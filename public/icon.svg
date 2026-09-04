@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="sonoraGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7C3AED" />
+      <stop offset="50%" stop-color="#6366F1" />
+      <stop offset="100%" stop-color="#06B6D4" />
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B0A18" />
+      <stop offset="100%" stop-color="#14112E" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Dark Background rounded canvas -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  
+  <!-- Outer glowing accent ring -->
+  <circle cx="256" cy="256" r="216" fill="none" stroke="url(#sonoraGrad)" stroke-width="6" opacity="0.3"/>
+
+  <!-- Main Sonic Orb -->
+  <circle cx="256" cy="256" r="184" fill="url(#sonoraGrad)" filter="url(#glow)"/>
+
+  <!-- Wave Ring 1 (Outer) -->
+  <path d="M128 256C128 185.3 185.3 128 256 128" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" opacity="0.5"/>
+  <path d="M384 256C384 326.7 326.7 384 256 384" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Wave Ring 2 (Inner) -->
+  <path d="M172 256C172 209.6 209.6 172 256 172" fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" opacity="0.85"/>
+  <path d="M340 256C340 302.4 302.4 340 256 340" fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" opacity="0.85"/>
+
+  <!-- Central Play Core -->
+  <polygon points="236,192 236,320 336,256" fill="#FFFFFF"/>
+</svg>
