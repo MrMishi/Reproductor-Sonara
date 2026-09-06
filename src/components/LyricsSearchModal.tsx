@@ -50,7 +50,7 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
     try {
       const res = await searchLyricsOnline(songTitle.trim(), songArtist.trim(), track.album, track.duration);
       if (!res.plainLyrics && (!res.syncedLyrics || res.syncedLyrics.length === 0)) {
-        setErrorMessage("No se encontraron letras para esta búsqueda. Prueba modificando el nombre o artista.");
+        setErrorMessage(res.message || "No se encontraron letras para esta búsqueda. Prueba modificando el nombre o artista.");
       } else {
         setResult(res);
         setCustomText(res.plainLyrics);

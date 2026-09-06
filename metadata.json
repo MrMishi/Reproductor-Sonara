@@ -1,6 +1,6 @@
 {
   "name": "Sonora - Music Player",
-  "description": "Reproductor de música Hi-Fi local y offline con ecualizador gráfico multibanda, escáner de archivos locales del dispositivo y letras sincronizadas.",
+  "description": "Reproductor de música Hi-Fi local y offline con descarga desde URLs de YouTube/web, ecualizador gráfico multibanda, escáner de archivos locales y letras sincronizadas.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

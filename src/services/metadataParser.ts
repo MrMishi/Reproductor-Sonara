@@ -73,6 +73,7 @@ function parseID3v2(buffer: ArrayBuffer): {
   } = {};
 
   const decoderUtf8 = new TextDecoder("utf-8");
+  const decoderUtf8Strict = new TextDecoder("utf-8", { fatal: true });
   const decoderLatin1 = new TextDecoder("iso-8859-1");
   const decoderUtf16 = new TextDecoder("utf-16le");
 
@@ -86,7 +87,16 @@ function parseID3v2(buffer: ArrayBuffer): {
       } else if (encoding === 3) {
         return decoderUtf8.decode(textBytes).replace(/\0/g, "").trim();
       } else {
-        return decoderLatin1.decode(textBytes).replace(/\0/g, "").trim();
+        // Many Asian/Japanese MP3s store UTF-8 even when tag specifies encoding 0 (Latin1)
+        try {
+          const strictUtf8 = decoderUtf8Strict.decode(textBytes).replace(/\0/g, "").trim();
+          if (strictUtf8 && /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(strictUtf8)) {
+            return strictUtf8;
+          }
+          return strictUtf8 || decoderLatin1.decode(textBytes).replace(/\0/g, "").trim();
+        } catch {
+          return decoderLatin1.decode(textBytes).replace(/\0/g, "").trim();
+        }
       }
     } catch {
       return decoderLatin1.decode(textBytes).replace(/\0/g, "").trim();

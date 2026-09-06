@@ -23,6 +23,10 @@ export interface Track {
 export interface SyncedLyricLine {
   time: number; // in seconds
   text: string;
+  nativeText?: string;
+  romaji?: string;
+  translation?: string;
+  hasJapanese?: boolean;
 }
 
 export interface EqualizerBand {

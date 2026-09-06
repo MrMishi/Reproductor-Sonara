@@ -161,14 +161,27 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
 export async function loadTracksFromDB(): Promise<Track[]> {
   try {
     const db = await openDB();
-    const tx = db.transaction(STORE_TRACKS, "readonly");
+    const tx = db.transaction(STORE_TRACKS, "readwrite");
     const store = tx.objectStore(STORE_TRACKS);
     const request = store.getAll();
 
     return new Promise((resolve, reject) => {
       request.onsuccess = () => {
         const records = request.result || [];
-        const loaded: Track[] = records.map((item: any) => {
+        const loaded: Track[] = [];
+
+        for (const item of records) {
+          // Limpia automáticamente de la base de datos cualquier pista con 0 bytes o duración 0
+          const isZeroBytes =
+            (item.size !== undefined && item.size === 0) ||
+            (item.blob && item.blob.size === 0);
+
+          if (isZeroBytes || item.duration === 0) {
+            console.warn(`Limpiando pista corrupta o de 0 bytes de IndexedDB: ${item.title} (${item.id})`);
+            store.delete(item.id);
+            continue;
+          }
+
           let url = "";
           let file: File | undefined = undefined;
 
@@ -179,27 +192,28 @@ export async function loadTracksFromDB(): Promise<Track[]> {
             url = URL.createObjectURL(file);
           }
 
-          return {
-            id: item.id,
-            title: item.title,
-            artist: item.artist,
-            album: item.album,
-            duration: item.duration,
-            url: url || item.url || "",
-            file,
-            coverUrl: item.coverUrl,
-            year: item.year,
-            genre: item.genre,
-            format: item.format,
-            size: item.size,
-            addedAt: item.addedAt,
-            isFavorite: item.isFavorite,
-            lyrics: item.lyrics,
-          };
-        });
+          if (url || item.url) {
+            loaded.push({
+              id: item.id,
+              title: item.title,
+              artist: item.artist,
+              album: item.album,
+              duration: item.duration,
+              url: url || item.url || "",
+              file,
+              coverUrl: item.coverUrl,
+              year: item.year,
+              genre: item.genre,
+              format: item.format,
+              size: item.size || file?.size,
+              addedAt: item.addedAt,
+              isFavorite: item.isFavorite,
+              lyrics: item.lyrics,
+            });
+          }
+        }
 
-        // Filter out those with valid playable urls
-        resolve(loaded.filter((t) => t.url));
+        resolve(loaded);
       };
       request.onerror = () => reject(request.error);
     });

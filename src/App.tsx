@@ -21,7 +21,9 @@ import { TrackList } from "./components/TrackList";
 import { FloatingMiniPlayer } from "./components/FloatingMiniPlayer";
 import { InstallAppModal } from "./components/InstallAppModal";
 import { HiddenTracksModal } from "./components/HiddenTracksModal";
-import { Trash2 } from "lucide-react";
+import { DownloadModal } from "./components/DownloadModal";
+import { parseAudioFile } from "./services/metadataParser";
+import { Trash2, AlertCircle } from "lucide-react";
 import {
   loadTracksFromDB,
   saveTracksToDB,
@@ -67,9 +69,14 @@ export default function App() {
   const [isEqualizerOpen, setIsEqualizerOpen] = useState(false);
   const [isThemeOpen, setIsThemeOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [isExpandedPlayerOpen, setIsExpandedPlayerOpen] = useState(false);
-  const [expandedSubTab, setExpandedSubTab] = useState<"queue" | "lyrics" | "details">("queue");
+  const [expandedSubTab, setExpandedSubTab] = useState<"cover" | "queue" | "lyrics" | "details">("cover");
   const [lyricsSearchTrack, setLyricsSearchTrack] = useState<Track | null>(null);
+
+  // Hidden File and Folder Input Refs for '+' menu
+  const localFilesInputRef = useRef<HTMLInputElement | null>(null);
+  const localFolderInputRef = useRef<HTMLInputElement | null>(null);
 
   // Hidden Tracks & Mobile PWA / APK installation
   const [isHiddenTracksOpen, setIsHiddenTracksOpen] = useState(false);
@@ -144,19 +151,63 @@ export default function App() {
       audioEngine.resumeContext();
       audioRef.current
         .play()
-        .catch((err) => console.warn("Audio play prevented:", err));
+        .catch((err) => console.warn("Audio play prevented:", err?.message || "playback blocked"));
     }
   }, [currentTrack?.id]);
+
+  // Helper para verificar si una pista es inválida, tiene 0 bytes o duración 0
+  const isTrackCorrupted = (t?: Track | null): boolean => {
+    if (!t) return true;
+    if (!t.url) return true;
+    if (t.duration !== undefined && t.duration <= 0) return true;
+    if (t.size !== undefined && t.size === 0) return true;
+    if (t.file && t.file.size === 0) return true;
+    return false;
+  };
+
+  // 3. Corrección del Reproductor:
+  // Al hacer clic en Play sobre una pista inválida o de 0 bytes, muestra Toast:
+  // 'Esta canción está dañada o no se pudo descargar el archivo de audio'
+  // y limpia automáticamente de la biblioteca cualquier pista que tenga 0 bytes guardados
+  const handleCorruptedTrack = (corruptedTrack: Track) => {
+    setToastMessage("Esta canción está dañada o no se pudo descargar el archivo de audio");
+    setTimeout(() => {
+      setToastMessage((curr) =>
+        curr === "Esta canción está dañada o no se pudo descargar el archivo de audio" ? null : curr
+      );
+    }, 4500);
+
+    const damagedId = corruptedTrack.id;
+    setTracks((prev) => {
+      const updated = prev.filter((t) => t.id !== damagedId);
+      saveTracksToDB(updated);
+      return updated;
+    });
+    removeTrackFromDB(damagedId);
+
+    if (currentTrack?.id === damagedId) {
+      setIsPlaying(false);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      }
+    }
+  };
 
   // Handle Play/Pause
   const handleTogglePlay = () => {
     if (!audioRef.current || !currentTrack) {
       if (tracks.length > 0) {
-        setCurrentTrackIndex(0);
-        setIsPlaying(true);
+        handlePlayTrack(tracks[0], 0);
       } else {
         setIsScannerOpen(true);
       }
+      return;
+    }
+
+    // Si la pista actual está dañada, tiene 0 bytes o duración 0
+    if (isTrackCorrupted(currentTrack)) {
+      handleCorruptedTrack(currentTrack);
       return;
     }
 
@@ -169,7 +220,10 @@ export default function App() {
       audioRef.current
         .play()
         .then(() => setIsPlaying(true))
-        .catch((e) => console.warn("Error playing audio:", e));
+        .catch((e) => {
+          console.warn("Error playing audio:", e?.message || "playback failed");
+          handleCorruptedTrack(currentTrack);
+        });
     }
   };
 
@@ -248,6 +302,12 @@ export default function App() {
 
   // Direct play from list
   const handlePlayTrack = (track: Track, _index: number) => {
+    // Al hacer clic en Play sobre una canción cuyo archivo sea inválido, tenga duración 0 o 0 bytes:
+    if (isTrackCorrupted(track)) {
+      handleCorruptedTrack(track);
+      return;
+    }
+
     const foundIndex = tracks.findIndex((t) => t.id === track.id);
     if (foundIndex !== -1) {
       if (foundIndex === currentTrackIndex && isPlaying) {
@@ -257,7 +317,11 @@ export default function App() {
         setIsPlaying(true);
         if (audioRef.current) {
           audioRef.current.currentTime = 0;
-          audioRef.current.play().catch(() => {});
+          audioRef.current.src = track.url;
+          audioRef.current.play().catch((err) => {
+            console.warn("Playback error:", err);
+            handleCorruptedTrack(track);
+          });
         }
       }
     }
@@ -286,6 +350,86 @@ export default function App() {
     if (newTracks.length > 0 && tracks.length === 0) {
       setCurrentTrackIndex(0);
       setIsPlaying(true);
+    }
+  };
+
+  // Handle local files selected directly from "+" menu
+  const handleLocalFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const imported: Track[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const track = await parseAudioFile(file);
+        if (track) imported.push(track);
+      } catch (err) {
+        console.warn("Error parsing file:", file.name, err);
+      }
+    }
+
+    if (imported.length > 0) {
+      handleTracksImported(imported);
+      setToastMessage(`Se añadieron ${imported.length} canción(es) a tu biblioteca`);
+    }
+    e.target.value = "";
+  };
+
+  // Handle local folder selected directly from "+" menu
+  const handleLocalFolderSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const audioExts = [".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg", ".opus", ".webm"];
+    const audioFiles: File[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (audioExts.some((ext) => f.name.toLowerCase().endsWith(ext))) {
+        audioFiles.push(f);
+      }
+    }
+
+    const imported: Track[] = [];
+    for (const f of audioFiles) {
+      try {
+        const track = await parseAudioFile(f);
+        if (track) imported.push(track);
+      } catch (err) {
+        console.warn("Error parsing folder file:", f.name, err);
+      }
+    }
+
+    if (imported.length > 0) {
+      handleTracksImported(imported);
+      setToastMessage(`Se importaron ${imported.length} canciones de la carpeta`);
+    } else {
+      setToastMessage("No se encontraron archivos de audio compatibles en la carpeta");
+    }
+    e.target.value = "";
+  };
+
+  // Handle downloaded track from DownloadModal
+  const handleTrackDownloaded = (newTrack: Track, shouldPlayNow: boolean = false) => {
+    setTracks((prev) => {
+      const filtered = prev.filter((t) => t.id !== newTrack.id);
+      const updated = [newTrack, ...filtered];
+      saveTracksToDB(updated);
+      return updated;
+    });
+
+    setToastMessage(`"${newTrack.title}" descargada e integrada con éxito`);
+
+    if (shouldPlayNow) {
+      setTimeout(() => {
+        setCurrentTrackIndex(0);
+        setIsPlaying(true);
+        if (audioRef.current) {
+          audioRef.current.currentTime = 0;
+          audioRef.current.src = newTrack.url;
+          audioRef.current.play().catch(() => {});
+        }
+      }, 100);
     }
   };
 
@@ -430,7 +574,7 @@ export default function App() {
   return (
     <div
       id="ytm-app-root"
-      className={`min-h-screen flex flex-col transition-colors duration-300 select-none ${
+      className={`w-full min-h-screen flex flex-col transition-colors duration-300 select-none ${
         isMiniMode && currentTrack ? "pb-8" : "pb-28"
       }`}
       style={{
@@ -456,7 +600,15 @@ export default function App() {
         onEnded={handleNext}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
-        onError={(e) => console.warn("Audio error occurred:", e)}
+        onError={() => {
+          const mediaErr = audioRef.current?.error;
+          if (mediaErr) {
+            console.warn(`Audio playback issue (code ${mediaErr.code}): ${mediaErr.message || "media load failed"}`);
+          }
+          if (currentTrack) {
+            handleCorruptedTrack(currentTrack);
+          }
+        }}
       />
 
       {/* Top Navigation */}
@@ -468,10 +620,12 @@ export default function App() {
         }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        onOpenAddFiles={() => localFilesInputRef.current?.click()}
+        onOpenAddFolder={() => setIsScannerOpen(true)}
+        onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
         onOpenScanner={() => setIsScannerOpen(true)}
         onOpenEqualizer={() => setIsEqualizerOpen(true)}
         onOpenTheme={() => setIsThemeOpen(true)}
-        onOpenInstallModal={() => setIsInstallModalOpen(true)}
         onOpenHiddenTracks={() => setIsHiddenTracksOpen(true)}
         hiddenCount={hiddenTracks.length}
         trackCount={tracks.length}
@@ -557,7 +711,7 @@ export default function App() {
           onCyclePlaybackMode={handleCyclePlaybackMode}
           onToggleFavorite={handleToggleFavorite}
           onOpenExpanded={() => {
-            setExpandedSubTab("queue");
+            setExpandedSubTab("cover");
             setIsExpandedPlayerOpen(true);
           }}
           onOpenEqualizer={() => setIsEqualizerOpen(true)}
@@ -624,12 +778,12 @@ export default function App() {
       {toastMessage && (
         <div
           id="sonora-toast-feedback"
-          className="fixed bottom-24 sm:bottom-28 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-full bg-neutral-900/95 border border-white/20 text-white shadow-2xl flex items-center gap-2.5 text-xs font-semibold backdrop-blur-xl animate-fade-in"
+          className="fixed bottom-24 sm:bottom-28 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-full bg-neutral-900/95 border border-white/20 text-white shadow-2xl flex items-center gap-2.5 text-xs font-semibold backdrop-blur-xl animate-fade-in max-w-[90vw]"
         >
-          <div className="w-5 h-5 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center">
-            <Trash2 className="w-3 h-3" />
+          <div className="w-5 h-5 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+            <AlertCircle className="w-3.5 h-3.5" />
           </div>
-          <span>{toastMessage}</span>
+          <span className="whitespace-normal sm:whitespace-nowrap text-center">{toastMessage}</span>
         </div>
       )}
 
@@ -667,6 +821,33 @@ export default function App() {
         hiddenTracks={hiddenTracks}
         onUnhideTrack={handleUnhideTrack}
         onUnhideAll={handleUnhideAll}
+      />
+
+      {/* Download from URL Modal */}
+      <DownloadModal
+        isOpen={isDownloadModalOpen}
+        onClose={() => setIsDownloadModalOpen(false)}
+        onTrackDownloaded={handleTrackDownloaded}
+      />
+
+      {/* Hidden File and Folder Inputs for '+' menu */}
+      <input
+        ref={localFilesInputRef}
+        type="file"
+        multiple
+        accept="audio/*,.mp3,.flac,.wav,.m4a,.aac,.ogg,.opus,.webm"
+        className="hidden"
+        onChange={handleLocalFilesSelected}
+      />
+      <input
+        ref={localFolderInputRef}
+        type="file"
+        // @ts-ignore
+        webkitdirectory=""
+        directory=""
+        multiple
+        className="hidden"
+        onChange={handleLocalFolderSelected}
       />
 
       {/* Mobile APK / PWA Local Installation Modal */}

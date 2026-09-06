@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Play, Sparkles, HardDrive, Disc3, User, Flame, Compass, Heart, Trash2 } from "lucide-react";
+import React from "react";
+import { Play, HardDrive, Heart, Trash2 } from "lucide-react";
 import { Track } from "../types";
 
 interface HomeViewProps {
@@ -13,29 +13,15 @@ interface HomeViewProps {
   onDeleteTrack?: (track: Track) => void;
 }
 
-const MOOD_CHIPS = ["Todas", "Energía", "Relajación", "Concentración", "Entrenamiento", "Para ti"];
-
 export const HomeView: React.FC<HomeViewProps> = ({
   tracks,
   currentTrackId,
   isPlaying,
   onPlayTrack,
   onOpenScanner,
-  onOpenLyricsSearchForTrack,
   onToggleFavorite,
   onDeleteTrack,
 }) => {
-  const [selectedMood, setSelectedMood] = useState("Todas");
-
-  // Filter or sort tracks based on selected mood
-  const filteredTracks = tracks.filter((t) => {
-    if (selectedMood === "Todas") return true;
-    if (selectedMood === "Para ti") return t.isFavorite || true;
-    if (selectedMood === "Relajación") return (t.genre || "").toLowerCase().includes("chill") || (t.title + t.artist).toLowerCase().includes("lofi") || (t.title + t.artist).toLowerCase().includes("café");
-    if (selectedMood === "Energía") return (t.genre || "").toLowerCase().includes("electronic") || (t.genre || "").toLowerCase().includes("synth") || (t.genre || "").toLowerCase().includes("rock");
-    return true;
-  });
-
   // Group albums
   const albumsMap = new Map<string, Track[]>();
   tracks.forEach((t) => {
@@ -55,41 +41,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const artistsList = Array.from(artistsMap.entries()).slice(0, 8);
 
   return (
-    <div className="flex flex-col gap-8 pb-12">
-      {/* Category / Mood Filter Chips */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar select-none">
-        {MOOD_CHIPS.map((chip) => (
-          <button
-            key={chip}
-            id={`mood-chip-${chip}`}
-            onClick={() => setSelectedMood(chip)}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all border ${
-              selectedMood === chip
-                ? "bg-white text-black border-white shadow"
-                : "border-white/10 text-white/80 hover:bg-white/10 hover:border-white/20"
-            }`}
-            style={{
-              backgroundColor: selectedMood === chip ? "var(--color-text-primary)" : "rgba(255,255,255,0.06)",
-              color: selectedMood === chip ? "var(--color-bg)" : "var(--color-text-primary)",
-            }}
-          >
-            {chip}
-          </button>
-        ))}
-      </div>
-
+    <div className="flex flex-col gap-6 sm:gap-8 pb-8 sm:pb-12">
       {/* Quick Picks (Selecciones Rápidas) */}
-      <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
+      <section className="flex flex-col gap-3.5 sm:gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <span className="text-xs uppercase tracking-wider font-bold opacity-60">Empieza a escuchar</span>
+            <span className="text-[11px] sm:text-xs uppercase tracking-wider font-bold opacity-60">Empieza a escuchar</span>
             <h2 className="text-xl sm:text-2xl font-black tracking-tight" style={{ color: "var(--color-text-primary)" }}>
               Selecciones rápidas
             </h2>
           </div>
           <button
             onClick={onOpenScanner}
-            className="text-xs font-semibold flex items-center gap-1.5 opacity-80 hover:opacity-100 hover:underline"
+            className="text-xs font-semibold flex items-center gap-1.5 opacity-80 hover:opacity-100 hover:underline self-start sm:self-auto py-1"
             style={{ color: "var(--color-accent)" }}
           >
             <HardDrive className="w-3.5 h-3.5" />
@@ -97,9 +61,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </button>
         </div>
 
-        {/* 4-column / 2-column Grid of Quick Pick cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {filteredTracks.slice(0, 8).map((track, idx) => {
+        {/* 4-column / 2-column / 1-column Grid of Quick Pick cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3">
+          {tracks.slice(0, 8).map((track, idx) => {
             const isCurrent = track.id === currentTrackId;
 
             return (
@@ -107,7 +71,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 key={track.id}
                 id={`quick-pick-${track.id}`}
                 onClick={() => onPlayTrack(track, idx)}
-                className={`flex items-center gap-3.5 p-2.5 rounded-xl cursor-pointer transition-all border group relative overflow-hidden ${
+                className={`flex items-center gap-3 sm:gap-3.5 p-3 sm:p-2.5 rounded-2xl sm:rounded-xl cursor-pointer transition-all border group relative overflow-hidden ${
                   isCurrent
                     ? "bg-white/15 border-white/20 shadow-md"
                     : "hover:bg-white/10 border-white/5"
@@ -118,7 +82,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 }}
               >
                 {/* Artwork with play overlay */}
-                <div className="relative w-14 h-14 rounded-lg overflow-hidden shrink-0 shadow">
+                <div className="relative w-14 h-14 sm:w-13 sm:h-13 rounded-xl sm:rounded-lg overflow-hidden shrink-0 shadow">
                   <img
                     src={track.coverUrl}
                     alt={track.title}
@@ -143,19 +107,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
 
                 {/* Info */}
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 pr-1">
                   <h4
-                    className="text-xs sm:text-sm font-bold truncate"
+                    className="text-xs sm:text-sm font-bold truncate leading-snug"
                     style={{ color: isCurrent ? "var(--color-accent)" : "var(--color-text-primary)" }}
                   >
                     {track.title}
                   </h4>
-                  <p className="text-[11px] truncate opacity-70" style={{ color: "var(--color-text-secondary)" }}>
+                  <p className="text-[11px] sm:text-xs truncate opacity-70 mt-0.5" style={{ color: "var(--color-text-secondary)" }}>
                     {track.artist}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-1 shrink-0">
                   {/* Like trigger */}
                   <button
                     onClick={(e) => {
@@ -163,7 +127,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       onToggleFavorite(track.id);
                     }}
                     title={track.isFavorite ? "Quitar de favoritas" : "Marcar como favorita"}
-                    className="p-2 rounded-full hover:bg-white/10 transition-transform opacity-0 group-hover:opacity-100"
+                    className="p-2 sm:p-1.5 rounded-full hover:bg-white/10 transition-transform opacity-90 sm:opacity-0 sm:group-hover:opacity-100"
                   >
                     <Heart
                       className={`w-4 h-4 ${
@@ -180,7 +144,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         onDeleteTrack(track);
                       }}
                       title="Eliminar del reproductor"
-                      className="p-2 rounded-full hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-transform opacity-0 group-hover:opacity-100"
+                      className="p-2 sm:p-1.5 rounded-full hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-transform opacity-90 sm:opacity-0 sm:group-hover:opacity-100"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>

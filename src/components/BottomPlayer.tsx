@@ -242,12 +242,12 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
               <SkipForward className="w-5 h-5" />
             </button>
 
-            {/* Repeat */}
+            {/* Repeat (oculto en pantallas pequeñas < 640px para evitar encimamiento) */}
             <button
               id="player-repeat-btn"
               onClick={onCyclePlaybackMode}
               title={`Modo: ${playbackMode}`}
-              className={`p-2 rounded-full transition-colors ${
+              className={`p-2 rounded-full transition-colors hidden sm:inline-flex ${
                 playbackMode.startsWith("repeat") ? "text-white" : "opacity-50 hover:opacity-100 text-neutral-300"
               }`}
               style={{
@@ -288,12 +288,12 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
             )}
           </button>
 
-          {/* Equalizer button */}
+          {/* Equalizer button (oculto en pantallas pequeñas < 640px) */}
           <button
             id="player-equalizer-btn"
             onClick={onOpenEqualizer}
             title="Ajustes de Ecualizador"
-            className="p-2 rounded-full hover:bg-white/10 transition-colors"
+            className="p-2 rounded-full hover:bg-white/10 transition-colors hidden sm:inline-flex"
           >
             <Sliders className="w-4 h-4" />
           </button>
@@ -327,12 +327,12 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
             />
           </div>
 
-          {/* Modo Mini / Gadget Flotante */}
+          {/* Modo Mini / Gadget Flotante (oculto en pantallas pequeñas < 640px) */}
           <button
             id="player-mini-mode-btn"
             onClick={onToggleMiniMode}
             title="Modo Mini (Gadget flotante)"
-            className="p-2 rounded-full hover:bg-white/10 transition-transform active:scale-95 text-neutral-300 hover:text-white"
+            className="p-2 rounded-full hover:bg-white/10 transition-transform active:scale-95 text-neutral-300 hover:text-white hidden sm:inline-flex"
           >
             <PictureInPicture2 className="w-4 h-4" />
           </button>
