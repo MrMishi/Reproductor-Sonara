@@ -2,16 +2,6 @@
  * ============================================================================
  * SONARA MUSIC - SERVICIO DE BASE DE DATOS LOCAL (IndexedDB & LocalStorage)
  * ============================================================================
- * Responsabilidad:
- * Gestiona el almacenamiento local persistente de pistas de audio, metadatos,
- * archivos binarios (Audio Blobs y Letras .LRC), listas de reproducción y
- * registros de pistas ocultas.
- *
- * Características principales:
- * - Persistencia de Blobs de audio y archivos .LRC en IndexedDB ("YouTubeMusicWebPlayerDB").
- * - Restauración transparente de URLs temporales mediante URL.createObjectURL().
- * - Limpieza automática de pistas de 0 bytes o audio corrupto.
- * - Lista negra y filtrado de canciones ocultas en LocalStorage.
  */
 
 import { Track, Playlist, HiddenTrackRecord } from "../types";
@@ -43,7 +33,6 @@ export function addHiddenTrack(track: Track): void {
   try {
     const list = getHiddenTracks();
     const fileName = track.file?.name || "";
-    // Evitar registros duplicados por ID, nombre de archivo o título/artista
     const exists = list.some(
       (h) =>
         h.id === track.id ||
@@ -150,7 +139,7 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Guarda o actualiza un array de pistas de audio y sus archivos binarios (.lrc y audio) en IndexedDB
+ * Guarda o actualiza un array de pistas de audio y sus archivos binarios en IndexedDB
  */
 export async function saveTracksToDB(tracks: Track[]): Promise<void> {
   try {
@@ -159,7 +148,6 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
     const store = tx.objectStore(STORE_TRACKS);
 
     for (const track of tracks) {
-      // Clon serializable con todos los metadatos de la pista
       const serializable: any = {
         id: track.id,
         title: track.title,
@@ -171,16 +159,18 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
         genre: track.genre,
         format: track.format,
         size: track.size,
-        addedAt: track.addedAt,
+        addedAt: track.addedAt || Date.now(),
         isFavorite: track.isFavorite,
         lyrics: track.lyrics,
+        url: track.url,
       };
 
-      // Si existe un archivo o Blob de audio, se almacena directamente en IndexedDB
-      if (track.file) {
-        serializable.blob = track.file;
-        serializable.fileName = track.file.name;
-        serializable.fileType = track.file.type;
+      // Si existe un archivo o Blob de audio, se almacena directamente
+      const audioBlob = track.file || (track as any).blob;
+      if (audioBlob) {
+        serializable.blob = audioBlob;
+        serializable.fileName = track.file?.name || (track as any).fileName || `${track.title}.mp3`;
+        serializable.fileType = track.file?.type || (track as any).fileType || "audio/mpeg";
       }
 
       // Persistencia de archivo .lrc en IndexedDB
@@ -188,7 +178,6 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
         serializable.lrcBlob = track.lrcBlob;
         serializable.lrcFileName = track.lrcFileName || `${track.artist} - ${track.title}.lrc`;
       } else if (track.lyrics?.rawLrc) {
-        // Generar Blob .lrc a partir del texto de la letra si no existe el blob
         serializable.lrcBlob = new Blob([track.lyrics.rawLrc], { type: "text/plain;charset=utf-8" });
         serializable.lrcFileName = track.lrcFileName || `${track.artist} - ${track.title}.lrc`;
       }
@@ -206,7 +195,7 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
 }
 
 /**
- * Carga todas las pistas persistidas desde IndexedDB y regenera los ObjectURLs
+ * Carga todas las pistas persistidas desde IndexedDB y regenera los ObjectURLs válidos
  */
 export async function loadTracksFromDB(): Promise<Track[]> {
   try {
@@ -221,52 +210,54 @@ export async function loadTracksFromDB(): Promise<Track[]> {
         const loaded: Track[] = [];
 
         for (const item of records) {
-          // Limpia automáticamente de la base de datos cualquier pista con 0 bytes o duración 0
-          const isZeroBytes =
-            (item.size !== undefined && item.size === 0) ||
-            (item.blob && item.blob.size === 0);
+          // Solo borra si el blob explícitamente tiene 0 bytes
+          const isZeroBytes = item.blob && item.blob.size === 0;
 
-          if (isZeroBytes || item.duration === 0) {
-            console.warn(`Limpiando pista corrupta o de 0 bytes de IndexedDB: ${item.title} (${item.id})`);
+          if (isZeroBytes) {
+            console.warn(`Limpiando pista de 0 bytes de IndexedDB: ${item.title} (${item.id})`);
             store.delete(item.id);
             continue;
           }
 
-          let url = "";
+          let generatedUrl = "";
           let file: File | undefined = undefined;
 
-          // Reconstruir el archivo de audio desde el Blob
+          // Reconstruir el archivo de audio desde el Blob almacenado
           if (item.blob) {
             file = new File([item.blob], item.fileName || "track.mp3", {
               type: item.fileType || "audio/mpeg",
             });
-            url = URL.createObjectURL(file);
+            generatedUrl = URL.createObjectURL(file);
           }
 
-          // Reconstruir archivo de letras .lrc si existe en el registro
+          const finalUrl = generatedUrl || item.url || "";
+
           const lrcBlob: Blob | undefined = item.lrcBlob || undefined;
           const lrcFileName: string | undefined = item.lrcFileName || undefined;
 
-          if (url || item.url) {
-            loaded.push({
+          if (finalUrl) {
+            const trackObj: any = {
               id: item.id,
-              title: item.title,
-              artist: item.artist,
-              album: item.album,
-              duration: item.duration,
-              url: url || item.url || "",
+              title: item.title || "Sin título",
+              artist: item.artist || "Artista desconocido",
+              album: item.album || "Álbum desconocido",
+              duration: item.duration || 0,
+              url: finalUrl,
+              audioUrl: finalUrl, // Compatibilidad con vistas que usen audioUrl
               file,
               coverUrl: item.coverUrl,
               year: item.year,
               genre: item.genre,
               format: item.format,
-              size: item.size || file?.size,
-              addedAt: item.addedAt,
-              isFavorite: item.isFavorite,
+              size: item.size || file?.size || 0,
+              addedAt: item.addedAt || Date.now(),
+              isFavorite: item.isFavorite || false,
               lyrics: item.lyrics,
               lrcBlob,
               lrcFileName,
-            });
+            };
+
+            loaded.push(trackObj as Track);
           }
         }
 
@@ -325,5 +316,5 @@ export async function clearTracksDB(): Promise<void> {
   } catch (e) {
     console.warn("Error clearing tracks db:", e);
   }
-}
-
+      }
+        
