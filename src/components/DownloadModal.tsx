@@ -1,3 +1,16 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MODAL DE DESCARGA DESDE URL (DownloadModal.tsx)
+ * ============================================================================
+ * Responsabilidad:
+ * Permite descargar música y audio directamente desde YouTube y enlaces web:
+ * - Extracción mediante API pública Cobalt con fallback automático a Piped e Invidious.
+ * - Guardado de audio Blob e IndexedDB local.
+ * - Búsqueda automática e integración de letras sincronizadas .LRC (LRCLIB).
+ * - Guardado del archivo .LRC en IndexedDB.
+ * - Validación rigurosa de integridad de audio (tamaño > 100 KB y duración > 0).
+ */
+
 import React, { useState, useRef, useEffect } from "react";
 import {
   X,
@@ -21,6 +34,7 @@ import {
 } from "lucide-react";
 import { Track } from "../types";
 import { generateCoverArt } from "../services/metadataParser";
+import { searchLyricsOnline } from "../services/lyricsService";
 import {
   isYouTubeUrl,
   extractYouTubeVideoId,
@@ -48,17 +62,17 @@ type AudioFormat = "MP3" | "M4A" | "FLAC";
 type VideoFormat = "MP4" | "WEBM";
 
 const AUDIO_QUALITIES = [
-  { id: "128k", label: "128 kbps (Estándar / Ligero)", detail: "Calidad estándar, menor tamaño" },
-  { id: "192k", label: "192 kbps (Alta Calidad Recomendada)", detail: "Excelente balance audio / peso" },
-  { id: "320k", label: "320 kbps (Hi-Fi Ultra)", detail: "Máxima fidelidad MP3 para audiófilos" },
-  { id: "lossless", label: "Audio Original Sin Pérdida (FLAC)", detail: "Audio puro 24-bit sin compresión" },
+  { id: "320k", label: "320 kbps" },
+  { id: "192k", label: "192 kbps" },
+  { id: "128k", label: "128 kbps" },
+  { id: "lossless", label: "Sin Pérdida (FLAC)" },
 ];
 
 const VIDEO_QUALITIES = [
-  { id: "360p", label: "360p (Móvil / Ahorro de datos)", detail: "Resolución estándar compacta" },
-  { id: "480p", label: "480p (SD Calidad Estándar)", detail: "Buena definición para pantallas chicas" },
-  { id: "720p", label: "720p (HD Alta Definición)", detail: "Excelente resolución y nitidez" },
-  { id: "1080p", label: "1080p (Full HD Máxima Calidad)", detail: "Máxima claridad visual en alta tasa" },
+  { id: "1080p", label: "1080p (Full HD)" },
+  { id: "720p", label: "720p (HD)" },
+  { id: "480p", label: "480p (SD)" },
+  { id: "360p", label: "360p" },
 ];
 
 const SAMPLE_LINKS = [
@@ -215,183 +229,150 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
           throw new Error(ERROR_YOUTUBE_EXTRACTION_FAILED);
         }
 
-        // 1. Petición directa a la API de Render con Stream de Audio:
-        // Endpoint: "https://sonara-backend-zpjn.onrender.com/api/download?url=" + encodeURIComponent(youtubeUrl)
-        setStatusMessage("Conectando con servidor de Render (esperando si despierta del reposo)...");
+        // Normalizamos la URL para que no contenga parámetros de playlist o timestamps que confundan al extractor
+        const cleanYtUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        mediaInfo = await fetchMediaMetadata(targetUrl);
+
+        // =========================================================================
+        // 1. PROVEEDOR PRINCIPAL: COBALT API PÚBLICA DIRECTA
+        // Endpoint: "https://api.cobalt.tools/api/json"
+        // Body: { "url": youtubeUrl, "downloadMode": "audio", "audioFormat": "mp3" }
+        // =========================================================================
+        setStatusMessage("Conectando con Cobalt API (proveedor principal)...");
         setProgress(20);
         setDownloadSpeed("Conectando...");
 
-        // Normalizamos la URL para que no contenga parámetros de playlist o timestamps que confundan al extractor
-        const cleanYtUrl = `https://www.youtube.com/watch?v=${videoId}`;
-        const renderUrl =
-          "https://sonara-backend-zpjn.onrender.com/api/download?url=" +
-          encodeURIComponent(cleanYtUrl);
+        let streamUrl: string | null = null;
+        let cobaltSuccess = false;
 
-        // 3. Extender tiempo de espera (Timeout) a 45 segundos para permitir despertar al contenedor de Render
-        const fetchController = new AbortController();
-        const timeoutMs = 45000;
-        const timeoutId = setTimeout(() => {
-          fetchController.abort(
-            new DOMException(
-              "Tiempo de espera agotado (45s). El servidor en Render tardó demasiado en despertar.",
-              "TimeoutError"
-            )
-          );
-        }, timeoutMs);
+        const cobaltEndpoints = [
+          "https://api.cobalt.tools/api/json",
+          "https://api.cobalt.tools",
+          "https://cobalt.tools/api/json",
+          "https://cobalt-api.kwiatekm.com/api/json",
+          "https://cobalt.canine.tools/api/json",
+        ];
 
-        // Sincronizar cancelación del usuario
-        const onUserCancel = () => {
-          fetchController.abort(
-            new DOMException("Descarga cancelada por el usuario", "AbortError")
-          );
-        };
-        controller.signal.addEventListener("abort", onUserCancel, { once: true });
-
-        let response: Response | null = null;
-        let directFetchFailed = false;
-
-        try {
-          try {
-            response = await fetch(renderUrl, {
-              method: "GET",
-              signal: fetchController.signal,
-            });
-          } catch (directErr: any) {
-            if (controller.signal.aborted || directErr?.name === "AbortError") {
-              throw directErr;
-            }
-            // Fallback transparente a través del proxy del backend en caso de bloqueo de red/CORS
-            const proxyUrl = `/api/download/proxy?url=${encodeURIComponent(renderUrl)}`;
-            response = await fetch(proxyUrl, {
-              method: "GET",
-              signal: fetchController.signal,
-            });
-          }
-        } catch (fetchErr: any) {
-          clearTimeout(timeoutId);
-          controller.signal.removeEventListener("abort", onUserCancel);
-
+        for (const endpoint of cobaltEndpoints) {
           if (controller.signal.aborted) {
             resetDownloadState(false);
             return;
           }
 
-          if (
-            fetchController.signal.aborted ||
-            fetchErr?.name === "TimeoutError" ||
-            fetchErr?.message?.includes("45s")
-          ) {
-            console.warn("Aviso: Tiempo de espera agotado en servidor de Render (45s).");
-            directFetchFailed = true;
-          } else {
-            console.warn("Aviso: Conexión con servidor de Render no completada:", fetchErr?.message || fetchErr);
-            directFetchFailed = true;
+          try {
+            const cobaltFetch = await fetch(endpoint, {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                url: cleanYtUrl,
+                downloadMode: "audio",
+                audioFormat: "mp3",
+              }),
+              signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+            }).catch(() => null);
+
+            if (cobaltFetch && cobaltFetch.ok) {
+              const data = await cobaltFetch.json().catch(() => null);
+              const returnedUrl = data?.url || data?.stream;
+              if (returnedUrl && typeof returnedUrl === "string" && !returnedUrl.includes("error")) {
+                streamUrl = returnedUrl;
+                cobaltSuccess = true;
+                if (data.title && (!mediaInfo.title || mediaInfo.title === "Pista de YouTube")) {
+                  mediaInfo.title = data.title;
+                }
+                if (data.artist && (!mediaInfo.artist || mediaInfo.artist === "YouTube Audio")) {
+                  mediaInfo.artist = data.artist;
+                }
+                break;
+              }
+            }
+          } catch {
+            // Continúa probando los siguientes endpoints o fallback
           }
-        } finally {
-          clearTimeout(timeoutId);
-          controller.signal.removeEventListener("abort", onUserCancel);
         }
 
-        if (controller.signal.aborted) {
-          resetDownloadState(false);
-          return;
-        }
+        // Si el navegador bloqueó la conexión directa por CORS o fallaron las instancias públicas,
+        // recurrir al proxy seguro del backend para Cobalt:
+        if (!streamUrl && !controller.signal.aborted) {
+          try {
+            const srvCobalt = await fetch("/api/download/youtube-audio", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                url: cleanYtUrl,
+                videoId,
+                format: "mp3",
+                quality: audioQuality,
+                provider: "cobalt",
+              }),
+              signal: controller.signal,
+            }).catch(() => null);
 
-        let streamObtainedFromRender = false;
-
-        if (response && response.ok) {
-          const contentType = response.headers.get("content-type") || "";
-          if (!contentType.includes("application/json") && !contentType.includes("text/html")) {
-            setStatusMessage("Descargando stream de audio desde servidor...");
-            setProgress(55);
-            setDownloadSpeed("1,650 KB/s");
-
-            // 1. Lee directamente la respuesta como Blob:
-            const rawBlob = await response.blob();
-
-            if (rawBlob && rawBlob.size >= MIN_VALID_AUDIO_BYTES) {
-              audioBlob = rawBlob;
-              streamObtainedFromRender = true;
-
-              // 2. Metadatos de la canción desde cabeceras HTTP:
-              const headerTitle =
-                response.headers.get("X-Audio-Title") ||
-                response.headers.get("x-audio-title");
-              const headerThumbnail =
-                response.headers.get("X-Audio-Thumbnail") ||
-                response.headers.get("x-audio-thumbnail");
-              const headerArtist =
-                response.headers.get("X-Audio-Artist") ||
-                response.headers.get("x-audio-artist");
-              const headerDuration =
-                response.headers.get("X-Audio-Duration") ||
-                response.headers.get("x-audio-duration");
-
-              // Metadatos base
-              mediaInfo = await fetchMediaMetadata(targetUrl);
-
-              if (headerTitle) {
-                try {
-                  mediaInfo.title = decodeURIComponent(headerTitle);
-                } catch {
-                  mediaInfo.title = headerTitle;
+            if (srvCobalt && srvCobalt.ok) {
+              const data = await srvCobalt.json().catch(() => null);
+              if (data && data.success && data.streamUrl) {
+                streamUrl = data.streamUrl;
+                cobaltSuccess = true;
+                if (data.title && (!mediaInfo.title || mediaInfo.title === "Pista de YouTube")) {
+                  mediaInfo.title = data.title;
+                }
+                if (data.artist && (!mediaInfo.artist || mediaInfo.artist === "YouTube Audio")) {
+                  mediaInfo.artist = data.artist;
                 }
               }
-
-              if (headerArtist) {
-                try {
-                  mediaInfo.artist = decodeURIComponent(headerArtist);
-                } catch {
-                  mediaInfo.artist = headerArtist;
-                }
-              }
-
-              if (headerThumbnail) {
-                mediaInfo.coverUrl = headerThumbnail;
-              } else {
-                setStatusMessage("Extrayendo portada oficial en alta definición...");
-                setProgress(85);
-                try {
-                  const thumbData = await downloadYouTubeThumbnailBlob(videoId);
-                  if (thumbData?.url) {
-                    mediaInfo.coverUrl = thumbData.url;
-                  }
-                } catch (thumbErr) {
-                  console.warn("Could not download YouTube thumbnail blob:", thumbErr);
-                }
-              }
-
-              if (headerDuration) {
-                const parsedDur = parseInt(headerDuration, 10);
-                if (!isNaN(parsedDur) && parsedDur > 0) {
-                  finalDuration = parsedDur;
-                  mediaInfo.duration = parsedDur;
-                }
-              }
+            }
+          } catch (srvErr: any) {
+            if (srvErr?.name === "AbortError" || controller.signal.aborted) {
+              resetDownloadState(false);
+              return;
             }
           }
         }
 
-        // Si el servidor de Render devolvió 400 (ej: verificación antibot de YouTube o formato no disponible)
-        // o no devolvió un stream de audio válido:
-        if (!streamObtainedFromRender) {
-          if (response && !response.ok) {
-            let errorDetail = "";
-            try {
-              const errData = await response.json();
-              errorDetail = errData?.detail || errData?.message || "";
-            } catch {
-              // ignore
+        // Si Cobalt obtuvo el enlace de stream, descargar el Blob de audio directamente:
+        if (streamUrl) {
+          setStatusMessage("Descargando stream de audio desde Cobalt...");
+          setProgress(50);
+          setDownloadSpeed("1,850 KB/s");
+
+          try {
+            audioBlob = await downloadAudioBlob(
+              streamUrl,
+              (pct, speed) => {
+                setProgress(Math.max(50, Math.min(85, 50 + Math.round((pct / 100) * 35))));
+                setDownloadSpeed(speed);
+              },
+              controller.signal
+            );
+          } catch (blobErr: any) {
+            if (blobErr?.name === "AbortError" || controller.signal.aborted) {
+              resetDownloadState(false);
+              return;
             }
-            console.warn(`Servidor de descargas Render devolvió status ${response.status}: ${errorDetail}`);
+            console.warn("Fallo al descargar stream de Cobalt, conmutando a Piped fallback:", blobErr);
+            streamUrl = null;
+            cobaltSuccess = false;
+          }
+        }
+
+        // =========================================================================
+        // 2. RESPALDO AUTOMÁTICO: PIPED / INVIDIOUS API
+        // Si Cobalt no responde o falla, conmuta automáticamente a Piped API
+        // =========================================================================
+        if (!audioBlob || !streamUrl) {
+          if (controller.signal.aborted) {
+            resetDownloadState(false);
+            return;
           }
 
-          // Activamos resolutor alternativo de respaldo
-          setStatusMessage("Servidor con límite de YouTube (400). Activando resolutor alternativo...");
+          setStatusMessage("Cobalt no disponible. Conmutando a respaldo automático Piped API...");
           setProgress(35);
           setDownloadSpeed("1,450 KB/s");
 
-          let resolvedAudio = null;
+          let resolvedAudio: any = null;
           try {
             resolvedAudio = await resolveYouTubeAudioStream(cleanYtUrl, {
               format: audioFormat.toLowerCase() === "m4a" ? "m4a" : "mp3",
@@ -407,15 +388,13 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
               resetDownloadState(false);
               return;
             }
-            console.warn("Aviso en resolución alternativa de YouTube:", ytErr?.message || ytErr);
+            console.warn("Aviso en resolución Piped/Invidious de YouTube:", ytErr?.message || ytErr);
           }
 
           if (controller.signal.aborted) {
             resetDownloadState(false);
             return;
           }
-
-          mediaInfo = await fetchMediaMetadata(targetUrl);
 
           if (resolvedAudio?.streamUrl) {
             if (resolvedAudio.title && (!mediaInfo.title || mediaInfo.title === "Pista de YouTube")) {
@@ -428,7 +407,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
               finalDuration = resolvedAudio.duration;
             }
 
-            setStatusMessage("Descargando archivo de audio desde red de respaldo...");
+            setStatusMessage("Descargando stream de audio desde Piped...");
             setProgress(55);
 
             audioBlob = await downloadAudioBlob(
@@ -440,28 +419,30 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
               controller.signal
             );
           } else {
-            // Ni Render ni la red alternativa pudieron extraer el audio debido al bloqueo antibot de YouTube
             throw new Error(
-              "El servidor de descargas no pudo extraer el audio de este video de YouTube debido a restricciones antibot. Por favor, prueba con otro video o utiliza un enlace directo de audio (MP3/M4A)."
+              "No se pudo extraer el audio a través de Cobalt ni de la red de respaldo Piped. Por favor, verifica el enlace o intenta con otro video."
             );
           }
+        }
 
-          if (controller.signal.aborted) {
-            resetDownloadState(false);
-            return;
-          }
+        if (controller.signal.aborted) {
+          resetDownloadState(false);
+          return;
+        }
 
-          if (!mediaInfo.coverUrl) {
-            setStatusMessage("Extrayendo portada oficial en alta definición...");
-            setProgress(85);
-            try {
-              const thumbData = await downloadYouTubeThumbnailBlob(videoId);
-              if (thumbData?.url) {
-                mediaInfo.coverUrl = thumbData.url;
-              }
-            } catch (thumbErr) {
-              console.warn("Could not download YouTube thumbnail blob:", thumbErr);
+        // =========================================================================
+        // 3. METADATOS Y CARÁTULA LIMPIA EN ALTA DEFINICIÓN (HD)
+        // =========================================================================
+        if (!mediaInfo.coverUrl || mediaInfo.coverUrl.includes("default_cover")) {
+          setStatusMessage("Extrayendo portada oficial en alta definición...");
+          setProgress(85);
+          try {
+            const thumbData = await downloadYouTubeThumbnailBlob(videoId);
+            if (thumbData?.url) {
+              mediaInfo.coverUrl = thumbData.url;
             }
+          } catch (thumbErr) {
+            console.warn("Could not download YouTube thumbnail blob:", thumbErr);
           }
         }
 
@@ -496,35 +477,61 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
 
       finalDuration = mediaInfo.duration || finalDuration;
 
-      // Integración de letras sincronizadas
+      // Integración de letras sincronizadas (.lrc) con soporte multilingüe (incluyendo caracteres japoneses UTF-8)
       let lyricsData: Track["lyrics"] = undefined;
+      let lrcBlob: Blob | undefined = undefined;
+      let lrcFileName: string | undefined = undefined;
+      let detectedAlbum: string | undefined = undefined;
+
       if (autoLyrics && !controller.signal.aborted) {
         setProgress(90);
-        setStatusMessage("Buscando e integrando letras sincronizadas (LRC)...");
+        setStatusMessage("Buscando letras sincronizadas (LRCLIB)...");
         try {
-          const lyricsRes = await fetch("/api/lyrics/search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              track: mediaInfo.title,
-              artist: mediaInfo.artist,
-              duration: finalDuration,
-            }),
-            signal: controller.signal,
-          });
-          if (lyricsRes.ok) {
-            const lyricsJson = await lyricsRes.json();
-            if (lyricsJson && (lyricsJson.plainLyrics || lyricsJson.syncedLyrics)) {
+          // Búsqueda directa en LRCLIB con fallback
+          const lyricsResult = await searchLyricsOnline(
+            mediaInfo.title,
+            mediaInfo.artist,
+            mediaInfo.album,
+            finalDuration
+          );
+
+          if (lyricsResult) {
+            if (lyricsResult.album) {
+              detectedAlbum = lyricsResult.album;
+            }
+
+            if (lyricsResult.syncedLyrics || lyricsResult.plainLyrics) {
+              let rawLrcString = lyricsResult.rawLrc || "";
+              if (!rawLrcString && lyricsResult.syncedLyrics && lyricsResult.syncedLyrics.length > 0) {
+                rawLrcString = lyricsResult.syncedLyrics
+                  .map((l) => {
+                    const min = Math.floor(l.time / 60).toString().padStart(2, "0");
+                    const sec = Math.floor(l.time % 60).toString().padStart(2, "0");
+                    const ms = Math.floor((l.time % 1) * 100).toString().padStart(2, "0");
+                    return `[${min}:${sec}.${ms}]${l.text}`;
+                  })
+                  .join("\n");
+              } else if (!rawLrcString && lyricsResult.plainLyrics) {
+                rawLrcString = lyricsResult.plainLyrics;
+              }
+
               lyricsData = {
-                plain: lyricsJson.plainLyrics || "",
-                synced: lyricsJson.syncedLyrics || undefined,
-                source: lyricsJson.source || "LrcLib",
+                plain: lyricsResult.plainLyrics || "",
+                synced: lyricsResult.syncedLyrics || undefined,
+                source: lyricsResult.source || "LRCLIB",
+                rawLrc: rawLrcString || undefined,
               };
+
+              // Crear Blob UTF-8 para persistencia en IndexedDB
+              if (rawLrcString) {
+                lrcBlob = new Blob([rawLrcString], { type: "text/plain;charset=utf-8" });
+                lrcFileName = `${mediaInfo.artist} - ${mediaInfo.title}.lrc`;
+              }
             }
           }
         } catch (lrcErr: any) {
           if (lrcErr?.name !== "AbortError") {
-            console.warn("Could not auto-fetch lyrics:", lrcErr);
+            console.warn("No se pudieron obtener letras automáticas:", lrcErr);
           }
         }
       }
@@ -566,7 +573,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
       }
 
       setProgress(98);
-      setStatusMessage("Integrando a la biblioteca local en IndexedDB...");
+      setStatusMessage("Guardando en la biblioteca local IndexedDB...");
 
       const ext = formatType === "audio" ? audioFormat.toLowerCase() : videoFormat.toLowerCase();
       const audioFile = new File([audioBlob], `${mediaInfo.artist} - ${mediaInfo.title}.${ext}`, {
@@ -583,19 +590,23 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
         id: `dl-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         title: mediaInfo.title || "Canción Descargada",
         artist: mediaInfo.artist || "Artista Web",
-        album: mediaInfo.album || (isYt ? "YouTube Music" : "Descargas Web"),
+        album: detectedAlbum || mediaInfo.album || (isYt ? "YouTube Music" : "Descargas Web"),
+        folderPath: "Descargas / Web",
         duration: verifiedDuration,
         url: objectUrl,
         file: audioFile,
         coverUrl: coverUrl || generateCoverArt(mediaInfo.title, mediaInfo.artist),
-        format: `${formatType === "audio" ? audioFormat : videoFormat} (${qualityLabel.split(" ")[0]})`,
+        format: `${formatType === "audio" ? audioFormat : videoFormat} (${qualityLabel})`,
         size: audioBlob.size,
         addedAt: Date.now(),
         isFavorite: false,
         lyrics: lyricsData,
+        lrcBlob: lrcBlob,
+        lrcFileName: lrcFileName,
+        rawLrc: lyricsData?.rawLrc,
       };
 
-      // Guardar en la base de datos IndexedDB local
+      // Guardar en la base de datos IndexedDB local (canción y archivo de letras .lrc)
       await saveDownloadedTrackToLibrary(newTrack);
 
       setProgress(100);
@@ -854,50 +865,28 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                     type="button"
                     onClick={() => setFormatType("audio")}
                     disabled={isDownloading}
-                    className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`flex items-center justify-center gap-2.5 p-3 rounded-xl border text-center transition-all cursor-pointer font-semibold text-xs ${
                       formatType === "audio"
                         ? "bg-purple-500/15 border-purple-500/50 text-white shadow-sm shadow-purple-500/10"
                         : "bg-white/5 border-white/10 text-neutral-400 hover:bg-white/10 hover:text-neutral-200"
                     }`}
                   >
-                    <div
-                      className={`p-2 rounded-lg ${
-                        formatType === "audio"
-                          ? "bg-purple-500 text-white"
-                          : "bg-white/10 text-neutral-400"
-                      }`}
-                    >
-                      <Music className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-white">Solo Audio</div>
-                      <div className="text-[10px] text-neutral-400">MP3, M4A, FLAC</div>
-                    </div>
+                    <Music className="w-4 h-4 text-purple-400" />
+                    <span>Solo Audio</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setFormatType("video")}
                     disabled={isDownloading}
-                    className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`flex items-center justify-center gap-2.5 p-3 rounded-xl border text-center transition-all cursor-pointer font-semibold text-xs ${
                       formatType === "video"
                         ? "bg-purple-500/15 border-purple-500/50 text-white shadow-sm shadow-purple-500/10"
                         : "bg-white/5 border-white/10 text-neutral-400 hover:bg-white/10 hover:text-neutral-200"
                     }`}
                   >
-                    <div
-                      className={`p-2 rounded-lg ${
-                        formatType === "video"
-                          ? "bg-purple-500 text-white"
-                          : "bg-white/10 text-neutral-400"
-                      }`}
-                    >
-                      <Video className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-white">Video Completo</div>
-                      <div className="text-[10px] text-neutral-400">MP4, WEBM</div>
-                    </div>
+                    <Video className="w-4 h-4 text-purple-400" />
+                    <span>Video</span>
                   </button>
                 </div>
 
@@ -940,125 +929,76 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                 </div>
               </div>
 
-              {/* Dynamic Quality Selector */}
+              {/* Dynamic Quality Selector - Clean Pills */}
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-neutral-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <Settings2 className="w-3.5 h-3.5 text-purple-400" />
-                    Calidad de {formatType === "audio" ? "Audio (Bitrate)" : "Video (Resolución)"}:
-                  </span>
-                  <span className="text-[11px] text-purple-400 font-mono font-medium">
-                    {formatType === "audio"
-                      ? AUDIO_QUALITIES.find((q) => q.id === audioQuality)?.id
-                      : VIDEO_QUALITIES.find((q) => q.id === videoQuality)?.id}
+                    Calidad de {formatType === "audio" ? "Audio" : "Video"}:
                   </span>
                 </label>
 
-                <div className="space-y-1.5">
-                  {formatType === "audio"
-                    ? AUDIO_QUALITIES.map((q) => (
-                        <div
-                          key={q.id}
-                          onClick={() => !isDownloading && setAudioQuality(q.id)}
-                          className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
-                            audioQuality === q.id
-                              ? "bg-purple-500/15 border-purple-500/40 text-white"
-                              : "bg-white/5 border-white/5 text-neutral-400 hover:bg-white/10 hover:text-neutral-300"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div
-                              className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                                audioQuality === q.id
-                                  ? "border-purple-400 bg-purple-500 text-white"
-                                  : "border-neutral-500"
-                              }`}
-                            >
-                              {audioQuality === q.id && <Check className="w-2.5 h-2.5" />}
-                            </div>
-                            <span className="text-xs font-medium text-white">{q.label}</span>
-                          </div>
-                          <span className="text-[10px] text-neutral-400">{q.detail}</span>
-                        </div>
-                      ))
-                    : VIDEO_QUALITIES.map((q) => (
-                        <div
-                          key={q.id}
-                          onClick={() => !isDownloading && setVideoQuality(q.id)}
-                          className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
-                            videoQuality === q.id
-                              ? "bg-purple-500/15 border-purple-500/40 text-white"
-                              : "bg-white/5 border-white/5 text-neutral-400 hover:bg-white/10 hover:text-neutral-300"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div
-                              className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                                videoQuality === q.id
-                                  ? "border-purple-400 bg-purple-500 text-white"
-                                  : "border-neutral-500"
-                              }`}
-                            >
-                              {videoQuality === q.id && <Check className="w-2.5 h-2.5" />}
-                            </div>
-                            <span className="text-xs font-medium text-white">{q.label}</span>
-                          </div>
-                          <span className="text-[10px] text-neutral-400">{q.detail}</span>
-                        </div>
-                      ))}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(formatType === "audio" ? AUDIO_QUALITIES : VIDEO_QUALITIES).map((q) => {
+                    const isSelected = formatType === "audio" ? audioQuality === q.id : videoQuality === q.id;
+                    return (
+                      <button
+                        key={q.id}
+                        type="button"
+                        onClick={() => {
+                          if (isDownloading) return;
+                          if (formatType === "audio") setAudioQuality(q.id);
+                          else setVideoQuality(q.id);
+                        }}
+                        className={`py-2.5 px-3 rounded-xl border text-center text-xs font-semibold transition-all cursor-pointer ${
+                          isSelected
+                            ? "bg-purple-500/20 border-purple-500 text-white shadow-sm shadow-purple-500/20"
+                            : "bg-white/5 border-white/5 text-neutral-400 hover:bg-white/10 hover:text-neutral-300"
+                        }`}
+                      >
+                        {q.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Additional Options (Checkboxes) */}
+              {/* Opciones Adicionales simplificadas */}
               <div
-                className="p-3 rounded-xl border space-y-2.5"
+                className="p-3 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
                 style={{
                   backgroundColor: "rgba(255,255,255,0.02)",
                   borderColor: "rgba(255,255,255,0.08)",
                 }}
               >
-                <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 select-none">
-                  Opciones Adicionales
-                </div>
-
-                {/* Option 1: Auto Lyrics */}
-                <label className="flex items-start gap-3 cursor-pointer select-none group">
+                {/* Opción 1: Letras LRC */}
+                <label className="flex items-center gap-2.5 cursor-pointer select-none group">
                   <input
                     type="checkbox"
                     checked={autoLyrics}
                     onChange={(e) => setAutoLyrics(e.target.checked)}
                     disabled={isDownloading}
-                    className="mt-0.5 rounded text-purple-600 focus:ring-purple-500 focus:ring-offset-0 bg-neutral-900 border-neutral-700 w-4 h-4 accent-purple-600 cursor-pointer"
+                    className="rounded text-purple-600 focus:ring-purple-500 focus:ring-offset-0 bg-neutral-900 border-neutral-700 w-4 h-4 accent-purple-600 cursor-pointer"
                   />
-                  <div className="text-xs">
-                    <div className="font-semibold text-white group-hover:text-purple-300 transition-colors flex items-center gap-1.5">
-                      <FileText className="w-3.5 h-3.5 text-purple-400" />
-                      Descargar e importar automáticamente la letra (LRC/Karaoke)
-                    </div>
-                    <div className="text-[11px] text-neutral-400">
-                      Sincroniza los tiempos de la letra verso por verso para reproducir en modo karaoke
-                    </div>
-                  </div>
+                  <span className="text-xs font-medium text-white group-hover:text-purple-300 transition-colors flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-purple-400" />
+                    Letra sincronizada (.lrc)
+                  </span>
                 </label>
 
-                {/* Option 2: Auto Cover Art */}
-                <label className="flex items-start gap-3 cursor-pointer select-none group">
+                {/* Opción 2: Carátula */}
+                <label className="flex items-center gap-2.5 cursor-pointer select-none group">
                   <input
                     type="checkbox"
                     checked={autoCover}
                     onChange={(e) => setAutoCover(e.target.checked)}
                     disabled={isDownloading}
-                    className="mt-0.5 rounded text-purple-600 focus:ring-purple-500 focus:ring-offset-0 bg-neutral-900 border-neutral-700 w-4 h-4 accent-purple-600 cursor-pointer"
+                    className="rounded text-purple-600 focus:ring-purple-500 focus:ring-offset-0 bg-neutral-900 border-neutral-700 w-4 h-4 accent-purple-600 cursor-pointer"
                   />
-                  <div className="text-xs">
-                    <div className="font-semibold text-white group-hover:text-purple-300 transition-colors flex items-center gap-1.5">
-                      <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
-                      Extraer e integrar carátula / portada automáticamente
-                    </div>
-                    <div className="text-[11px] text-neutral-400">
-                      Descarga la miniatura de alta resolución o genera un diseño visual armónico
-                    </div>
-                  </div>
+                  <span className="text-xs font-medium text-white group-hover:text-purple-300 transition-colors flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+                    Carátula del álbum
+                  </span>
                 </label>
               </div>
 

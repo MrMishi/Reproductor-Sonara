@@ -7,7 +7,7 @@ interface LyricsSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   track: Track | null;
-  onLyricsApplied: (trackId: string, lyrics: Track["lyrics"]) => void;
+  onLyricsApplied: (trackId: string, lyrics: Track["lyrics"], detectedAlbum?: string) => void;
 }
 
 export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
@@ -69,15 +69,20 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
         source: "Personalizada por el usuario",
       });
     } else if (result) {
-      onLyricsApplied(track.id, {
-        plain: result.plainLyrics,
-        synced: result.syncedLyrics || undefined,
-        source: result.source === "lrclib" || result.source === "lrclib-search"
-          ? "LRCLib (Sincronizada)"
-          : result.source === "gemini"
-          ? "Google Gemini AI"
-          : "Web Lyrics",
-      });
+      onLyricsApplied(
+        track.id,
+        {
+          plain: result.plainLyrics,
+          synced: result.syncedLyrics || undefined,
+          source:
+            result.source === "lrclib" || result.source === "lrclib-search" || result.source === "lrclib-direct"
+              ? "LRCLib (Sincronizada)"
+              : result.source === "gemini"
+              ? "Google Gemini AI"
+              : "Web Lyrics",
+        },
+        result.album || undefined
+      );
     } else if (customText) {
       onLyricsApplied(track.id, {
         plain: customText,

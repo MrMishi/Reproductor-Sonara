@@ -1,9 +1,26 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - SERVICIO DE LETRAS Y SINCRONIZACIÓN LRC (lyricsService.ts)
+ * ============================================================================
+ * Responsabilidad:
+ * Búsqueda, descarga, análisis sintáctico y sincronización en tiempo real de letras
+ * musicales estándar y sincronizadas (formato .LRC).
+ *
+ * Características principales:
+ * - Búsqueda en la API abierta LRCLIB: "https://lrclib.net/api/search?q="
+ * - Procesamiento estricto de codificación UTF-8 para preservar caracteres japoneses
+ *   (Hiragana, Katakana, Kanji) y transliteraciones a Romaji.
+ * - Cálculo del verso activo según el tiempo actual de reproducción (currentTime).
+ * - Generación y empaquetado de archivos .lrc para almacenamiento en IndexedDB.
+ */
+
 import { SyncedLyricLine } from "../types";
 
 export interface LyricsResult {
   source: string;
   track: string;
   artist: string;
+  album?: string; // Nombre del álbum detectado en LRCLIB o metadatos
   plainLyrics: string;
   syncedLyrics: SyncedLyricLine[] | null;
   rawLrc?: string | null;
@@ -12,12 +29,12 @@ export interface LyricsResult {
 }
 
 /**
- * Regular expression matching native Japanese characters (Hiragana, Katakana, Kanji)
+ * Expresión regular para detectar caracteres japoneses nativos (Hiragana, Katakana, Kanji)
  */
 export const JAPANESE_CHAR_REGEX = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/;
 
 /**
- * Checks if a string contains Japanese characters (Hiragana, Katakana, or Kanji)
+ * Comprueba si un texto contiene caracteres japoneses
  */
 export function hasJapaneseText(text: string): boolean {
   if (!text) return false;
@@ -25,10 +42,8 @@ export function hasJapaneseText(text: string): boolean {
 }
 
 /**
- * Extracts native Japanese text and Romaji transliteration if present in a single line
- * Examples:
- * "夜に駆ける (Yoru ni kakeru)" -> native: "夜に駆ける", romaji: "Yoru ni kakeru"
- * "沈むように溶けてゆくように / shizumu you ni tokete yuku you ni"
+ * Separa una línea bilingüe que combina texto japonés nativo con Romaji.
+ * Ejemplo: "夜に駆ける (Yoru ni kakeru)" -> native: "夜に駆ける", romaji: "Yoru ni kakeru"
  */
 export function parseBilingualLine(text: string): {
   nativeText?: string;
@@ -42,7 +57,7 @@ export function parseBilingualLine(text: string): {
     return { hasJapanese: false };
   }
 
-  // Check pattern with slash: "日本語 / Romaji"
+  // Patrón con barra inclinada: "日本語 / Romaji"
   const slashMatch = text.match(/^([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\s\d\p{P}]+?)\s*[\/|\\]\s*([a-zA-Z\s\d\p{P}]+)$/u);
   if (slashMatch) {
     return {
@@ -52,7 +67,7 @@ export function parseBilingualLine(text: string): {
     };
   }
 
-  // Check pattern with parentheses/brackets: "日本語 (Romaji)" or "日本語 [Romaji]"
+  // Patrón con paréntesis o corchetes: "日本語 (Romaji)"
   const parenMatch = text.match(/^([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\s\d\p{P}]+?)\s*[\(\[\{]([a-zA-Z\s\d\p{P}]+)[\)\]\}]$/u);
   if (parenMatch) {
     return {
@@ -69,13 +84,13 @@ export function parseBilingualLine(text: string): {
 }
 
 /**
- * Parses LRC raw text into an array of sorted timestamped lines,
- * with strict UTF-8 Unicode normalization (NFC) to preserve native Hiragana/Kanji/Katakana.
+ * Analiza el texto en bruto de un archivo .LRC y genera una lista ordenada de versos
+ * con sus marcas de tiempo exactas en segundos. Aplica normalización Unicode NFC (UTF-8).
  */
 export function parseLrc(lrcText: string): SyncedLyricLine[] {
   if (!lrcText) return [];
 
-  // Guarantee UTF-8 Unicode canonical decomposition/composition
+  // Garantizar normalización canónica Unicode NFC en UTF-8
   const normalized = typeof lrcText === "string" ? lrcText.normalize("NFC") : "";
   const lines = normalized.split(/\r?\n/);
   const result: SyncedLyricLine[] = [];
@@ -85,7 +100,7 @@ export function parseLrc(lrcText: string): SyncedLyricLine[] {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Collect all timestamps on this line
+    // Extraer todas las marcas de tiempo presentes en el verso
     const matches = Array.from(trimmed.matchAll(tagRegex));
     if (matches.length > 0) {
       const text = trimmed.replace(tagRegex, "").trim();
@@ -109,19 +124,20 @@ export function parseLrc(lrcText: string): SyncedLyricLine[] {
     }
   }
 
-  // Sort by timestamp ascending
+  // Ordenar versos ascendentemente por tiempo de aparición
   result.sort((a, b) => a.time - b.time);
   return result;
 }
 
 /**
- * Finds the active synchronized line given current audio playback time in seconds
+ * Determina el índice del verso que debe resaltarse en el reproductor según el tiempo actual (segundos)
  */
 export function getActiveLyricIndex(syncedLyrics: SyncedLyricLine[] | null | undefined, currentTime: number): number {
   if (!syncedLyrics || syncedLyrics.length === 0) return -1;
 
   let activeIndex = -1;
   for (let i = 0; i < syncedLyrics.length; i++) {
+    // Anticipación de 200ms para una transición visual suave
     if (currentTime >= syncedLyrics[i].time - 0.2) {
       activeIndex = i;
     } else {
@@ -132,7 +148,10 @@ export function getActiveLyricIndex(syncedLyrics: SyncedLyricLine[] | null | und
 }
 
 /**
- * Search lyrics online via our backend API
+ * Busca letras de canciones en línea.
+ * Integra prioritariamente la búsqueda directa en la API abierta de LRCLIB:
+ * "https://lrclib.net/api/search?q="
+ * y recurre al endpoint interno de respaldo en caso de limitaciones de red o CORS.
  */
 export async function searchLyricsOnline(
   track: string,
@@ -140,6 +159,50 @@ export async function searchLyricsOnline(
   album?: string,
   duration?: number
 ): Promise<LyricsResult> {
+  const cleanTrack = track
+    .replace(/\.(mp3|wav|flac|m4a|aac|ogg|opus|webm)$/i, "")
+    .replace(/\s*[\(\[](official\s*(music\s*)?video|official\s*audio|video\s*oficial|audio\s*oficial|remastered\s*\d*|lyrics\s*video|letra|4k|hd)[\)\]]/gi, "")
+    .trim();
+  const cleanArtist = (artist || "").trim();
+  const searchQuery = `${cleanArtist} ${cleanTrack}`.trim();
+
+  // 1. Intento directo a la API pública de LRCLIB: https://lrclib.net/api/search?q=
+  try {
+    const lrclibUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`;
+    const lrcDirectRes = await fetch(lrclibUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "SonaraMusicPlayer/1.0",
+      },
+    }).catch(() => null);
+
+    if (lrcDirectRes && lrcDirectRes.ok) {
+      const results = await lrcDirectRes.json().catch(() => null);
+      if (Array.isArray(results) && results.length > 0) {
+        // Priorizar el resultado que tenga letras sincronizadas (.lrc)
+        const best = results.find((item: any) => item.syncedLyrics) || results[0];
+        if (best && (best.syncedLyrics || best.plainLyrics)) {
+          const rawLrc = best.syncedLyrics || null;
+          const parsed = rawLrc ? parseLrc(rawLrc) : null;
+          return {
+            source: "lrclib-direct",
+            track: best.trackName || cleanTrack,
+            artist: best.artistName || cleanArtist,
+            album: best.albumName || undefined,
+            plainLyrics: best.plainLyrics || "",
+            syncedLyrics: parsed && parsed.length > 0 ? parsed : null,
+            rawLrc,
+            instrumental: Boolean(best.instrumental),
+          };
+        }
+      }
+    }
+  } catch (directErr) {
+    console.warn("Aviso en búsqueda directa de LRCLIB:", directErr);
+  }
+
+  // 2. Respaldo a través del servidor API (/api/lyrics/search)
   try {
     const response = await fetch("/api/lyrics/search", {
       method: "POST",
@@ -147,8 +210,8 @@ export async function searchLyricsOnline(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        track,
-        artist,
+        track: cleanTrack,
+        artist: cleanArtist,
         album,
         duration,
       }),
@@ -159,28 +222,31 @@ export async function searchLyricsOnline(
     }
 
     const data = await response.json();
-    const synced = data.syncedLyrics ? parseLrc(data.syncedLyrics) : null;
+    const rawLrc = data.syncedLyrics || null;
+    const synced = rawLrc ? parseLrc(rawLrc) : null;
 
     return {
-      source: data.source || "web",
-      track: data.track || track,
-      artist: data.artist || artist || "",
+      source: data.source || "lrclib",
+      track: data.track || cleanTrack,
+      artist: data.artist || cleanArtist,
+      album: data.album || undefined,
       plainLyrics: data.plainLyrics || "",
       syncedLyrics: synced && synced.length > 0 ? synced : null,
-      rawLrc: data.syncedLyrics || null,
+      rawLrc,
       instrumental: data.instrumental || false,
       message: data.message,
     };
   } catch (error: any) {
-    console.warn("Notice: Lyrics search error:", error?.message || error);
+    console.warn("Aviso: Error en búsqueda de letras:", error?.message || error);
     return {
       source: "error",
-      track,
-      artist: artist || "",
+      track: cleanTrack,
+      artist: cleanArtist,
       plainLyrics: "",
       syncedLyrics: null,
+      rawLrc: null,
       instrumental: false,
-      message: "No se pudieron obtener letras en este momento. Puedes redactarlas o pegarlas manualmente.",
+      message: "No se pudieron obtener letras automáticas. Puedes añadirlas o editarlas manualmente.",
     };
   }
 }

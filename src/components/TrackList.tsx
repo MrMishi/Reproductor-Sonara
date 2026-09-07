@@ -14,6 +14,7 @@ import {
   Square,
   Check,
   X,
+  MoreVertical,
 } from "lucide-react";
 import { Track } from "../types";
 
@@ -57,6 +58,15 @@ export const TrackList: React.FC<TrackListProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingDeleteTracks, setPendingDeleteTracks] = useState<Track[]>([]);
+  const [openMenuTrackId, setOpenMenuTrackId] = useState<string | null>(null);
+
+  // Cerrar menú contextual al hacer clic en cualquier parte de la ventana
+  React.useEffect(() => {
+    if (!openMenuTrackId) return;
+    const handleDocumentClick = () => setOpenMenuTrackId(null);
+    window.addEventListener("click", handleDocumentClick);
+    return () => window.removeEventListener("click", handleDocumentClick);
+  }, [openMenuTrackId]);
 
   // Selection helpers
   const handleToggleSelect = (id: string, e?: React.MouseEvent) => {
@@ -157,140 +167,80 @@ export const TrackList: React.FC<TrackListProps> = ({
             <span>Cargar Pistas Demo</span>
           </button>
         </div>
-
-        {hiddenCount !== undefined && hiddenCount > 0 && onOpenHiddenTracks && (
-          <div className="mt-6 pt-4 border-t border-white/10 w-full">
-            <button
-              onClick={onOpenHiddenTracks}
-              className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1.5 mx-auto font-semibold"
-            >
-              <EyeOff className="w-3.5 h-3.5" />
-              <span>Ver {hiddenCount} canciones ocultas</span>
-            </button>
-          </div>
-        )}
       </div>
     );
   }
 
   return (
-    <div className="w-full flex flex-col gap-3">
-      {/* Hidden tracks quick notice if any */}
-      {hiddenCount !== undefined && hiddenCount > 0 && onOpenHiddenTracks && (
-        <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-red-950/30 border border-red-500/25 text-xs">
-          <span className="flex items-center gap-2 text-neutral-300">
-            <EyeOff className="w-3.5 h-3.5 text-red-400 shrink-0" />
-            <span>
-              Tienes <strong>{hiddenCount}</strong> archivo{hiddenCount === 1 ? "" : "s"} de música en tu lista de ocultos (se omiten siempre).
+    <div className="w-full flex flex-col gap-2">
+      {/* Top Selection Bar (shown only when in selection mode, or sleek discrete trigger) */}
+      {isSelectionMode ? (
+        <div
+          id="selection-mode-active-bar"
+          className="w-full flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-2xl border bg-neutral-900/90 backdrop-blur-md shadow-lg mb-1"
+          style={{ borderColor: "var(--color-accent, #7C3AED)" }}
+        >
+          <div className="flex items-center gap-3">
+            <button
+              id="select-all-toggle-btn"
+              onClick={handleToggleSelectAll}
+              className="flex items-center gap-2 px-2.5 py-1 rounded-lg hover:bg-white/10 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              {selectedIds.size === tracks.length ? (
+                <CheckSquare className="w-4 h-4 text-violet-400" />
+              ) : (
+                <Square className="w-4 h-4 text-neutral-400" />
+              )}
+              <span>
+                {selectedIds.size === tracks.length
+                  ? "Deseleccionar todas"
+                  : `Seleccionar todas (${tracks.length})`}
+              </span>
+            </button>
+
+            <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-white/10 text-white">
+              {selectedIds.size} seleccionada{selectedIds.size === 1 ? "" : "s"}
             </span>
-          </span>
-          <button
-            id="view-hidden-tracks-btn"
-            onClick={onOpenHiddenTracks}
-            className="text-red-400 hover:text-red-300 font-bold underline cursor-pointer shrink-0 ml-2"
-          >
-            Ver o restaurar
-          </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              id="delete-selected-tracks-btn"
+              onClick={handleStartDeleteSelected}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold text-white bg-red-600 hover:bg-red-500 disabled:opacity-30 disabled:pointer-events-none shadow-md transition-all active:scale-95 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Eliminar ({selectedIds.size})</span>
+            </button>
+
+            <button
+              id="cancel-selection-mode-btn"
+              onClick={handleExitSelectionMode}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold hover:bg-white/10 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Cancelar</span>
+            </button>
+          </div>
         </div>
+      ) : (
+        onDeleteTracks && (
+          <div className="flex justify-end px-1">
+            <button
+              id="enter-selection-mode-btn"
+              onClick={() => setIsSelectionMode(true)}
+              className="text-[11px] font-medium text-neutral-400 hover:text-white transition-colors flex items-center gap-1 py-0.5 px-2 rounded-lg hover:bg-white/5 cursor-pointer"
+              title="Seleccionar canciones para eliminar"
+            >
+              <ListChecks className="w-3.5 h-3.5" />
+              <span>Seleccionar</span>
+            </button>
+          </div>
+        )
       )}
 
-      {/* Top Action & Selection Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1 py-1">
-        {!isSelectionMode ? (
-          <div className="flex items-center justify-between w-full">
-            <span className="text-xs font-semibold opacity-60">
-              {tracks.length} {tracks.length === 1 ? "canción" : "canciones"} en la lista
-            </span>
-
-            {onDeleteTracks && (
-              <button
-                id="enter-selection-mode-btn"
-                onClick={() => setIsSelectionMode(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold hover:bg-white/10 transition-colors text-neutral-300 hover:text-white"
-                style={{ borderColor: "var(--color-border-subtle)" }}
-                title="Selecciona varias canciones para eliminarlas"
-              >
-                <ListChecks className="w-3.5 h-3.5" />
-                <span>Seleccionar para eliminar</span>
-              </button>
-            )}
-          </div>
-        ) : (
-          /* Selection Mode Active Bar */
-          <div
-            id="selection-mode-active-bar"
-            className="w-full flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-2xl border bg-neutral-900/90 backdrop-blur-md shadow-lg"
-            style={{ borderColor: "var(--color-accent, #7C3AED)" }}
-          >
-            <div className="flex items-center gap-3">
-              <button
-                id="select-all-toggle-btn"
-                onClick={handleToggleSelectAll}
-                className="flex items-center gap-2 px-2.5 py-1 rounded-lg hover:bg-white/10 text-xs font-semibold transition-colors"
-              >
-                {selectedIds.size === tracks.length ? (
-                  <CheckSquare className="w-4 h-4 text-violet-400" />
-                ) : (
-                  <Square className="w-4 h-4 text-neutral-400" />
-                )}
-                <span>
-                  {selectedIds.size === tracks.length
-                    ? "Deseleccionar todas"
-                    : `Seleccionar todas (${tracks.length})`}
-                </span>
-              </button>
-
-              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-white/10 text-white">
-                {selectedIds.size} seleccionada{selectedIds.size === 1 ? "" : "s"}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                id="delete-selected-tracks-btn"
-                onClick={handleStartDeleteSelected}
-                disabled={selectedIds.size === 0}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold text-white bg-red-600 hover:bg-red-500 disabled:opacity-30 disabled:pointer-events-none shadow-md transition-all active:scale-95"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Eliminar ({selectedIds.size})</span>
-              </button>
-
-              <button
-                id="cancel-selection-mode-btn"
-                onClick={handleExitSelectionMode}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold hover:bg-white/10 text-neutral-300 hover:text-white transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Cancelar</span>
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Table Header */}
-      <div
-        className="grid grid-cols-12 gap-2 px-4 py-2 text-xs font-semibold uppercase tracking-wider opacity-60 border-b select-none"
-        style={{ borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))" }}
-      >
-        <span className="col-span-1 text-center">
-          {isSelectionMode ? (
-            <span title="Seleccionar">Sel</span>
-          ) : (
-            "#"
-          )}
-        </span>
-        <span className="col-span-6 sm:col-span-5">Título</span>
-        <span className="hidden sm:block sm:col-span-3">Álbum</span>
-        <span className="col-span-3 sm:col-span-2 text-right flex items-center justify-end gap-1">
-          <Clock className="w-3.5 h-3.5" />
-          <span>Tiempo</span>
-        </span>
-        <span className="col-span-2 sm:col-span-1 text-center">Acción</span>
-      </div>
-
-      {/* Rows */}
+      {/* Lista de Canciones: Filas Modernas con Bordes Redondeados Suaves */}
       <div className="flex flex-col space-y-1">
         {tracks.map((track, idx) => {
           const isCurrent = track.id === currentTrackId;
@@ -307,24 +257,21 @@ export const TrackList: React.FC<TrackListProps> = ({
                   onPlayTrack(track, idx);
                 }
               }}
-              className={`grid grid-cols-12 gap-2 items-center px-4 py-2.5 rounded-xl cursor-pointer transition-all group ${
+              className={`relative flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4 rounded-2xl cursor-pointer transition-all group select-none ${
                 isSelected
-                  ? "bg-violet-950/40 border border-violet-500/40 shadow-sm"
+                  ? "bg-violet-950/40 border border-violet-500/30 shadow-sm"
                   : isCurrent
-                  ? "bg-white/10 shadow-sm"
-                  : "hover:bg-white/5"
+                  ? "bg-white/[0.08] shadow-sm border border-white/10"
+                  : "hover:bg-white/[0.04] border border-transparent"
               }`}
-              style={{
-                borderRadius: "var(--theme-radius, 12px)",
-              }}
             >
-              {/* Checkbox (selection mode) or Index/Play icon (normal mode) */}
-              <div className="col-span-1 flex items-center justify-center">
-                {isSelectionMode ? (
+              {/* Izquierda: Portada + Selección + Título + Artista */}
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                {isSelectionMode && (
                   <button
                     type="button"
                     onClick={(e) => handleToggleSelect(track.id, e)}
-                    className="w-5 h-5 rounded-md flex items-center justify-center transition-all"
+                    className="w-5 h-5 rounded-md flex items-center justify-center transition-all shrink-0 cursor-pointer"
                   >
                     {isSelected ? (
                       <div className="w-4 h-4 rounded bg-violet-600 text-white flex items-center justify-center shadow">
@@ -334,101 +281,141 @@ export const TrackList: React.FC<TrackListProps> = ({
                       <div className="w-4 h-4 rounded border border-neutral-500 hover:border-white transition-colors" />
                     )}
                   </button>
-                ) : isCurrent ? (
-                  <div
-                    className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                    style={{ backgroundColor: "var(--color-accent)" }}
-                  >
-                    {isPlaying ? "▶" : "❚❚"}
-                  </div>
-                ) : (
-                  <>
-                    <span className="text-xs font-mono opacity-50 group-hover:hidden">
-                      {idx + 1}
-                    </span>
-                    <Play className="w-4 h-4 text-white hidden group-hover:block ml-0.5 fill-white" />
-                  </>
                 )}
-              </div>
 
-              {/* Title & Artist & Thumbnail */}
-              <div className="col-span-6 sm:col-span-5 flex items-center gap-3 min-w-0">
-                <img
-                  src={track.coverUrl}
-                  alt={track.title}
-                  className="w-10 h-10 rounded-lg object-cover shrink-0 shadow"
-                />
-                <div className="min-w-0">
+                {/* Portada pequeña con indicador de reproducción */}
+                <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-neutral-900 border border-white/5 shadow-sm group-hover:shadow-md transition-shadow">
+                  <img
+                    src={track.coverUrl}
+                    alt={track.title}
+                    className="w-full h-full object-cover"
+                  />
+                  {isCurrent ? (
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <div
+                        className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white font-bold shadow"
+                        style={{ backgroundColor: "var(--color-accent, #7C3AED)" }}
+                      >
+                        {isPlaying ? "▶" : "❚❚"}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <Play className="w-4 h-4 text-white fill-white ml-0.5" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Título y Artista */}
+                <div className="min-w-0 flex-1">
                   <p
-                    className={`text-xs sm:text-sm font-semibold truncate ${
+                    className={`text-sm font-semibold truncate ${
                       isCurrent ? "font-bold" : ""
                     }`}
-                    style={{ color: isCurrent ? "var(--color-accent)" : "var(--color-text-primary)" }}
+                    style={{
+                      color: isCurrent ? "var(--color-accent, #8B5CF6)" : "var(--color-text-primary, #ffffff)",
+                    }}
                   >
                     {track.title}
                   </p>
-                  <p className="text-[11px] truncate opacity-70" style={{ color: "var(--color-text-secondary)" }}>
-                    {track.artist}
+                  <p
+                    className="text-xs truncate opacity-65 mt-0.5"
+                    style={{ color: "var(--color-text-secondary, #9ca3af)" }}
+                  >
+                    {track.artist || "Artista Desconocido"}
                   </p>
                 </div>
               </div>
 
-              {/* Album */}
-              <div className="hidden sm:block sm:col-span-3 truncate text-xs opacity-75">
-                {track.album}
-              </div>
+              {/* Derecha: Duración + Menú tres puntos (...) */}
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                <span className="text-xs font-mono opacity-50 select-none">
+                  {formatDuration(track.duration)}
+                </span>
 
-              {/* Duration */}
-              <div className="col-span-3 sm:col-span-2 text-right text-xs font-mono opacity-70">
-                {formatDuration(track.duration)}
-              </div>
-
-              {/* Actions (Like + Lyrics + Hide + Delete) */}
-              <div
-                className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  id={`track-like-btn-${track.id}`}
-                  onClick={() => onToggleFavorite(track.id)}
-                  title={track.isFavorite ? "Quitar favorita" : "Marcar favorita"}
-                  className="p-1.5 rounded-full hover:bg-white/10 transition-transform active:scale-90"
-                >
-                  <Heart
-                    className={`w-3.5 h-3.5 ${
-                      track.isFavorite ? "fill-red-500 text-red-500" : "text-neutral-400 group-hover:text-white"
-                    }`}
-                  />
-                </button>
-
-                <button
-                  id={`track-lyrics-btn-${track.id}`}
-                  onClick={() => onOpenLyricsSearchForTrack(track)}
-                  title="Buscar o ver letra"
-                  className="p-1.5 rounded-full hover:bg-white/10 transition-transform active:scale-90 opacity-60 hover:opacity-100"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                </button>
-
-                <button
-                  id={`track-hide-btn-${track.id}`}
-                  onClick={() => onHideTrack && onHideTrack(track)}
-                  title="Ocultar canción (omitir de la biblioteca)"
-                  className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-transform active:scale-90 opacity-50 hover:opacity-100"
-                >
-                  <EyeOff className="w-3.5 h-3.5" />
-                </button>
-
-                {onDeleteTracks && (
+                {/* Menú tres puntos (...) */}
+                <div className="relative">
                   <button
-                    id={`track-delete-btn-${track.id}`}
-                    onClick={() => handleStartDeleteSingle(track)}
-                    title="Eliminar del reproductor"
-                    className="p-1.5 rounded-full hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-transform active:scale-90 opacity-60 hover:opacity-100"
+                    id={`track-menu-btn-${track.id}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenMenuTrackId((prev) => (prev === track.id ? null : track.id));
+                    }}
+                    title="Opciones"
+                    className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer active:scale-95"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <MoreVertical className="w-4 h-4" />
                   </button>
-                )}
+
+                  {openMenuTrackId === track.id && (
+                    <div
+                      id={`track-options-menu-${track.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute right-0 top-full mt-1 w-48 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
+                      style={{
+                        backgroundColor: "var(--color-surface-elevated, #1c1c1c)",
+                        borderColor: "var(--color-border-subtle, rgba(255,255,255,0.12))",
+                      }}
+                    >
+                      {/* Favorita */}
+                      <button
+                        onClick={() => {
+                          onToggleFavorite(track.id);
+                          setOpenMenuTrackId(null);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
+                      >
+                        <Heart
+                          className={`w-3.5 h-3.5 ${
+                            track.isFavorite ? "fill-red-500 text-red-500" : "text-neutral-400"
+                          }`}
+                        />
+                        <span>{track.isFavorite ? "Quitar de Favoritas" : "Marcar Favorita"}</span>
+                      </button>
+
+                      {/* Letras */}
+                      <button
+                        onClick={() => {
+                          onOpenLyricsSearchForTrack(track);
+                          setOpenMenuTrackId(null);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-purple-400" />
+                        <span>Ver / Buscar Letra</span>
+                      </button>
+
+                      {/* Ocultar */}
+                      {onHideTrack && (
+                        <button
+                          onClick={() => {
+                            onHideTrack(track);
+                            setOpenMenuTrackId(null);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-neutral-300 hover:text-white"
+                        >
+                          <EyeOff className="w-3.5 h-3.5 text-neutral-400" />
+                          <span>Ocultar Canción</span>
+                        </button>
+                      )}
+
+                      {/* Eliminar */}
+                      {onDeleteTracks && (
+                        <button
+                          onClick={() => {
+                            setOpenMenuTrackId(null);
+                            handleStartDeleteSingle(track);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-red-500/20 text-left transition-colors cursor-pointer text-red-400"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Eliminar Canción</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           );

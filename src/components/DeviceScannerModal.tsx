@@ -1,3 +1,16 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MODAL DE IMPORTACIÓN LOCAL DE MÚSICA (DeviceScannerModal.tsx)
+ * ============================================================================
+ * Responsabilidad:
+ * Permite al usuario incorporar música almacenada en su dispositivo local:
+ * - Selección de archivos individuales o escaneo recursivo de directorios.
+ * - Arrastrar y soltar (Drag & Drop) de carpetas y archivos.
+ * - Extracción y análisis de metadatos ID3 (título, artista, álbum, carátula incrustada).
+ * - Filtro inteligente de duración mínima (elimina notas de voz y audios de mensajería).
+ * - Carga de pistas demo sintéticas Lo-Fi / Synthwave.
+ */
+
 import React, { useState, useRef, useEffect } from "react";
 import {
   X,
@@ -471,9 +484,9 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
               <HardDrive className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold tracking-tight">Detectar Música del Dispositivo</h2>
+              <h2 className="text-xl font-bold tracking-tight">Importar Música Local</h2>
               <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                Escanea tu almacenamiento local, carpetas o canciones descargadas
+                Añade archivos o carpetas completas a tu biblioteca
               </p>
             </div>
           </div>
@@ -482,7 +495,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
             id="device-scanner-close-btn"
             onClick={handleSafeClose}
             className="p-2 rounded-full hover:bg-white/10 transition-colors text-neutral-400 hover:text-white"
-            aria-label="Cerrar escáner"
+            aria-label="Cerrar importador"
             title="Cerrar ventana"
           >
             <X className="w-5 h-5" />
@@ -548,150 +561,96 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           </div>
         </div>
 
-        {/* Smart Audio Duration & Blacklist Filters */}
+        {/* Filtro simplificado de audios cortos */}
         <div
           id="smart-filter-settings-box"
-          className="p-3.5 rounded-2xl border flex flex-col gap-3 transition-all"
+          className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all"
           style={{
             backgroundColor: "var(--color-surface, #141414)",
             borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
           }}
         >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4" style={{ color: "var(--color-accent, #FF0000)" }} />
-              <span className="text-xs font-bold text-white">Filtro de Duración y Audios de WhatsApp</span>
+          <label className="flex items-center gap-2.5 text-xs cursor-pointer select-none">
+            <input
+              id="filter-short-audios-toggle"
+              type="checkbox"
+              checked={filterShortAudios}
+              onChange={(e) => setFilterShortAudios(e.target.checked)}
+              className="w-4 h-4 rounded accent-violet-500 cursor-pointer"
+            />
+            <span className="font-semibold text-neutral-200">
+              Omitir audios cortos
+            </span>
+          </label>
+
+          {filterShortAudios && (
+            <div className="flex items-center gap-2 text-xs shrink-0 self-end sm:self-auto">
+              <span className="opacity-70 text-[11px]">Duración mínima:</span>
+              <select
+                id="min-duration-select"
+                value={minDurationSeconds}
+                onChange={(e) => setMinDurationSeconds(Number(e.target.value))}
+                className="bg-neutral-800 text-white rounded-lg px-2.5 py-1.5 text-xs border border-white/10 font-bold focus:outline-none cursor-pointer hover:border-white/20"
+              >
+                <option value={75}>75s (Recomendado)</option>
+                <option value={60}>60s</option>
+                <option value={90}>90s</option>
+                <option value={120}>120s</option>
+                <option value={30}>30s</option>
+              </select>
             </div>
-            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-              Antivirus de audios cortos
-            </span>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 border-t border-white/5">
-            <label className="flex items-center gap-2.5 text-xs cursor-pointer select-none">
-              <input
-                id="filter-short-audios-toggle"
-                type="checkbox"
-                checked={filterShortAudios}
-                onChange={(e) => setFilterShortAudios(e.target.checked)}
-                className="w-4 h-4 rounded accent-violet-500 cursor-pointer"
-              />
-              <div>
-                <span className="font-semibold text-neutral-200 block">
-                  Omitir audios cortos (WhatsApp, notas de voz, tonos)
-                </span>
-                <span className="text-[10px] opacity-60">
-                  Verifica que los archivos sean música real y no mensajes de voz
-                </span>
-              </div>
-            </label>
-
-            {filterShortAudios && (
-              <div className="flex items-center gap-2 text-xs shrink-0 self-end sm:self-auto">
-                <span className="opacity-70 text-[11px]">Duración mínima:</span>
-                <select
-                  id="min-duration-select"
-                  value={minDurationSeconds}
-                  onChange={(e) => setMinDurationSeconds(Number(e.target.value))}
-                  className="bg-neutral-800 text-white rounded-lg px-2.5 py-1.5 text-xs border border-white/10 font-bold focus:outline-none cursor-pointer hover:border-white/20"
-                >
-                  <option value={75}>1 min 15 seg (75s) · Recomendado</option>
-                  <option value={60}>1 min 00 seg (60s)</option>
-                  <option value={90}>1 min 30 seg (90s)</option>
-                  <option value={120}>2 min 00 seg (120s)</option>
-                  <option value={30}>30 segundos (30s)</option>
-                </select>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-white/5 opacity-80">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                id="filter-hidden-tracks-toggle"
-                type="checkbox"
-                checked={filterHiddenTracks}
-                onChange={(e) => setFilterHiddenTracks(e.target.checked)}
-                className="w-3.5 h-3.5 rounded accent-violet-500 cursor-pointer"
-              />
-              <span className="flex items-center gap-1.5">
-                <EyeOff className="w-3.5 h-3.5 text-red-400" />
-                <span>Omitir permanentemente archivos de tu lista de "Archivos Ocultos"</span>
-              </span>
-            </label>
-            <span className="font-mono text-[10px] text-neutral-400">
-              {getHiddenTracks().length} {getHiddenTracks().length === 1 ? "oculta" : "ocultas"}
-            </span>
-          </div>
+          )}
         </div>
 
-        {/* Action Options */}
-        <div className="flex flex-col gap-3">
-          {/* Main Option: Native folder scan */}
-          <button
-            id="scan-device-folder-btn"
-            disabled={isScanning}
-            onClick={handleScanDeviceDirectory}
-            className="p-4 rounded-xl border flex items-center justify-between text-left transition-all hover:scale-[1.01] group shadow-md disabled:opacity-50"
-            style={{
-              backgroundColor: "var(--color-surface, #141414)",
-              borderColor: "var(--color-accent)",
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0"
-                style={{ backgroundColor: "var(--color-accent)" }}
-              >
-                <FolderSearch className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="text-sm font-bold block text-white">
-                  Escanear Carpeta de Música del Dispositivo
-                </span>
-                <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                  Busca automáticamente todas las canciones en tu carpeta seleccionada y subcarpetas
-                </span>
-              </div>
-            </div>
-            <span
-              className="text-xs font-semibold px-2.5 py-1 rounded-full text-white shrink-0"
-              style={{ backgroundColor: "var(--color-accent)" }}
-            >
-              Recomendado
-            </span>
-          </button>
-
-          {/* Secondary Options */}
+        {/* Sección unificada: Importar Música Local (archivos o carpetas) */}
+        <div className="flex flex-col gap-2.5">
+          <div className="text-[10px] font-bold uppercase tracking-wider opacity-50 px-1 select-none">
+            Importar Música Local
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               id="select-audio-files-btn"
               disabled={isScanning}
               onClick={() => filesInputRef.current?.click()}
-              className="p-3 rounded-xl border flex items-center gap-3 text-left hover:bg-white/5 transition-all disabled:opacity-50"
+              className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-white/5 transition-all disabled:opacity-50 cursor-pointer group"
               style={{ borderColor: "var(--color-border-subtle)" }}
             >
-              <Music className="w-4 h-4 text-neutral-400 shrink-0" />
+              <div className="p-2 rounded-lg bg-cyan-500/15 text-cyan-400 group-hover:scale-105 transition-transform shrink-0">
+                <Music className="w-4 h-4" />
+              </div>
               <div>
-                <span className="text-xs font-bold block">Seleccionar Archivos</span>
-                <span className="text-[11px] opacity-70">Elige pistas específicas</span>
+                <span className="text-xs font-bold block text-white">Seleccionar Archivos</span>
+                <span className="text-[11px] opacity-70">Elige canciones específicas</span>
               </div>
             </button>
 
             <button
-              id="load-demo-tracks-btn"
+              id="scan-device-folder-btn"
               disabled={isScanning}
-              onClick={handleLoadDemo}
-              className="p-3 rounded-xl border flex items-center gap-3 text-left hover:bg-white/5 transition-all disabled:opacity-50"
+              onClick={handleScanDeviceDirectory}
+              className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-white/5 transition-all disabled:opacity-50 cursor-pointer group"
               style={{ borderColor: "var(--color-border-subtle)" }}
             >
-              <Sparkles className="w-4 h-4 shrink-0" style={{ color: "var(--color-accent)" }} />
+              <div className="p-2 rounded-lg bg-amber-500/15 text-amber-400 group-hover:scale-105 transition-transform shrink-0">
+                <FolderSearch className="w-4 h-4" />
+              </div>
               <div>
-                <span className="text-xs font-bold block">Cargar Música de Prueba</span>
-                <span className="text-[11px] opacity-70">Sintetizador Lo-Fi & Synthwave</span>
+                <span className="text-xs font-bold block text-white">Seleccionar Carpeta</span>
+                <span className="text-[11px] opacity-70">Escanea un directorio completo</span>
               </div>
             </button>
           </div>
+
+          <button
+            id="load-demo-tracks-btn"
+            disabled={isScanning}
+            onClick={handleLoadDemo}
+            className="w-full p-2.5 rounded-xl border flex items-center justify-center gap-2 text-xs font-medium hover:bg-white/5 transition-all disabled:opacity-50 opacity-70 hover:opacity-100 cursor-pointer"
+            style={{ borderColor: "var(--color-border-subtle)" }}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Cargar Música de Prueba (Lo-Fi / Sintetizador)</span>
+          </button>
         </div>
 
         {/* Scanning In-Progress Display with CANCEL button */}

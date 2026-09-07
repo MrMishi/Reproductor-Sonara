@@ -130,6 +130,7 @@ app.post("/api/lyrics/search", async (req, res) => {
             source: "lrclib-search",
             track: best.trackName || cleanTrack,
             artist: best.artistName || cleanArtist,
+            album: best.albumName || undefined,
             plainLyrics: best.plainLyrics || "",
             syncedLyrics: best.syncedLyrics || null,
             instrumental: Boolean(best.instrumental),
@@ -386,9 +387,12 @@ app.post("/api/download/youtube-audio", async (req, res) => {
   if (!provider || provider === "cobalt" || provider === "auto") {
     const rawCobalt = [
       process.env.COBALT_API_URL,
+      "https://api.cobalt.tools/api/json",
       "https://api.cobalt.tools",
+      "https://cobalt.tools/api/json",
       "https://cobalt.tools",
-      "https://cobalt.canine.tools",
+      "https://cobalt-api.kwiatekm.com/api/json",
+      "https://cobalt.canine.tools/api/json",
     ];
     const cobaltInstances = rawCobalt
       .map(sanitizeApiUrl)
@@ -411,10 +415,9 @@ app.post("/api/download/youtube-audio", async (req, res) => {
           body: JSON.stringify({
             url: cleanUrl,
             downloadMode: "audio",
-            audioFormat: targetFormat,
-            audioBitrate: bitrateNum,
+            audioFormat: "mp3",
           }),
-          signal: AbortSignal.timeout(4500),
+          signal: AbortSignal.timeout(6000),
         });
 
         if (cobaltRes.ok) {
@@ -422,11 +425,11 @@ app.post("/api/download/youtube-audio", async (req, res) => {
           if (cType.includes("application/json")) {
             const data: any = await cobaltRes.json().catch(() => null);
             const streamUrl = data?.url || data?.stream;
-            if (streamUrl && typeof streamUrl === "string") {
+            if (streamUrl && typeof streamUrl === "string" && !streamUrl.includes("error")) {
               res.json({
                 success: true,
                 streamUrl,
-                format: targetFormat,
+                format: "mp3",
                 bitrate: `${bitrateNum}k`,
                 source: "cobalt",
               });

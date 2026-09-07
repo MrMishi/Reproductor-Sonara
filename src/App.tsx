@@ -16,14 +16,13 @@ import { EqualizerModal } from "./components/EqualizerModal";
 import { ThemeModal } from "./components/ThemeModal";
 import { DeviceScannerModal } from "./components/DeviceScannerModal";
 import { LyricsSearchModal } from "./components/LyricsSearchModal";
-import { HomeView } from "./components/HomeView";
-import { TrackList } from "./components/TrackList";
+import { LibraryView } from "./components/LibraryView";
 import { FloatingMiniPlayer } from "./components/FloatingMiniPlayer";
 import { InstallAppModal } from "./components/InstallAppModal";
 import { HiddenTracksModal } from "./components/HiddenTracksModal";
 import { DownloadModal } from "./components/DownloadModal";
 import { parseAudioFile } from "./services/metadataParser";
-import { Trash2, AlertCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import {
   loadTracksFromDB,
   saveTracksToDB,
@@ -44,7 +43,7 @@ export default function App() {
   const [volume, setVolume] = useState<number>(0.85);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("repeat-all");
-  const [activeTab, setActiveTab] = useState<ActiveTab>("home");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("library");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   // Modo Mini (Floating Gadget)
@@ -440,8 +439,17 @@ export default function App() {
   };
 
   // Lyrics applied from search
-  const handleLyricsApplied = (trackId: string, lyrics: Track["lyrics"]) => {
-    const updated = tracks.map((t) => (t.id === trackId ? { ...t, lyrics } : t));
+  const handleLyricsApplied = (trackId: string, lyrics: Track["lyrics"], album?: string) => {
+    const updated = tracks.map((t) => {
+      if (t.id === trackId) {
+        return {
+          ...t,
+          lyrics,
+          album: t.album || album,
+        };
+      }
+      return t;
+    });
     setTracks(updated);
     saveTracksToDB(updated);
   };
@@ -634,62 +642,24 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-8 py-6">
-        {activeTab === "home" && !searchQuery ? (
-          <HomeView
-            tracks={tracks}
-            currentTrackId={currentTrack?.id}
-            isPlaying={isPlaying}
-            onPlayTrack={handlePlayTrack}
-            onOpenScanner={() => setIsScannerOpen(true)}
-            onOpenLyricsSearchForTrack={(track) => setLyricsSearchTrack(track)}
-            onToggleFavorite={handleToggleFavorite}
-            onDeleteTrack={(track) => handleDeleteTracks([track.id])}
-          />
-        ) : (
-          <div className="flex flex-col gap-5">
-            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: "var(--color-border-subtle)" }}>
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
-                  {searchQuery
-                    ? `Resultados para "${searchQuery}"`
-                    : activeTab === "favorites"
-                    ? "Canciones Favoritas"
-                    : "Biblioteca de Canciones"}
-                </h1>
-                <p className="text-xs opacity-70 mt-1" style={{ color: "var(--color-text-secondary)" }}>
-                  {displayedTracks.length} {displayedTracks.length === 1 ? "canción encontrada" : "canciones encontradas"}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  id="library-scan-more-btn"
-                  onClick={() => setIsScannerOpen(true)}
-                  className="px-4 py-2 rounded-full font-bold text-xs text-white shadow transition-all hover:scale-105"
-                  style={{ backgroundColor: "var(--color-accent)" }}
-                >
-                  + Añadir Canciones
-                </button>
-              </div>
-            </div>
-
-            <TrackList
-              tracks={displayedTracks}
-              currentTrackId={currentTrack?.id}
-              isPlaying={isPlaying}
-              onPlayTrack={handlePlayTrack}
-              onToggleFavorite={handleToggleFavorite}
-              onOpenLyricsSearchForTrack={(track) => setLyricsSearchTrack(track)}
-              onOpenScanner={() => setIsScannerOpen(true)}
-              onLoadDemos={handleLoadDemos}
-              onHideTrack={handleHideTrack}
-              onOpenHiddenTracks={() => setIsHiddenTracksOpen(true)}
-              hiddenCount={hiddenTracks.length}
-              onDeleteTracks={handleDeleteTracks}
-            />
-          </div>
-        )}
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <LibraryView
+          tracks={tracks}
+          currentTrackId={currentTrack?.id}
+          isPlaying={isPlaying}
+          onPlayTrack={handlePlayTrack}
+          onToggleFavorite={handleToggleFavorite}
+          onOpenLyricsSearchForTrack={(track) => setLyricsSearchTrack(track)}
+          onOpenScanner={() => setIsScannerOpen(true)}
+          onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
+          onLoadDemos={handleLoadDemos}
+          onHideTrack={handleHideTrack}
+          onOpenHiddenTracks={() => setIsHiddenTracksOpen(true)}
+          hiddenCount={hiddenTracks.length}
+          onDeleteTracks={handleDeleteTracks}
+          searchQuery={searchQuery}
+          isFavoritesView={activeTab === "favorites"}
+        />
       </main>
 
       {/* Bottom Sticky YouTube Music Player Bar (when not in Mini Mode) */}

@@ -664,26 +664,15 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
               </div>
             )}
 
-            {/* Draggable Slide Handle Bar (Permite desplegar/deslizar hacia arriba y abajo dinámicamente) */}
+            {/* Draggable Slide Handle Bar */}
             <div
-              className="w-full flex flex-col items-center justify-center py-1 cursor-pointer group shrink-0"
+              className="w-full flex flex-col items-center justify-center py-2 cursor-pointer group shrink-0"
               onClick={() =>
                 setLyricsExpansion(lyricsExpansion === "full" ? "compact" : "full")
               }
-              title="Toca o arrastra para deslizar la vista de letras"
+              title="Ajustar vista de letras"
             >
               <div className="w-12 h-1.5 rounded-full bg-white/20 group-hover:bg-white/40 transition-colors" />
-              <span className="text-[10px] uppercase font-bold tracking-wider opacity-40 group-hover:opacity-80 transition-opacity mt-1 flex items-center gap-1">
-                {lyricsExpansion === "full" ? (
-                  <>
-                    <ChevronDown className="w-3 h-3" /> Deslizar hacia abajo para reducir
-                  </>
-                ) : (
-                  <>
-                    <ChevronUp className="w-3 h-3" /> Deslizar hacia arriba para expandir letras
-                  </>
-                )}
-              </span>
             </div>
 
             {/* Compact Mode Artwork Preview (if lyricsExpansion === 'compact') */}
@@ -1033,7 +1022,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
           <button
             id="expanded-prev-btn"
             onClick={onPrev}
-            title="Canción anterior (O desliza a la izquierda en la carátula)"
+            title="Canción anterior"
             className="p-3 rounded-full hover:bg-white/10 transition-transform active:scale-90"
           >
             <SkipBack className="w-7 h-7" />
@@ -1043,7 +1032,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
           <button
             id="expanded-play-pause-btn"
             onClick={onTogglePlay}
-            title={isPlaying ? "Pausar (O tap en carátula)" : "Reproducir (O tap en carátula)"}
+            title={isPlaying ? "Pausar" : "Reproducir"}
             className="w-16 h-16 sm:w-18 sm:h-18 rounded-full flex items-center justify-center text-white shadow-2xl transition-transform hover:scale-105 active:scale-95"
             style={{
               backgroundColor: "var(--color-accent, #FF0000)",
@@ -1061,7 +1050,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
           <button
             id="expanded-next-btn"
             onClick={onNext}
-            title="Siguiente canción (O desliza a la derecha en la carátula)"
+            title="Siguiente canción"
             className="p-3 rounded-full hover:bg-white/10 transition-transform active:scale-90"
           >
             <SkipForward className="w-7 h-7" />

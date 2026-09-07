@@ -1,6 +1,32 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - SERVICIO DE DESCARGAS Y PROCESAMIENTO MULTIMEDIA (downloadService.ts)
+ * ============================================================================
+ * Responsabilidad:
+ * Orquesta la extracción, descarga, validación de integridad y almacenamiento local
+ * de canciones desde YouTube y fuentes web directas.
+ *
+ * Arquitectura de Red y Proveedores:
+ * 1. Proveedor Principal (Cobalt API):
+ *    - Envía POST a "https://api.cobalt.tools/api/json" con:
+ *      { "url": youtubeUrl, "downloadMode": "audio", "audioFormat": "mp3" }
+ *    - Obtiene la URL de descarga directa y descarga el Blob de audio.
+ * 2. Respaldo Automático (Piped / Invidious API):
+ *    - Si Cobalt no responde o falla por restricciones de red/CORS, conmuta
+ *      automáticamente a instancias públicas de Piped e Invidious rotadas dinámicamente.
+ * 3. Servidor de Extracción Backend Propio (/api/download/youtube y Render):
+ *    - Respaldo adicional para eludir bloqueos locales de CORS del navegador.
+ * 4. Verificación de Integridad de Audio:
+ *    - Valida que el archivo descargado supere los 100 KB y que el navegador pueda
+ *      leer su duración real (> 0s) mediante un elemento HTMLAudioElement de prueba.
+ * 5. Persistencia:
+ *    - Guarda el Blob de audio y el archivo de letras .lrc en IndexedDB.
+ */
+
 import { Track } from "../types";
 import { saveTracksToDB } from "./db";
 import { generateCoverArt } from "./metadataParser";
+
 
 export interface YouTubeAudioResolution {
   streamUrl: string;
@@ -381,48 +407,71 @@ export async function resolveYouTubeAudioStream(
   const userSignal = options?.signal;
   const onBackend = options?.onBackendChange;
 
-  // --- 1. INTENTAR COBALT ---
-  onBackend?.("Intentando vía Cobalt...", 25);
+  // --- 1. PROVEEDOR PRINCIPAL: COBALT API ---
+  onBackend?.("Conectando con Cobalt API (proveedor principal)...", 25);
 
   let cobaltSuccess: YouTubeAudioResolution | null = null;
-  try {
-    // Try direct public Cobalt API first
-    const directCobalt = await fetch("https://api.cobalt.tools", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        url: youtubeUrl,
-        downloadMode: "audio",
-        audioFormat: format === "m4a" ? "m4a" : "mp3",
-        audioBitrate: quality === "128k" ? "128" : quality === "192k" ? "192" : "320",
-      }),
-      signal: createCombinedSignal(userSignal, 5000),
-    }).catch(() => null);
+  const cobaltEndpoints = [
+    "https://api.cobalt.tools/api/json",
+    "https://api.cobalt.tools",
+    "https://cobalt.tools/api/json",
+    "https://cobalt-api.kwiatekm.com/api/json",
+    "https://cobalt.canine.tools/api/json",
+  ];
 
-    if (directCobalt && directCobalt.ok) {
-      const data = await directCobalt.json();
-      const streamUrl = data?.url || data?.stream;
-      if (streamUrl && typeof streamUrl === "string") {
-        cobaltSuccess = {
-          streamUrl: appendCacheBuster(streamUrl),
-          format: format === "m4a" ? "m4a" : "mp3",
-          bitrate: quality,
-        };
-      }
+  for (const cobaltUrl of cobaltEndpoints) {
+    if (userSignal?.aborted) {
+      throw new DOMException("Operación cancelada", "AbortError");
     }
 
-    // If direct cobalt was blocked by CORS or failed, try server-side Cobalt proxy
-    if (!cobaltSuccess && !userSignal?.aborted) {
+    try {
+      // 1. Envío POST a Cobalt API pública directa:
+      // Body: { "url": youtubeUrl, "downloadMode": "audio", "audioFormat": "mp3" }
+      const directCobalt = await fetch(cobaltUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: youtubeUrl,
+          downloadMode: "audio",
+          audioFormat: "mp3",
+        }),
+        signal: createCombinedSignal(userSignal, 5000),
+      }).catch(() => null);
+
+      if (directCobalt && directCobalt.ok) {
+        const data = await directCobalt.json().catch(() => null);
+        const streamUrl = data?.url || data?.stream;
+        if (streamUrl && typeof streamUrl === "string" && !streamUrl.includes("error")) {
+          cobaltSuccess = {
+            streamUrl: appendCacheBuster(streamUrl),
+            format: "mp3",
+            bitrate: quality,
+            title: data.title,
+            artist: data.artist,
+          };
+          break;
+        }
+      }
+    } catch (cobaltErr: any) {
+      if (cobaltErr?.name === "AbortError" && userSignal?.aborted) {
+        throw cobaltErr;
+      }
+    }
+  }
+
+  // Si el fetch directo de Cobalt fue bloqueado por CORS en el navegador, intentar proxy del servidor
+  if (!cobaltSuccess && !userSignal?.aborted) {
+    try {
       const srvCobalt = await fetch("/api/download/youtube-audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url: youtubeUrl,
           videoId,
-          format,
+          format: "mp3",
           quality,
           provider: "cobalt",
         }),
@@ -430,23 +479,22 @@ export async function resolveYouTubeAudioStream(
       }).catch(() => null);
 
       if (srvCobalt && srvCobalt.ok) {
-        const data = await srvCobalt.json();
+        const data = await srvCobalt.json().catch(() => null);
         if (data && data.success && data.streamUrl) {
           cobaltSuccess = {
             streamUrl: appendCacheBuster(data.streamUrl),
-            format: data.format || format,
+            format: "mp3",
             bitrate: data.bitrate || quality,
             title: data.title,
             artist: data.artist,
           };
         }
       }
+    } catch (proxyErr: any) {
+      if (proxyErr?.name === "AbortError" && userSignal?.aborted) {
+        throw proxyErr;
+      }
     }
-  } catch (cobaltErr: any) {
-    if (cobaltErr?.name === "AbortError" && userSignal?.aborted) {
-      throw cobaltErr;
-    }
-    console.warn("Cobalt attempt encountered error:", cobaltErr);
   }
 
   if (cobaltSuccess) {
@@ -457,7 +505,8 @@ export async function resolveYouTubeAudioStream(
     throw new DOMException("Operación cancelada", "AbortError");
   }
 
-  // --- 2. FALLBACK A PIPED API (CON ROTACIÓN DINÁMICA & FRESH STREAM) ---
+  // --- 2. RESPALDO AUTOMÁTICO: PIPED API (CON ROTACIÓN DINÁMICA & FRESH STREAM) ---
+  onBackend?.("Cobalt no disponible. Conmutando a respaldo automático Piped API...", 40);
   onBackend?.("Cambiando a servidor Piped (balanceo dinámico)...", 40);
 
   // Rotación aleatoria de instancias para evitar Rate Limiting

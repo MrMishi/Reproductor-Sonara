@@ -294,6 +294,15 @@ export async function parseAudioFile(file: File): Promise<Track> {
   const finalArtist = id3.artist || fallbackArtist;
   const coverUrl = id3.coverUrl || generateCoverArt(finalTitle, finalArtist);
 
+  // Extraer estructura de carpeta de origen
+  let folderPath = "Música del Dispositivo";
+  if ((file as any).webkitRelativePath) {
+    const parts = (file as any).webkitRelativePath.split("/");
+    if (parts.length > 1) {
+      folderPath = parts.slice(0, -1).join(" / ");
+    }
+  }
+
   return {
     id: `track-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
     title: finalTitle,
@@ -308,5 +317,6 @@ export async function parseAudioFile(file: File): Promise<Track> {
     size: file.size,
     addedAt: Date.now(),
     isFavorite: false,
+    folderPath,
   };
 }

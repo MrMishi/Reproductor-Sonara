@@ -1,3 +1,14 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - BARRA DE NAVEGACIÓN SUPERIOR (Navbar.tsx)
+ * ============================================================================
+ * Responsabilidad:
+ * Barra de control y navegación principal. Gestiona la búsqueda global en vivo,
+ * el menú simplificado "Añadir Música" (Importar Música Local / Descargar desde URL),
+ * accesos rápidos a configuración (Ecualizador, Temas, Canciones Ocultas) y
+ * el conmutador a modo mini-reproductor Flotante.
+ */
+
 import React, { useState, useEffect, useRef } from "react";
 import {
   Search,
@@ -41,6 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectTab,
   searchQuery,
   onSearchChange,
+  onOpenScanner,
   onOpenAddFiles,
   onOpenAddFolder,
   onOpenDownloadModal,
@@ -91,29 +103,21 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center gap-3 sm:gap-6 shrink-0">
           <div
             id="sonora-logo"
-            onClick={() => onSelectTab("home")}
-            className="cursor-pointer select-none transition-transform active:scale-95"
+            onClick={() => onSelectTab("library")}
+            className="cursor-pointer select-none transition-transform active:scale-95 flex items-center gap-2"
           >
             <SonoraLogo size={32} />
+            <span className="font-black text-lg tracking-tight hidden sm:inline" style={{ color: "var(--color-text-primary)" }}>
+              Sonora
+            </span>
           </div>
 
           {/* Primary Tabs (desktop/tablet) */}
           <nav className="hidden md:flex items-center gap-1">
             <button
-              id="nav-tab-home"
-              onClick={() => onSelectTab("home")}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                activeTab === "home"
-                  ? "bg-white text-black shadow-sm"
-                  : "text-neutral-300 hover:text-white hover:bg-white/10"
-              }`}
-            >
-              Principal
-            </button>
-            <button
               id="nav-tab-library"
               onClick={() => onSelectTab("library")}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                 activeTab === "library"
                   ? "bg-white text-black shadow-sm"
                   : "text-neutral-300 hover:text-white hover:bg-white/10"
@@ -125,13 +129,13 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               id="nav-tab-favorites"
               onClick={() => onSelectTab("favorites")}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                 activeTab === "favorites"
                   ? "bg-white text-black shadow-sm"
                   : "text-neutral-300 hover:text-white hover:bg-white/10"
               }`}
             >
-              <Heart className="w-3.5 h-3.5 text-red-500" />
+              <Heart className="w-3.5 h-3.5 text-red-500 fill-red-500/20" />
               <span>Favoritas</span>
             </button>
           </nav>
@@ -207,124 +211,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Add / Download Music Dropdown Button */}
-          <div className="relative" ref={addMenuRef}>
-            <button
-              id="navbar-add-music-btn"
-              onClick={() => setIsAddMenuOpen((prev) => !prev)}
-              title="Añadir / Descargar música"
-              aria-label="Añadir / Descargar música"
-              className={`w-8.5 h-8.5 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-md select-none border shrink-0 ${
-                isAddMenuOpen
-                  ? "bg-purple-600 text-white border-purple-400 shadow-purple-500/30 scale-105"
-                  : "bg-white/10 hover:bg-purple-600/20 text-white hover:border-purple-500/40 border-white/10 hover:scale-105 active:scale-95"
-              }`}
-              style={{
-                boxShadow: isAddMenuOpen ? "0 0 15px rgba(124, 58, 237, 0.4)" : undefined,
-              }}
-            >
-              <Plus
-                className={`w-4 h-4 sm:w-5 sm:h-5 transition-transform duration-200 ${
-                  isAddMenuOpen ? "rotate-45 text-white" : "text-white"
-                }`}
-              />
-            </button>
-
-            {/* Add Music Dropdown Menu */}
-            {isAddMenuOpen && (
-              <div
-                id="navbar-add-music-dropdown"
-                className="absolute right-0 mt-2 w-72 rounded-2xl p-2 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-150"
-                style={{
-                  backgroundColor: "var(--color-surface, #181818)",
-                  borderColor: "var(--color-border-subtle, rgba(255,255,255,0.15))",
-                  boxShadow: "0 20px 45px rgba(0, 0, 0, 0.75), 0 0 25px rgba(124, 58, 237, 0.15)",
-                }}
-              >
-                <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider opacity-50 select-none text-neutral-400">
-                  Añadir Música
-                </div>
-
-                {/* Option a) Añadir archivos locales */}
-                <button
-                  id="navbar-add-files-btn"
-                  onClick={() => {
-                    setIsAddMenuOpen(false);
-                    onOpenAddFiles();
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-white/10 group cursor-pointer"
-                >
-                  <div className="p-2 rounded-lg bg-cyan-500/15 text-cyan-400 group-hover:scale-105 transition-transform shrink-0">
-                    <FileAudio className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-white group-hover:text-cyan-300 transition-colors">
-                      Añadir archivos locales
-                    </div>
-                    <div className="text-[11px] text-neutral-400 truncate">
-                      Seleccionar pistas (MP3, FLAC, WAV...)
-                    </div>
-                  </div>
-                </button>
-
-                {/* Option b) Añadir carpeta */}
-                <button
-                  id="navbar-add-folder-btn"
-                  onClick={() => {
-                    setIsAddMenuOpen(false);
-                    onOpenAddFolder();
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-white/10 group cursor-pointer"
-                >
-                  <div className="p-2 rounded-lg bg-amber-500/15 text-amber-400 group-hover:scale-105 transition-transform shrink-0">
-                    <FolderPlus className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-white group-hover:text-amber-300 transition-colors">
-                      Añadir carpeta
-                    </div>
-                    <div className="text-[11px] text-neutral-400 truncate">
-                      Escanear directorio completo de música
-                    </div>
-                  </div>
-                </button>
-
-                <div className="my-1.5 border-t border-white/10" />
-
-                {/* Option c) Descargar desde URL */}
-                <button
-                  id="navbar-download-url-btn"
-                  onClick={() => {
-                    setIsAddMenuOpen(false);
-                    onOpenDownloadModal();
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-purple-500/15 group cursor-pointer"
-                >
-                  <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400 group-hover:scale-105 transition-transform shrink-0">
-                    <DownloadCloud className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-white group-hover:text-purple-300 transition-colors flex items-center gap-1.5">
-                      Descargar desde URL
-                      <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-200">
-                        Nuevo
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-neutral-400 truncate">
-                      YouTube, enlaces directos y web
-                    </div>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-
           {/* Settings Menu Dropdown */}
           <div className="relative" ref={settingsRef}>
             <button
               id="navbar-settings-btn"
               onClick={() => setIsSettingsOpen((prev) => !prev)}
-              title="Configuración"
+              title="Configuración y Opciones"
               className={`p-2 sm:px-3.5 sm:py-2 rounded-full text-xs font-semibold border flex items-center gap-1.5 transition-all shrink-0 cursor-pointer select-none ${
                 isSettingsOpen
                   ? "bg-white/15 text-white border-white/30 shadow-sm"
@@ -340,7 +232,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   isSettingsOpen ? "rotate-90 text-white" : "opacity-80"
                 }`}
               />
-              <span className="hidden sm:inline">Configuración</span>
+              <span className="hidden sm:inline">Ajustes</span>
               <ChevronDown
                 className={`w-3.5 h-3.5 opacity-60 transition-transform duration-200 hidden sm:inline ${
                   isSettingsOpen ? "rotate-180" : ""
@@ -359,8 +251,50 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
               >
                 <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider opacity-50 select-none">
-                  Configuración
+                  Ajustes y Música
                 </div>
+
+                {/* Importar Local */}
+                <button
+                  id="settings-import-local-btn"
+                  onClick={() => {
+                    setIsSettingsOpen(false);
+                    if (onOpenScanner) {
+                      onOpenScanner();
+                    } else if (onOpenAddFiles) {
+                      onOpenAddFiles();
+                    }
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
+                >
+                  <div className="p-2 rounded-lg bg-cyan-500/15 text-cyan-400 group-hover:bg-cyan-500/25 transition-colors">
+                    <FolderPlus className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-white font-medium text-xs">Importar Música Local</div>
+                    <div className="text-[10px] opacity-60">Archivos o carpetas de audio</div>
+                  </div>
+                </button>
+
+                {/* Descargar URL */}
+                <button
+                  id="settings-download-url-btn"
+                  onClick={() => {
+                    setIsSettingsOpen(false);
+                    onOpenDownloadModal();
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
+                >
+                  <div className="p-2 rounded-lg bg-purple-500/15 text-purple-400 group-hover:bg-purple-500/25 transition-colors">
+                    <DownloadCloud className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-white font-medium text-xs">Descargar desde URL</div>
+                    <div className="text-[10px] opacity-60">Cobalt / Enlace web</div>
+                  </div>
+                </button>
+
+                <div className="my-1 border-t border-white/10" />
 
                 {/* Botón Tema */}
                 <button
@@ -398,8 +332,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                 </button>
 
-                {/* Canciones Ocultas en menú (fácil acceso en móvil) */}
-                {hiddenCount !== undefined && hiddenCount > 0 && onOpenHiddenTracks && (
+                {/* Canciones Ocultas en menú Ajustes */}
+                {onOpenHiddenTracks && (
                   <button
                     id="settings-hidden-tracks-btn"
                     onClick={() => {
@@ -412,7 +346,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <EyeOff className="w-4 h-4" />
                     </div>
                     <div className="flex-1">
-                      <div className="text-white font-medium text-xs">Canciones Ocultas ({hiddenCount})</div>
+                      <div className="text-white font-medium text-xs flex items-center justify-between">
+                        <span>Canciones Ocultas</span>
+                        {hiddenCount !== undefined && hiddenCount > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 font-bold">
+                            {hiddenCount}
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[11px] opacity-60">Ver o restaurar pistas ocultas</div>
                     </div>
                   </button>
@@ -427,27 +368,16 @@ export const Navbar: React.FC<NavbarProps> = ({
       <nav
         id="mobile-nav-tabs"
         aria-label="Navegación móvil principal"
-        className="flex md:hidden items-center justify-around px-3 py-2 border-b sticky top-[53px] z-25 backdrop-blur-xl"
+        className="flex md:hidden items-center justify-around px-3 py-2 border-b sticky top-[53px] z-25 backdrop-blur-xl gap-2"
         style={{
           backgroundColor: "var(--color-surface, #0c0c0c)",
           borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
         }}
       >
         <button
-          id="mobile-nav-tab-home"
-          onClick={() => onSelectTab("home")}
-          className={`flex-1 py-2 px-2.5 rounded-full text-xs font-bold transition-all text-center ${
-            activeTab === "home"
-              ? "bg-white text-black shadow-sm"
-              : "text-neutral-400 hover:text-white"
-          }`}
-        >
-          Principal
-        </button>
-        <button
           id="mobile-nav-tab-library"
           onClick={() => onSelectTab("library")}
-          className={`flex-1 py-2 px-2.5 rounded-full text-xs font-bold transition-all flex items-center justify-center gap-1 text-center ${
+          className={`flex-1 py-2 px-2.5 rounded-full text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-center ${
             activeTab === "library"
               ? "bg-white text-black shadow-sm"
               : "text-neutral-400 hover:text-white"
@@ -459,7 +389,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <button
           id="mobile-nav-tab-favorites"
           onClick={() => onSelectTab("favorites")}
-          className={`flex-1 py-2 px-2.5 rounded-full text-xs font-bold transition-all flex items-center justify-center gap-1 text-center ${
+          className={`flex-1 py-2 px-2.5 rounded-full text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-center ${
             activeTab === "favorites"
               ? "bg-white text-black shadow-sm"
               : "text-neutral-400 hover:text-white"

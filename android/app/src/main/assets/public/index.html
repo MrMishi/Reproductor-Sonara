@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sonora - Reproductor de Música Hi-Fi</title>
+    <meta name="description" content="Sonora es un reproductor de música Hi-Fi local y offline con descarga desde URLs de YouTube/web, ecualizador gráfico multibanda, escáner de archivos locales y letras sincronizadas." />
+    <meta property="og:title" content="Sonora - Reproductor de Música Hi-Fi" />
+    <meta property="og:description" content="Sonora es un reproductor de música Hi-Fi local y offline con descarga desde URLs de YouTube/web, ecualizador gráfico multibanda, escáner de archivos locales y letras sincronizadas." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#7C3AED" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Sonora" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script type="module" crossorigin src="/assets/index-2YBQFwXR.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CNGxDIb3.css">
+  </head>
+  <body class="bg-[#0A0915] text-white selection:bg-purple-600 selection:text-white antialiased overflow-x-hidden min-h-screen w-full">
+    <div id="root" class="w-full h-screen min-h-screen flex flex-col"></div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch((err) => {
+            console.log('SW registration skipped:', err);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
+

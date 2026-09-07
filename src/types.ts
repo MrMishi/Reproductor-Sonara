@@ -1,61 +1,81 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - DEFINICIONES DE TIPOS GLOBALES (TypeScript)
+ * ============================================================================
+ * Este archivo centraliza todas las interfaces, tipos y estructuras de datos
+ * utilizadas en el reproductor de música:
+ * - Track: Pistas de audio locales y remotas con metadatos, carátula y letras.
+ * - SyncedLyricLine: Líneas de letras sincronizadas con soporte bilingüe (Romaji/Kanji).
+ * - EqualizerBand / EqualizerPreset: Bandas de ecualización y curvas predefinidas.
+ * - ThemeConfig: Personalización visual dinámica de la interfaz.
+ * - PlaybackMode: Modos de reproducción (normal, bucle, aleatorio).
+ */
+
 export interface Track {
   id: string;
   title: string;
   artist: string;
   album: string;
-  duration: number; // in seconds
-  url: string; // Object URL or sample URL
-  file?: File; // Original File if from device
-  coverUrl?: string; // Extracted or fallback album artwork
+  duration: number; // en segundos
+  url: string; // Object URL de blob local o URL remota
+  file?: File; // Objeto File original cargado desde el dispositivo
+  coverUrl?: string; // Carátula oficial en HD o carátula generada
   year?: string;
   genre?: string;
   format?: string;
   size?: number;
   addedAt: number;
   isFavorite?: boolean;
+  folderPath?: string; // Ruta de carpeta o directorio de origen en el dispositivo
+  lrcBlob?: Blob; // Archivo .lrc binario persistido en IndexedDB
+  lrcFileName?: string; // Nombre del archivo .lrc asociado
+  rawLrc?: string; // Texto original del archivo .lrc para carga rápida
   lyrics?: {
-    plain: string;
-    synced?: SyncedLyricLine[];
-    source?: string;
+    plain: string; // Letra plana sin marcas de tiempo
+    synced?: SyncedLyricLine[]; // Letras procesadas verso a verso
+    source?: string; // Origen (LrcLib, Genius, Local)
+    rawLrc?: string; // Contenido textual original en formato .lrc
   };
 }
 
+export type LibrarySection = "songs" | "artists" | "albums" | "folders";
+
 export interface SyncedLyricLine {
-  time: number; // in seconds
-  text: string;
-  nativeText?: string;
-  romaji?: string;
-  translation?: string;
-  hasJapanese?: boolean;
+  time: number; // Marca de tiempo en segundos
+  text: string; // Texto del verso
+  nativeText?: string; // Texto en idioma nativo (ej. japonés)
+  romaji?: string; // Transliteración romanizada
+  translation?: string; // Traducción opcional
+  hasJapanese?: boolean; // Indicador de caracteres japoneses
 }
 
 export interface EqualizerBand {
-  frequency: number;
-  gain: number; // -12 to +12 dB
-  type: BiquadFilterType;
-  label: string;
+  frequency: number; // Frecuencia central en Hz
+  gain: number; // Ganancia de -12 a +12 dB
+  type: BiquadFilterType; // Tipo de filtro Web Audio API
+  label: string; // Etiqueta descriptiva (ej. 60 Hz, 1 kHz)
 }
 
 export interface EqualizerPreset {
   id: string;
-  name: string;
-  gains: number[]; // Array of gains in dB for each band
-  bassBoost?: number; // 0 to 10
+  name: string; // Nombre del preset (ej. Rock, Pop, Bass Boost)
+  gains: number[]; // Array de ganancias en dB para cada banda
+  bassBoost?: number; // Realce de graves adicional (0 a 10)
 }
 
 export interface ThemeConfig {
   id: string;
   name: string;
   isDark: boolean;
-  accentColor: string; // Primary brand color (e.g. #FF0000)
+  accentColor: string; // Color de acento primario (ej. #FF0000)
   accentHover: string;
-  bgColor: string; // Base background (e.g. #030303)
-  surfaceColor: string; // Cards & sidebars (e.g. #121212)
-  surfaceElevated: string; // Dropdowns / modals (e.g. #212121)
-  playerBarBg: string; // Bottom bar (e.g. #181818)
-  textPrimary: string; // #FFFFFF
-  textSecondary: string; // #AAAAAA
-  borderSubtle: string; // rgba(255,255,255,0.08)
+  bgColor: string; // Color de fondo base
+  surfaceColor: string; // Tarjetas y paneles laterales
+  surfaceElevated: string; // Modales y menús desplegables
+  playerBarBg: string; // Barra inferior del reproductor
+  textPrimary: string;
+  textSecondary: string;
+  borderSubtle: string;
   glowEffect: boolean;
   borderRadius: "none" | "sm" | "md" | "lg" | "full";
 }
@@ -82,3 +102,4 @@ export interface Playlist {
   createdAt: number;
   coverUrl?: string;
 }
+

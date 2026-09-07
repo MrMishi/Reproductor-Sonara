@@ -1,3 +1,19 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - SERVICIO DE BASE DE DATOS LOCAL (IndexedDB & LocalStorage)
+ * ============================================================================
+ * Responsabilidad:
+ * Gestiona el almacenamiento local persistente de pistas de audio, metadatos,
+ * archivos binarios (Audio Blobs y Letras .LRC), listas de reproducción y
+ * registros de pistas ocultas.
+ *
+ * Características principales:
+ * - Persistencia de Blobs de audio y archivos .LRC en IndexedDB ("YouTubeMusicWebPlayerDB").
+ * - Restauración transparente de URLs temporales mediante URL.createObjectURL().
+ * - Limpieza automática de pistas de 0 bytes o audio corrupto.
+ * - Lista negra y filtrado de canciones ocultas en LocalStorage.
+ */
+
 import { Track, Playlist, HiddenTrackRecord } from "../types";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
@@ -7,6 +23,9 @@ const STORE_PLAYLISTS = "playlists";
 const STORE_FAVORITES = "favorites";
 const HIDDEN_TRACKS_STORAGE_KEY = "ytm_hidden_tracks_list";
 
+/**
+ * Obtiene la lista de pistas marcadas como ocultas por el usuario
+ */
 export function getHiddenTracks(): HiddenTrackRecord[] {
   try {
     const raw = localStorage.getItem(HIDDEN_TRACKS_STORAGE_KEY);
@@ -17,11 +36,14 @@ export function getHiddenTracks(): HiddenTrackRecord[] {
   }
 }
 
+/**
+ * Agrega una pista a la lista de pistas ocultas (evita duplicados)
+ */
 export function addHiddenTrack(track: Track): void {
   try {
     const list = getHiddenTracks();
     const fileName = track.file?.name || "";
-    // Avoid duplicate entries
+    // Evitar registros duplicados por ID, nombre de archivo o título/artista
     const exists = list.some(
       (h) =>
         h.id === track.id ||
@@ -48,6 +70,9 @@ export function addHiddenTrack(track: Track): void {
   }
 }
 
+/**
+ * Remueve una pista de la lista de pistas ocultas
+ */
 export function removeHiddenTrack(idOrTitle: string): void {
   try {
     const list = getHiddenTracks().filter(
@@ -59,6 +84,9 @@ export function removeHiddenTrack(idOrTitle: string): void {
   }
 }
 
+/**
+ * Vacía completamente la lista de pistas ocultas
+ */
 export function clearAllHiddenTracks(): void {
   try {
     localStorage.removeItem(HIDDEN_TRACKS_STORAGE_KEY);
@@ -67,6 +95,9 @@ export function clearAllHiddenTracks(): void {
   }
 }
 
+/**
+ * Comprueba si una pista está en la lista de ocultas
+ */
 export function isTrackHidden(title: string, artist: string, fileName?: string): boolean {
   try {
     const list = getHiddenTracks();
@@ -93,6 +124,9 @@ export function isTrackHidden(title: string, artist: string, fileName?: string):
   }
 }
 
+/**
+ * Inicializa y abre la conexión con la base de datos IndexedDB local
+ */
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -115,6 +149,9 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * Guarda o actualiza un array de pistas de audio y sus archivos binarios (.lrc y audio) en IndexedDB
+ */
 export async function saveTracksToDB(tracks: Track[]): Promise<void> {
   try {
     const db = await openDB();
@@ -122,7 +159,7 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
     const store = tx.objectStore(STORE_TRACKS);
 
     for (const track of tracks) {
-      // Create a serializable clone (omit file / url if object url)
+      // Clon serializable con todos los metadatos de la pista
       const serializable: any = {
         id: track.id,
         title: track.title,
@@ -139,11 +176,21 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
         lyrics: track.lyrics,
       };
 
-      // If file exists, IndexedDB can store File/Blob in modern browsers!
+      // Si existe un archivo o Blob de audio, se almacena directamente en IndexedDB
       if (track.file) {
         serializable.blob = track.file;
         serializable.fileName = track.file.name;
         serializable.fileType = track.file.type;
+      }
+
+      // Persistencia de archivo .lrc en IndexedDB
+      if (track.lrcBlob) {
+        serializable.lrcBlob = track.lrcBlob;
+        serializable.lrcFileName = track.lrcFileName || `${track.artist} - ${track.title}.lrc`;
+      } else if (track.lyrics?.rawLrc) {
+        // Generar Blob .lrc a partir del texto de la letra si no existe el blob
+        serializable.lrcBlob = new Blob([track.lyrics.rawLrc], { type: "text/plain;charset=utf-8" });
+        serializable.lrcFileName = track.lrcFileName || `${track.artist} - ${track.title}.lrc`;
       }
 
       store.put(serializable);
@@ -158,6 +205,9 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
   }
 }
 
+/**
+ * Carga todas las pistas persistidas desde IndexedDB y regenera los ObjectURLs
+ */
 export async function loadTracksFromDB(): Promise<Track[]> {
   try {
     const db = await openDB();
@@ -185,12 +235,17 @@ export async function loadTracksFromDB(): Promise<Track[]> {
           let url = "";
           let file: File | undefined = undefined;
 
+          // Reconstruir el archivo de audio desde el Blob
           if (item.blob) {
             file = new File([item.blob], item.fileName || "track.mp3", {
               type: item.fileType || "audio/mpeg",
             });
             url = URL.createObjectURL(file);
           }
+
+          // Reconstruir archivo de letras .lrc si existe en el registro
+          const lrcBlob: Blob | undefined = item.lrcBlob || undefined;
+          const lrcFileName: string | undefined = item.lrcFileName || undefined;
 
           if (url || item.url) {
             loaded.push({
@@ -209,6 +264,8 @@ export async function loadTracksFromDB(): Promise<Track[]> {
               addedAt: item.addedAt,
               isFavorite: item.isFavorite,
               lyrics: item.lyrics,
+              lrcBlob,
+              lrcFileName,
             });
           }
         }
@@ -223,6 +280,9 @@ export async function loadTracksFromDB(): Promise<Track[]> {
   }
 }
 
+/**
+ * Elimina una pista de la base de datos IndexedDB por su ID
+ */
 export async function removeTrackFromDB(id: string): Promise<void> {
   try {
     const db = await openDB();
@@ -233,6 +293,9 @@ export async function removeTrackFromDB(id: string): Promise<void> {
   }
 }
 
+/**
+ * Elimina múltiples pistas por sus IDs en una única transacción de IndexedDB
+ */
 export async function removeMultipleTracksFromDB(ids: string[]): Promise<void> {
   if (!ids || ids.length === 0) return;
   try {
@@ -251,6 +314,9 @@ export async function removeMultipleTracksFromDB(ids: string[]): Promise<void> {
   }
 }
 
+/**
+ * Limpia y vacía por completo el almacén de pistas de la base de datos
+ */
 export async function clearTracksDB(): Promise<void> {
   try {
     const db = await openDB();
@@ -260,3 +326,4 @@ export async function clearTracksDB(): Promise<void> {
     console.warn("Error clearing tracks db:", e);
   }
 }
+
