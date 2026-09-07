@@ -2,13 +2,7 @@ name: Sonora - Compilar APK Android
 
 on:
   push:
-    branches:
-      - main
-      - master
-  pull_request:
-    branches:
-      - main
-      - master
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -17,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Descargar código fuente (Checkout)
+      - name: Descargar código fuente
         uses: actions/checkout@v4
 
       - name: Configurar Java JDK 17
@@ -26,27 +20,28 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Configurar Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Instalar dependencias
-        run: |
-          npm ci || npm install
+      - name: Instalación limpia de dependencias
+        run: npm ci || npm install
 
       - name: Compilar aplicación web
-        run: |
-          npm run build
+        run: npm run build
 
-      - name: Sincronizar plataforma nativa Android
+      - name: Sincronizar plataforma nativa Capacitor
         run: |
           if [ ! -d "android" ]; then
             npx cap add android
           fi
           npx cap sync android
 
-      - name: Otorgar permisos a Gradle y compilar APK
+      - name: Dar permisos y compilar APK Debug
         run: |
           chmod +x android/gradlew
           cd android
@@ -58,4 +53,3 @@ jobs:
           name: Sonora-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
-
