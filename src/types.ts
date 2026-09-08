@@ -27,6 +27,7 @@ export interface Track {
   addedAt: number;
   isFavorite?: boolean;
   folderPath?: string; // Ruta de carpeta o directorio de origen en el dispositivo
+  fileName?: string; // Nombre del archivo (.mp3, etc.)
   lrcBlob?: Blob; // Archivo .lrc binario persistido en IndexedDB
   lrcFileName?: string; // Nombre del archivo .lrc asociado
   rawLrc?: string; // Texto original del archivo .lrc para carga rápida

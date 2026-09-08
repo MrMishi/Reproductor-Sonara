@@ -21,6 +21,7 @@ import { FloatingMiniPlayer } from "./components/FloatingMiniPlayer";
 import { InstallAppModal } from "./components/InstallAppModal";
 import { HiddenTracksModal } from "./components/HiddenTracksModal";
 import { DownloadModal } from "./components/DownloadModal";
+import { ID3EditorModal } from "./components/ID3EditorModal";
 import { parseAudioFile } from "./services/metadataParser";
 import { AlertCircle } from "lucide-react";
 import {
@@ -32,6 +33,7 @@ import {
   getHiddenTracks,
   removeHiddenTrack,
   clearAllHiddenTracks,
+  updateTrackInDb,
 } from "./services/db";
 
 export default function App() {
@@ -76,6 +78,37 @@ export default function App() {
   // Hidden File and Folder Input Refs for '+' menu
   const localFilesInputRef = useRef<HTMLInputElement | null>(null);
   const localFolderInputRef = useRef<HTMLInputElement | null>(null);
+
+  // ID3 Metadata Editor Modal state
+  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+
+  // Filtro de audios cortos (< 30 segundos: notas de voz, tonos y audios breves)
+  const [filterShortAudios, setFilterShortAudios] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem("sonora_filter_short_audios");
+      return stored !== null ? stored === "true" : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleFilterShortAudios = (enabled: boolean) => {
+    setFilterShortAudios(enabled);
+    try {
+      localStorage.setItem("sonora_filter_short_audios", String(enabled));
+    } catch {
+      // ignore
+    }
+    setToastMessage(enabled ? "Filtro activo: audios < 30s ocultos" : "Filtro desactivado: mostrando todos los audios");
+  };
+
+  // Guardar cambios del editor de etiquetas ID3
+  const handleSaveEditedTrack = async (updatedTrack: Track) => {
+    setTracks((prev) => prev.map((t) => (t.id === updatedTrack.id ? updatedTrack : t)));
+    await updateTrackInDb(updatedTrack);
+    setEditingTrack(null);
+    setToastMessage(`Etiquetas ID3 guardadas: "${updatedTrack.title}"`);
+  };
 
   // Hidden Tracks & Mobile PWA / APK installation
   const [isHiddenTracksOpen, setIsHiddenTracksOpen] = useState(false);
@@ -128,6 +161,12 @@ export default function App() {
 
     initLibrary();
   }, []);
+
+  // Pistas visibles con filtro de audios cortos (< 30s) opcional
+  const visibleTracks = useMemo(() => {
+    if (!filterShortAudios) return tracks;
+    return tracks.filter((t) => !t.duration || t.duration >= 30);
+  }, [tracks, filterShortAudios]);
 
   const currentTrack = tracks[currentTrackIndex] || null;
 
@@ -270,6 +309,83 @@ export default function App() {
       setCurrentTime(time);
     }
   };
+
+  // Integración completa con MediaSession API para notificaciones y pantalla de bloqueo de Android
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+
+    if (currentTrack) {
+      try {
+        const coverSrc = currentTrack.coverUrl || "/icon.svg";
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentTrack.title || "Sonora Music",
+          artist: currentTrack.artist || "Artista Desconocido",
+          album: currentTrack.album || "Sonora",
+          artwork: [
+            { src: coverSrc, sizes: "96x96", type: "image/png" },
+            { src: coverSrc, sizes: "128x128", type: "image/png" },
+            { src: coverSrc, sizes: "192x192", type: "image/png" },
+            { src: coverSrc, sizes: "256x256", type: "image/png" },
+            { src: coverSrc, sizes: "512x512", type: "image/png" },
+          ],
+        });
+      } catch (e) {
+        console.warn("Error setting MediaSession metadata:", e);
+      }
+    }
+
+    try {
+      navigator.mediaSession.setActionHandler("play", () => {
+        if (!isPlaying) handleTogglePlay();
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        if (isPlaying) handleTogglePlay();
+      });
+      navigator.mediaSession.setActionHandler("previoustrack", () => {
+        handlePrev();
+      });
+      navigator.mediaSession.setActionHandler("nexttrack", () => {
+        handleNext();
+      });
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        if (details.seekTime !== undefined && details.seekTime !== null) {
+          handleSeek(details.seekTime);
+        }
+      });
+      navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+        const offset = details.seekOffset || 10;
+        const cur = audioRef.current?.currentTime || 0;
+        handleSeek(Math.max(0, cur - offset));
+      });
+      navigator.mediaSession.setActionHandler("seekforward", (details) => {
+        const offset = details.seekOffset || 10;
+        const cur = audioRef.current?.currentTime || 0;
+        const dur = audioRef.current?.duration || duration || 0;
+        handleSeek(Math.min(dur, cur + offset));
+      });
+    } catch (err) {
+      console.warn("Error setting MediaSession action handlers:", err);
+    }
+  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.coverUrl, isPlaying, duration]);
+
+  // Sincronizar estado de reproducción y barra de progreso en MediaSession
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+
+    try {
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+
+      if ("setPositionState" in navigator.mediaSession && duration > 0 && !isNaN(duration) && isFinite(duration)) {
+        navigator.mediaSession.setPositionState({
+          duration: Math.max(0, duration),
+          playbackRate: audioRef.current?.playbackRate || 1,
+          position: Math.min(Math.max(0, currentTime), duration),
+        });
+      }
+    } catch (e) {
+      // Ignorar advertencias menores en navegadores que limitan frecuencia de actualización
+    }
+  }, [isPlaying, currentTime, duration]);
 
   // Volume
   const handleVolumeChange = (vol: number) => {
@@ -636,15 +752,18 @@ export default function App() {
         onOpenTheme={() => setIsThemeOpen(true)}
         onOpenHiddenTracks={() => setIsHiddenTracksOpen(true)}
         hiddenCount={hiddenTracks.length}
-        trackCount={tracks.length}
+        trackCount={visibleTracks.length}
         isMiniMode={isMiniMode}
         onToggleMiniMode={() => setIsMiniMode((prev) => !prev)}
+        filterShortAudios={filterShortAudios}
+        onToggleFilterShortAudios={handleToggleFilterShortAudios}
+        onOpenInstallModal={() => setIsInstallModalOpen(true)}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
         <LibraryView
-          tracks={tracks}
+          tracks={visibleTracks}
           currentTrackId={currentTrack?.id}
           isPlaying={isPlaying}
           onPlayTrack={handlePlayTrack}
@@ -659,6 +778,7 @@ export default function App() {
           onDeleteTracks={handleDeleteTracks}
           searchQuery={searchQuery}
           isFavoritesView={activeTab === "favorites"}
+          onOpenID3Editor={(track) => setEditingTrack(track)}
         />
       </main>
 
@@ -723,7 +843,7 @@ export default function App() {
         isOpen={isExpandedPlayerOpen}
         onClose={() => setIsExpandedPlayerOpen(false)}
         currentTrack={currentTrack}
-        queue={tracks}
+        queue={visibleTracks}
         currentTrackIndex={currentTrackIndex}
         isPlaying={isPlaying}
         currentTime={currentTime}
@@ -742,6 +862,7 @@ export default function App() {
         onHideTrack={handleHideTrack}
         onDeleteTracks={handleDeleteTracks}
         activeSubTab={expandedSubTab}
+        onOpenID3Editor={(track) => setEditingTrack(track)}
       />
 
       {/* Floating Action Toast Notification */}
@@ -793,11 +914,14 @@ export default function App() {
         onUnhideAll={handleUnhideAll}
       />
 
-      {/* Download from URL Modal */}
+      {/* Download / Cobalt Tools Integration Modal */}
       <DownloadModal
         isOpen={isDownloadModalOpen}
         onClose={() => setIsDownloadModalOpen(false)}
         onTrackDownloaded={handleTrackDownloaded}
+        onTracksImported={handleTracksImported}
+        existingTracks={tracks}
+        filterShortAudios={filterShortAudios}
       />
 
       {/* Hidden File and Folder Inputs for '+' menu */}
@@ -825,6 +949,14 @@ export default function App() {
         isOpen={isInstallModalOpen}
         onClose={() => setIsInstallModalOpen(false)}
         deferredPrompt={deferredPrompt}
+      />
+
+      {/* ID3 Tag & Metadata Editor Modal */}
+      <ID3EditorModal
+        isOpen={Boolean(editingTrack)}
+        track={editingTrack}
+        onClose={() => setEditingTrack(null)}
+        onSave={handleSaveEditedTrack}
       />
     </div>
   );

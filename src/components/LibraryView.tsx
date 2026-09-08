@@ -47,6 +47,7 @@ interface LibraryViewProps {
   onOpenHiddenTracks?: () => void;
   hiddenCount?: number;
   onDeleteTracks?: (trackIds: string[]) => void;
+  onOpenID3Editor?: (track: Track) => void;
   searchQuery?: string;
   isFavoritesView?: boolean;
 }
@@ -72,6 +73,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   onOpenHiddenTracks,
   hiddenCount,
   onDeleteTracks,
+  onOpenID3Editor,
   searchQuery = "",
   isFavoritesView = false,
 }) => {
@@ -83,27 +85,29 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
 
-  // Menú flotante discreto de añadir música (+)
-  const [showAddMenu, setShowAddMenu] = useState(false);
-
-  React.useEffect(() => {
-    if (!showAddMenu) return;
-    const handleOutsideClick = () => setShowAddMenu(false);
-    window.addEventListener("click", handleOutsideClick);
-    return () => window.removeEventListener("click", handleOutsideClick);
-  }, [showAddMenu]);
-
-  // Filtrar según búsqueda global
+  // Filtrar según búsqueda inteligente y profunda (Título, Artista ID3, Álbum, Nombre de archivo .mp3 y Carpetas)
   const filteredTracks = useMemo(() => {
     if (!searchQuery.trim()) return tracks;
     const q = searchQuery.toLowerCase().trim();
-    return tracks.filter(
-      (t) =>
-        t.title.toLowerCase().includes(q) ||
-        t.artist.toLowerCase().includes(q) ||
-        (t.album && t.album.toLowerCase().includes(q)) ||
-        (t.folderPath && t.folderPath.toLowerCase().includes(q))
-    );
+    const terms = q.split(/\s+/).filter(Boolean);
+
+    return tracks.filter((t) => {
+      const title = (t.title || "").toLowerCase();
+      const artist = (t.artist || "").toLowerCase();
+      const album = (t.album || "").toLowerCase();
+      const fileName = (t.fileName || t.file?.name || (t.url ? t.url.split("/").pop() : "") || "").toLowerCase();
+      const folder = (t.folderPath || "").toLowerCase();
+
+      // Debe coincidir cada término de búsqueda simultáneamente en cualquiera de las propiedades ID3 / archivo
+      return terms.every(
+        (term) =>
+          title.includes(term) ||
+          artist.includes(term) ||
+          album.includes(term) ||
+          fileName.includes(term) ||
+          folder.includes(term)
+      );
+    });
   }, [tracks, searchQuery]);
 
   // 1. Agrupación por Artista
@@ -208,7 +212,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   return (
     <div className="flex flex-col gap-6 pb-12 animate-in fade-in duration-200">
-      {/* Encabezado Principal y Acciones Discretas */}
+      {/* Encabezado Principal */}
       <div
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b"
         style={{ borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))" }}
@@ -228,85 +232,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             {tracks.length} {tracks.length === 1 ? "canción" : "canciones"} · {artistsMap.length} artistas ·{" "}
             {albumsMap.length} álbumes
           </p>
-        </div>
-
-        {/* Botón discreto único de '+' para añadir/importar/descargar música */}
-        <div className="relative">
-          <button
-            id="library-add-menu-btn"
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowAddMenu((prev) => !prev);
-            }}
-            title="Añadir música"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold text-white shadow-md transition-all hover:scale-105 active:scale-95 cursor-pointer"
-            style={{
-              backgroundColor: "var(--color-accent, #7C3AED)",
-            }}
-          >
-            <Plus className="w-4 h-4" />
-            <span>Añadir</span>
-          </button>
-
-          {showAddMenu && (
-            <div
-              id="library-add-dropdown"
-              onClick={(e) => e.stopPropagation()}
-              className="absolute right-0 top-full mt-2 w-56 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
-              style={{
-                backgroundColor: "var(--color-surface-elevated, #1c1c1c)",
-                borderColor: "var(--color-border-subtle, rgba(255,255,255,0.12))",
-              }}
-            >
-              <button
-                id="menu-import-local-btn"
-                onClick={() => {
-                  setShowAddMenu(false);
-                  onOpenScanner();
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
-              >
-                <FolderOpen className="w-4 h-4 text-violet-400" />
-                <div className="flex flex-col">
-                  <span>Importar Música Local</span>
-                  <span className="text-[10px] opacity-60">Escanear archivos de audio</span>
-                </div>
-              </button>
-
-              <button
-                id="menu-download-url-btn"
-                onClick={() => {
-                  setShowAddMenu(false);
-                  onOpenDownloadModal();
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
-              >
-                <DownloadCloud className="w-4 h-4 text-purple-400" />
-                <div className="flex flex-col">
-                  <span>Descargar desde URL</span>
-                  <span className="text-[10px] opacity-60">YouTube, SoundCloud o enlace</span>
-                </div>
-              </button>
-
-              {onLoadDemos && (
-                <button
-                  id="menu-load-demos-btn"
-                  onClick={() => {
-                    setShowAddMenu(false);
-                    onLoadDemos();
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-neutral-300 hover:text-white"
-                >
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  <div className="flex flex-col">
-                    <span>Cargar Pistas Demo</span>
-                    <span className="text-[10px] opacity-60">Música libre de muestra</span>
-                  </div>
-                </button>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
@@ -366,26 +291,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           </button>
         </div>
       )}
-
-      {/* Floating Action Button (FAB) discreto en la esquina inferior */}
-      <div className="fixed bottom-24 right-5 sm:right-8 z-30">
-        <button
-          id="floating-add-btn"
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowAddMenu((prev) => !prev);
-          }}
-          title="Añadir música a Sonora"
-          className="w-12 h-12 rounded-full flex items-center justify-center text-white shadow-2xl hover:scale-110 active:scale-95 transition-all cursor-pointer border border-white/10"
-          style={{
-            backgroundColor: "var(--color-accent, #7C3AED)",
-            boxShadow: "0 8px 24px rgba(124, 58, 237, 0.45)",
-          }}
-        >
-          <Plus className="w-6 h-6 stroke-[2.5]" />
-        </button>
-      </div>
 
       {/* Vista en detalle cuando se hace clic en un Artista, Álbum o Carpeta */}
       {(selectedArtist || selectedAlbum || selectedFolder) && (
@@ -461,6 +366,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             onOpenHiddenTracks={onOpenHiddenTracks}
             hiddenCount={hiddenCount}
             onDeleteTracks={onDeleteTracks}
+            onOpenID3Editor={onOpenID3Editor}
           />
         </div>
       )}
@@ -482,6 +388,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           onOpenHiddenTracks={onOpenHiddenTracks}
           hiddenCount={hiddenCount}
           onDeleteTracks={onDeleteTracks}
+          onOpenID3Editor={onOpenID3Editor}
         />
       )}
 

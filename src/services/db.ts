@@ -4,7 +4,7 @@
  * ============================================================================
  */
 
-import { Track, Playlist, HiddenTrackRecord } from "../types";
+import { Track, HiddenTrackRecord } from "../types";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
 const DB_VERSION = 1;
@@ -85,12 +85,26 @@ export function clearAllHiddenTracks(): void {
 }
 
 /**
- * Comprueba si una pista está en la lista de ocultas
+ * Comprueba si una pista está en la lista de ocultas (acepta objeto Track o título/artista/archivo)
  */
-export function isTrackHidden(title: string, artist: string, fileName?: string): boolean {
+export function isTrackHidden(trackOrTitle: Track | string, artist?: string, fileName?: string): boolean {
   try {
     const list = getHiddenTracks();
-    const cleanT = (title || "").toLowerCase().trim();
+    if (typeof trackOrTitle === "object" && trackOrTitle !== null) {
+      const track = trackOrTitle as Track;
+      const cleanT = (track.title || "").toLowerCase().trim();
+      const cleanA = (track.artist || "").toLowerCase().trim();
+      const cleanF = (track.fileName || track.file?.name || "").toLowerCase().trim();
+      return list.some((h) => {
+        if (h.id === track.id) return true;
+        if (cleanF && h.fileName && h.fileName.toLowerCase().trim() === cleanF) return true;
+        if (cleanT && h.title.toLowerCase().trim() === cleanT && cleanA && h.artist.toLowerCase().trim() === cleanA) return true;
+        return false;
+      });
+    }
+
+    const titleStr = typeof trackOrTitle === "string" ? trackOrTitle : "";
+    const cleanT = (titleStr || "").toLowerCase().trim();
     const cleanA = (artist || "").toLowerCase().trim();
     const cleanF = (fileName || "").toLowerCase().trim();
 
@@ -316,5 +330,11 @@ export async function clearTracksDB(): Promise<void> {
   } catch (e) {
     console.warn("Error clearing tracks db:", e);
   }
-      }
-        
+}
+
+/**
+ * Actualiza las etiquetas o metadatos de una pista existente en IndexedDB
+ */
+export async function updateTrackInDb(track: Track): Promise<void> {
+  return saveTracksToDB([track]);
+}

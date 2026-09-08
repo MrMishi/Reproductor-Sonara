@@ -1,27 +1,31 @@
 import { EqualizerBand, EqualizerPreset } from "../types";
 
 export const DEFAULT_BANDS: EqualizerBand[] = [
-  { frequency: 60, gain: 0, type: "lowshelf", label: "60 Hz" },
-  { frequency: 170, gain: 0, type: "peaking", label: "170 Hz" },
-  { frequency: 420, gain: 0, type: "peaking", label: "420 Hz" },
+  { frequency: 31, gain: 0, type: "lowshelf", label: "31 Hz" },
+  { frequency: 62, gain: 0, type: "peaking", label: "62 Hz" },
+  { frequency: 125, gain: 0, type: "peaking", label: "125 Hz" },
+  { frequency: 250, gain: 0, type: "peaking", label: "250 Hz" },
+  { frequency: 500, gain: 0, type: "peaking", label: "500 Hz" },
   { frequency: 1000, gain: 0, type: "peaking", label: "1 kHz" },
-  { frequency: 2500, gain: 0, type: "peaking", label: "2.5 kHz" },
-  { frequency: 6000, gain: 0, type: "peaking", label: "6 kHz" },
-  { frequency: 14000, gain: 0, type: "highshelf", label: "14 kHz" },
+  { frequency: 2000, gain: 0, type: "peaking", label: "2 kHz" },
+  { frequency: 4000, gain: 0, type: "peaking", label: "4 kHz" },
+  { frequency: 8000, gain: 0, type: "peaking", label: "8 kHz" },
+  { frequency: 16000, gain: 0, type: "highshelf", label: "16 kHz" },
 ];
 
 export const EQUALIZER_PRESETS: EqualizerPreset[] = [
-  { id: "flat", name: "Plano (Por defecto)", gains: [0, 0, 0, 0, 0, 0, 0], bassBoost: 0 },
-  { id: "bass-boost", name: "Refuerzo de graves", gains: [7, 5, 2, 0, 0, 0, -1], bassBoost: 6 },
-  { id: "rock", name: "Rock & Metal", gains: [4, 2, -1, 0, 2, 4, 5], bassBoost: 2 },
-  { id: "pop", name: "Pop", gains: [-1, 2, 4, 3, 2, 1, 2], bassBoost: 1 },
-  { id: "electronic", name: "Electrónica / EDM", gains: [6, 5, 1, 0, 2, 5, 6], bassBoost: 4 },
-  { id: "hiphop", name: "Hip-Hop / Trap", gains: [6, 4, 0, 1, -1, 2, 3], bassBoost: 5 },
-  { id: "jazz", name: "Jazz & Blues", gains: [3, 2, -1, 1, 2, 3, 4], bassBoost: 0 },
-  { id: "acoustic", name: "Acústico", gains: [3, 2, 1, 2, 3, 4, 3], bassBoost: 0 },
-  { id: "vocal", name: "Claridad vocal", gains: [-3, -1, 1, 4, 5, 3, 1], bassBoost: 0 },
-  { id: "classical", name: "Clásica", gains: [4, 3, 2, 1, -1, 2, 4], bassBoost: 0 },
-  { id: "custom", name: "Personalizado", gains: [0, 0, 0, 0, 0, 0, 0], bassBoost: 0 },
+  { id: "flat", name: "Plano (Por defecto)", gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bassBoost: 0 },
+  { id: "bass-boost", name: "Refuerzo de graves (Bass Boost)", gains: [8, 7, 5, 2, 0, 0, 0, 0, -1, -2], bassBoost: 6 },
+  { id: "treble-boost", name: "Refuerzo de agudos", gains: [-2, -1, 0, 0, 1, 2, 4, 6, 8, 9], bassBoost: 0 },
+  { id: "rock", name: "Rock & Metal", gains: [5, 4, 2, -1, -2, 0, 2, 4, 5, 6], bassBoost: 2 },
+  { id: "pop", name: "Pop", gains: [-1, 1, 3, 4, 3, 1, 1, 2, 3, 3], bassBoost: 1 },
+  { id: "electronic", name: "Electrónica / EDM", gains: [6, 6, 4, 1, 0, 1, 3, 5, 6, 7], bassBoost: 4 },
+  { id: "hiphop", name: "Hip-Hop / Trap", gains: [7, 6, 4, 1, 0, -1, 1, 3, 4, 4], bassBoost: 5 },
+  { id: "jazz", name: "Jazz & Blues", gains: [3, 2, 1, 1, -1, 1, 2, 3, 4, 4], bassBoost: 0 },
+  { id: "acoustic", name: "Acústico", gains: [4, 3, 2, 1, 2, 3, 3, 4, 4, 3], bassBoost: 0 },
+  { id: "vocal", name: "Claridad vocal", gains: [-3, -2, 0, 2, 4, 5, 4, 2, 1, 0], bassBoost: 0 },
+  { id: "classical", name: "Clásica", gains: [5, 4, 3, 2, 0, 1, 2, 3, 4, 5], bassBoost: 0 },
+  { id: "custom", name: "Personalizado", gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bassBoost: 0 },
 ];
 
 class AudioEngine {
@@ -34,7 +38,7 @@ class AudioEngine {
   private connectedElement: HTMLAudioElement | null = null;
   private isInitialized = false;
 
-  private currentGains: number[] = [0, 0, 0, 0, 0, 0, 0];
+  private currentGains: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   private currentBassBoost: number = 0;
   private currentPreamp: number = 0;
   private currentPresetId: string = "flat";

@@ -26,11 +26,14 @@ import {
   Filter,
   EyeOff,
   VolumeX,
+  Smartphone,
 } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
 import { Track } from "../types";
 import { parseAudioFile } from "../services/metadataParser";
 import { getInitialDemoTracks } from "../services/demoTracks";
 import { isTrackHidden, getHiddenTracks } from "../services/db";
+import { scanNativeMusicDirectories } from "../services/nativeScanner";
 
 interface DeviceScannerModalProps {
   isOpen: boolean;
@@ -455,6 +458,69 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
     }
   };
 
+  /**
+   * Escaneo nativo automático en directorios estándar de Android (@capacitor/filesystem)
+   * Inspecciona /Music, /Download y /WhatsApp Audio
+   */
+  const handleScanNativeAndroidFolders = async () => {
+    isCancelledRef.current = false;
+    setIsScanning(true);
+    setStatusType("info");
+    setProgressStatus("Iniciando escaneo automático en /Music, /Download y /WhatsApp Audio...");
+    setDiscoveredCount(0);
+    setProcessedCount(0);
+
+    const isNative = Capacitor.isNativePlatform();
+    if (!isNative) {
+      setProgressStatus("El escaneo nativo directo se ejecuta en Android con Capacitor. Abriendo selector de carpetas...");
+      setTimeout(() => {
+        handleScanDeviceDirectory();
+      }, 600);
+      return;
+    }
+
+    try {
+      const result = await scanNativeMusicDirectories(
+        (folder, found, processed, msg) => {
+          if (isCancelledRef.current) return;
+          setProgressStatus(`[${folder}] ${msg}`);
+          setDiscoveredCount(found);
+          setProcessedCount(processed);
+        },
+        filterShortAudios
+      );
+
+      if (isCancelledRef.current) {
+        setStatusType("cancelled");
+        setProgressStatus("Escaneo cancelado por el usuario.");
+        setIsScanning(false);
+        return;
+      }
+
+      if (result.tracks.length > 0) {
+        setStatusType("success");
+        setProgressStatus(`¡Se importaron ${result.tracks.length} canciones exitosamente!`);
+        onTracksImported(result.tracks);
+        setTimeout(() => {
+          onClose();
+        }, 1200);
+      } else {
+        setStatusType("error");
+        setProgressStatus(
+          result.errors.length > 0
+            ? `No se detectaron pistas de audio (${result.errors[0]}). Puedes seleccionar tu carpeta manualmente.`
+            : "No se encontraron canciones en /Music, /Download ni /WhatsApp Audio. Selecciona una carpeta manualmente."
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusType("error");
+      setProgressStatus(`Error en escaneo nativo: ${msg}`);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   return (
     <div
       id="device-scanner-modal-backdrop"
@@ -608,6 +674,27 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
             Importar Música Local
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Escaneo Automático Android Nativo */}
+            <button
+              id="scan-native-directories-btn"
+              disabled={isScanning}
+              onClick={handleScanNativeAndroidFolders}
+              className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-emerald-500/10 transition-all disabled:opacity-50 cursor-pointer group col-span-1 sm:col-span-2 bg-emerald-500/5 border-emerald-500/20"
+            >
+              <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 group-hover:scale-105 transition-transform shrink-0">
+                <Smartphone className="w-4 h-4" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold block text-white">Escaneo Automático Android</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold">
+                    Capacitor Native
+                  </span>
+                </div>
+                <span className="text-[11px] opacity-70">Detecta /Music, /Download y /WhatsApp Audio</span>
+              </div>
+            </button>
+
             <button
               id="select-audio-files-btn"
               disabled={isScanning}

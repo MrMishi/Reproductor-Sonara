@@ -25,6 +25,8 @@ import {
   FileAudio,
   FolderPlus,
   DownloadCloud,
+  Check,
+  Filter,
 } from "lucide-react";
 import { ActiveTab } from "../types";
 import { SonoraLogo } from "./SonoraLogo";
@@ -45,6 +47,9 @@ interface NavbarProps {
   trackCount: number;
   isMiniMode?: boolean;
   onToggleMiniMode?: () => void;
+  filterShortAudios?: boolean;
+  onToggleFilterShortAudios?: (enabled: boolean) => void;
+  onOpenInstallModal?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -63,6 +68,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   trackCount,
   isMiniMode,
   onToggleMiniMode,
+  filterShortAudios = true,
+  onToggleFilterShortAudios,
+  onOpenInstallModal,
 }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
@@ -243,40 +251,36 @@ export const Navbar: React.FC<NavbarProps> = ({
             {isSettingsOpen && (
               <div
                 id="navbar-settings-dropdown"
-                className="absolute right-0 mt-2 w-64 rounded-2xl p-2 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-150"
+                className="absolute right-0 mt-2 w-72 rounded-2xl p-2 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-150"
                 style={{
                   backgroundColor: "var(--color-surface, #181818)",
                   borderColor: "var(--color-border-subtle, rgba(255,255,255,0.15))",
                   boxShadow: "0 20px 45px rgba(0, 0, 0, 0.65)",
                 }}
               >
-                <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider opacity-50 select-none">
-                  Ajustes y Música
+                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider opacity-50 select-none">
+                  Gestión de Biblioteca
                 </div>
 
-                {/* Importar Local */}
+                {/* Agregar manualmente (+) */}
                 <button
-                  id="settings-import-local-btn"
+                  id="settings-add-manually-btn"
                   onClick={() => {
                     setIsSettingsOpen(false);
-                    if (onOpenScanner) {
-                      onOpenScanner();
-                    } else if (onOpenAddFiles) {
-                      onOpenAddFiles();
-                    }
+                    onOpenAddFiles();
                   }}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
                 >
-                  <div className="p-2 rounded-lg bg-cyan-500/15 text-cyan-400 group-hover:bg-cyan-500/25 transition-colors">
-                    <FolderPlus className="w-4 h-4" />
+                  <div className="p-2 rounded-lg bg-purple-500/15 text-purple-400 group-hover:bg-purple-500/25 transition-colors">
+                    <Plus className="w-4 h-4" />
                   </div>
                   <div className="flex-1">
-                    <div className="text-white font-medium text-xs">Importar Música Local</div>
-                    <div className="text-[10px] opacity-60">Archivos o carpetas de audio</div>
+                    <div className="text-white font-medium text-xs">Agregar manualmente (+)</div>
+                    <div className="text-[10px] opacity-60">Seleccionar archivos o carpeta local</div>
                   </div>
                 </button>
 
-                {/* Descargar URL */}
+                {/* Descargar Música */}
                 <button
                   id="settings-download-url-btn"
                   onClick={() => {
@@ -285,16 +289,86 @@ export const Navbar: React.FC<NavbarProps> = ({
                   }}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
                 >
-                  <div className="p-2 rounded-lg bg-purple-500/15 text-purple-400 group-hover:bg-purple-500/25 transition-colors">
+                  <div className="p-2 rounded-lg bg-cyan-500/15 text-cyan-400 group-hover:bg-cyan-500/25 transition-colors">
                     <DownloadCloud className="w-4 h-4" />
                   </div>
                   <div className="flex-1">
-                    <div className="text-white font-medium text-xs">Descargar desde URL</div>
-                    <div className="text-[10px] opacity-60">Cobalt / Enlace web</div>
+                    <div className="text-white font-medium text-xs">Descargar música</div>
+                    <div className="text-[10px] opacity-60">Cobalt.tools / Guardar en /Download</div>
                   </div>
                 </button>
 
+                {/* Escaneo Nativo Automático */}
+                {onOpenScanner && (
+                  <button
+                    id="settings-native-scanner-btn"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onOpenScanner();
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
+                  >
+                    <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover:bg-emerald-500/25 transition-colors">
+                      <FolderPlus className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-white font-medium text-xs">Escanear dispositivo</div>
+                      <div className="text-[10px] opacity-60">/Music, /Download, /WhatsApp</div>
+                    </div>
+                  </button>
+                )}
+
+                {/* Toggle Filtrar Audios Cortos (< 30 segundos) */}
+                <div className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0 pr-2">
+                    <div className="p-2 rounded-lg bg-amber-500/15 text-amber-400 shrink-0">
+                      <Filter className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-white font-medium text-xs truncate">Filtrar audios cortos</div>
+                      <div className="text-[10px] opacity-60 truncate">Ocultar notas de voz (&lt; 30s)</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    id="settings-filter-short-toggle-btn"
+                    onClick={() => onToggleFilterShortAudios?.(!filterShortAudios)}
+                    className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 cursor-pointer ${
+                      filterShortAudios ? "bg-purple-600" : "bg-neutral-700"
+                    }`}
+                    title={filterShortAudios ? "Filtro activo: audios < 30s ocultos" : "Filtro inactivo"}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                        filterShortAudios ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
                 <div className="my-1 border-t border-white/10" />
+
+                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider opacity-50 select-none">
+                  Audio y Apariencia
+                </div>
+
+                {/* Botón Ecualizador 10 bandas */}
+                <button
+                  id="settings-equalizer-btn"
+                  onClick={() => {
+                    setIsSettingsOpen(false);
+                    onOpenEqualizer();
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
+                >
+                  <div className="p-2 rounded-lg bg-amber-500/15 text-amber-400 group-hover:bg-amber-500/25 transition-colors">
+                    <Sliders className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-white font-medium text-xs">Ecualizador (10 Bandas)</div>
+                    <div className="text-[10px] opacity-60">Presets y refuerzo de graves</div>
+                  </div>
+                </button>
 
                 {/* Botón Tema */}
                 <button
@@ -303,32 +377,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setIsSettingsOpen(false);
                     onOpenTheme();
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
                 >
-                  <div className="p-2 rounded-lg bg-purple-500/15 text-purple-400 group-hover:bg-purple-500/25 transition-colors">
+                  <div className="p-2 rounded-lg bg-pink-500/15 text-pink-400 group-hover:bg-pink-500/25 transition-colors">
                     <Palette className="w-4 h-4" />
                   </div>
                   <div className="flex-1">
-                    <div className="text-white font-medium text-xs">Tema</div>
-                    <div className="text-[11px] opacity-60">Personalizar colores y estilo visual</div>
-                  </div>
-                </button>
-
-                {/* Botón Ecualizador */}
-                <button
-                  id="settings-equalizer-btn"
-                  onClick={() => {
-                    setIsSettingsOpen(false);
-                    onOpenEqualizer();
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
-                >
-                  <div className="p-2 rounded-lg bg-amber-500/15 text-amber-400 group-hover:bg-amber-500/25 transition-colors">
-                    <Sliders className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-white font-medium text-xs">Ecualizador</div>
-                    <div className="text-[11px] opacity-60">Ajustar ecualización y bandas de audio</div>
+                    <div className="text-white font-medium text-xs">Tema y Estilo</div>
+                    <div className="text-[10px] opacity-60">Personalizar colores y diseño</div>
                   </div>
                 </button>
 
@@ -340,7 +396,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       setIsSettingsOpen(false);
                       onOpenHiddenTracks();
                     }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold hover:bg-red-500/15 transition-colors text-left group cursor-pointer"
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-red-500/15 transition-colors text-left group cursor-pointer"
                   >
                     <div className="p-2 rounded-lg bg-red-500/15 text-red-400 group-hover:bg-red-500/25 transition-colors">
                       <EyeOff className="w-4 h-4" />
@@ -354,7 +410,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] opacity-60">Ver o restaurar pistas ocultas</div>
+                      <div className="text-[10px] opacity-60">Ver o restaurar pistas</div>
                     </div>
                   </button>
                 )}

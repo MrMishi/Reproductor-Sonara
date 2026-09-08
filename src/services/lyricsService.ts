@@ -16,6 +16,17 @@
 
 import { SyncedLyricLine } from "../types";
 
+export interface LrclibSearchItem {
+  id?: number;
+  trackName?: string;
+  artistName?: string;
+  albumName?: string;
+  duration?: number;
+  instrumental?: boolean;
+  plainLyrics?: string;
+  syncedLyrics?: string;
+}
+
 export interface LyricsResult {
   source: string;
   track: string;
@@ -94,11 +105,32 @@ export function parseLrc(lrcText: string): SyncedLyricLine[] {
   const normalized = typeof lrcText === "string" ? lrcText.normalize("NFC") : "";
   const lines = normalized.split(/\r?\n/);
   const result: SyncedLyricLine[] = [];
-  const tagRegex = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+
+  // Detectar desplazamiento global de tiempo [offset:+/-ms]
+  let globalOffsetSeconds = 0;
+  const offsetRegex = /\[offset:\s*([+-]?\d+)\s*\]/i;
+  for (const line of lines) {
+    const offsetMatch = line.match(offsetRegex);
+    if (offsetMatch) {
+      const offsetMs = parseInt(offsetMatch[1], 10);
+      if (!isNaN(offsetMs)) {
+        globalOffsetSeconds = offsetMs / 1000;
+      }
+      break;
+    }
+  }
+
+  // Regex flexible para timestamps: [mm:ss], [mm:ss.xx], [mm:ss.xxx], [mm:ss:xx], [mm:ss:xxx]
+  const tagRegex = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+
+    // Omitir metadatos como [ti:...], [ar:...], [al:...], [offset:...]
+    if (/^\[(ti|ar|al|by|offset|length|re|ve):/i.test(trimmed)) {
+      continue;
+    }
 
     // Extraer todas las marcas de tiempo presentes en el verso
     const matches = Array.from(trimmed.matchAll(tagRegex));
@@ -109,9 +141,22 @@ export function parseLrc(lrcText: string): SyncedLyricLine[] {
       for (const match of matches) {
         const min = parseInt(match[1], 10);
         const sec = parseInt(match[2], 10);
-        const msStr = match[3] || "0";
-        const ms = msStr.length === 3 ? parseInt(msStr, 10) : parseInt(msStr.padEnd(3, "0"), 10);
-        const totalSec = min * 60 + sec + ms / 1000;
+        const fracStr = match[3];
+        let fracSeconds = 0;
+
+        if (fracStr) {
+          if (fracStr.length === 1) {
+            fracSeconds = parseInt(fracStr, 10) / 10;
+          } else if (fracStr.length === 2) {
+            // Centésimas de segundo estándar (ej: .45 = 0.45s)
+            fracSeconds = parseInt(fracStr, 10) / 100;
+          } else {
+            // Milisegundos (ej: .456 = 0.456s)
+            fracSeconds = parseInt(fracStr, 10) / 1000;
+          }
+        }
+
+        const totalSec = Math.max(0, min * 60 + sec + fracSeconds + globalOffsetSeconds);
 
         result.push({
           time: totalSec,
@@ -178,10 +223,10 @@ export async function searchLyricsOnline(
     }).catch(() => null);
 
     if (lrcDirectRes && lrcDirectRes.ok) {
-      const results = await lrcDirectRes.json().catch(() => null);
+      const results: LrclibSearchItem[] = await lrcDirectRes.json().catch(() => []);
       if (Array.isArray(results) && results.length > 0) {
         // Priorizar el resultado que tenga letras sincronizadas (.lrc)
-        const best = results.find((item: any) => item.syncedLyrics) || results[0];
+        const best = results.find((item: LrclibSearchItem) => item.syncedLyrics) || results[0];
         if (best && (best.syncedLyrics || best.plainLyrics)) {
           const rawLrc = best.syncedLyrics || null;
           const parsed = rawLrc ? parseLrc(rawLrc) : null;
@@ -198,8 +243,9 @@ export async function searchLyricsOnline(
         }
       }
     }
-  } catch (directErr) {
-    console.warn("Aviso en búsqueda directa de LRCLIB:", directErr);
+  } catch (directErr: unknown) {
+    const errLog = directErr instanceof Error ? directErr.message : String(directErr);
+    console.warn("Aviso en búsqueda directa de LRCLIB:", errLog);
   }
 
   // 2. Respaldo a través del servidor API (/api/lyrics/search)
@@ -236,8 +282,9 @@ export async function searchLyricsOnline(
       instrumental: data.instrumental || false,
       message: data.message,
     };
-  } catch (error: any) {
-    console.warn("Aviso: Error en búsqueda de letras:", error?.message || error);
+  } catch (error: unknown) {
+    const errLog = error instanceof Error ? error.message : String(error);
+    console.warn("Aviso: Error en búsqueda de letras:", errLog);
     return {
       source: "error",
       track: cleanTrack,

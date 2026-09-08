@@ -24,6 +24,7 @@ import {
   Volume2,
   Languages,
   Sparkles,
+  Tag,
 } from "lucide-react";
 import { Track, PlaybackMode } from "../types";
 import { getActiveLyricIndex, hasJapaneseText } from "../services/lyricsService";
@@ -51,6 +52,7 @@ export interface ExpandedPlayerProps {
   onToggleMiniMode?: () => void;
   onHideTrack?: (track: Track) => void;
   onDeleteTracks?: (trackIds: string[]) => void;
+  onOpenID3Editor?: (track: Track) => void;
   activeSubTab?: "cover" | "queue" | "lyrics" | "details";
 }
 
@@ -83,12 +85,13 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   onToggleMiniMode,
   onHideTrack,
   onDeleteTracks,
+  onOpenID3Editor,
   activeSubTab = "cover",
 }) => {
   const [activeTab, setActiveTab] = useState<"cover" | "queue" | "lyrics" | "details">(
     activeSubTab || "cover"
   );
-  const [visualMode, setVisualMode] = useState<"cover" | "spectrum">("cover");
+  const [visualMode, setVisualMode] = useState<"cover" | "bars" | "wave" | "circle">("cover");
 
   // Dynamic Lyrics Sheet Expansion: 'full' (fullscreen lyrics) or 'compact' (split with mini cover banner)
   const [lyricsExpansion, setLyricsExpansion] = useState<"full" | "compact">("full");
@@ -254,7 +257,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   return (
     <div
       id="ytm-expanded-player"
-      className="fixed inset-0 z-50 flex flex-col backdrop-blur-3xl animate-in slide-in-from-bottom-6 duration-300 overflow-hidden select-none"
+      className="fixed inset-0 z-50 flex flex-col backdrop-blur-3xl animate-in slide-in-from-bottom duration-300 ease-out overflow-hidden select-none"
       style={{
         backgroundColor: "var(--color-bg, #030303)",
         color: "var(--color-text-primary, #ffffff)",
@@ -416,8 +419,8 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                   }`}
                 />
               ) : (
-                <div className="w-full h-full p-8 flex flex-col justify-end bg-gradient-to-b from-black/80 to-black/40 pointer-events-none">
-                  <VisualizerCanvas className="w-full h-48" type="bars" isPlaying={isPlaying} />
+                <div className="w-full h-full p-4 sm:p-6 flex items-center justify-center bg-black/40 pointer-events-none">
+                  <VisualizerCanvas className="w-full h-full" type={visualMode} isPlaying={isPlaying} />
                 </div>
               )}
 
@@ -447,6 +450,53 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                   <span>Anterior</span>
                 </div>
               )}
+            </div>
+
+            {/* Selector de Modo Visual: Carátula | Barras | Ondas | Círculos */}
+            <div
+              className="flex items-center gap-1 p-1 rounded-full border bg-black/30 backdrop-blur-md mb-4 text-[11px]"
+              style={{ borderColor: "var(--color-border-subtle)" }}
+            >
+              <button
+                type="button"
+                id="visual-mode-cover-btn"
+                onClick={() => setVisualMode("cover")}
+                className={`px-3 py-1 rounded-full transition-all font-semibold cursor-pointer ${
+                  visualMode === "cover" ? "bg-white text-black shadow-sm" : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                Carátula
+              </button>
+              <button
+                type="button"
+                id="visual-mode-bars-btn"
+                onClick={() => setVisualMode("bars")}
+                className={`px-3 py-1 rounded-full transition-all font-semibold cursor-pointer ${
+                  visualMode === "bars" ? "bg-white text-black shadow-sm" : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                Barras
+              </button>
+              <button
+                type="button"
+                id="visual-mode-wave-btn"
+                onClick={() => setVisualMode("wave")}
+                className={`px-3 py-1 rounded-full transition-all font-semibold cursor-pointer ${
+                  visualMode === "wave" ? "bg-white text-black shadow-sm" : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                Ondas
+              </button>
+              <button
+                type="button"
+                id="visual-mode-circle-btn"
+                onClick={() => setVisualMode("circle")}
+                className={`px-3 py-1 rounded-full transition-all font-semibold cursor-pointer ${
+                  visualMode === "circle" ? "bg-white text-black shadow-sm" : "text-neutral-400 hover:text-white"
+                }`}
+              >
+                Círculos
+              </button>
             </div>
 
             {/* Track Info & Actions */}
@@ -494,25 +544,14 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                   />
                 </button>
 
-                {onHideTrack && (
+                {onOpenID3Editor && (
                   <button
-                    id="expanded-hide-btn"
-                    onClick={() => onHideTrack(currentTrack)}
+                    id="expanded-edit-id3-btn"
+                    onClick={() => onOpenID3Editor(currentTrack)}
                     className="p-3 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-transform active:scale-90"
-                    title="Ocultar canción permanentemente"
+                    title="Editar etiquetas ID3 y carátula"
                   >
-                    <EyeOff className="w-5 h-5" />
-                  </button>
-                )}
-
-                {onDeleteTracks && (
-                  <button
-                    id="expanded-delete-btn"
-                    onClick={() => onDeleteTracks([currentTrack.id])}
-                    className="p-3 rounded-full hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-transform active:scale-90"
-                    title="Eliminar canción"
-                  >
-                    <Trash2 className="w-5 h-5" />
+                    <Tag className="w-5 h-5 text-purple-400" />
                   </button>
                 )}
               </div>

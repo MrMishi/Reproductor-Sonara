@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import {
   Play,
   Heart,
-  FileText,
   HardDrive,
   Sparkles,
   Clock,
@@ -15,6 +14,7 @@ import {
   Check,
   X,
   MoreVertical,
+  Tag,
 } from "lucide-react";
 import { Track } from "../types";
 
@@ -24,13 +24,14 @@ interface TrackListProps {
   isPlaying: boolean;
   onPlayTrack: (track: Track, index: number) => void;
   onToggleFavorite: (id: string) => void;
-  onOpenLyricsSearchForTrack: (track: Track) => void;
+  onOpenLyricsSearchForTrack?: (track: Track) => void;
   onOpenScanner: () => void;
   onLoadDemos: () => void;
   onHideTrack?: (track: Track) => void;
   onOpenHiddenTracks?: () => void;
   hiddenCount?: number;
   onDeleteTracks?: (trackIds: string[]) => void;
+  onOpenID3Editor?: (track: Track) => void;
 }
 
 function formatDuration(sec: number): string {
@@ -39,6 +40,234 @@ function formatDuration(sec: number): string {
   const s = Math.floor(sec % 60);
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
+
+interface TrackRowProps {
+  track: Track;
+  idx: number;
+  isCurrent: boolean;
+  isPlaying: boolean;
+  isSelected: boolean;
+  isSelectionMode: boolean;
+  isMenuOpen: boolean;
+  onPlay: (track: Track, idx: number) => void;
+  onToggleSelect: (id: string, e?: React.MouseEvent) => void;
+  onToggleFavorite: (id: string) => void;
+  onToggleMenu: (id: string, e: React.MouseEvent) => void;
+  onCloseMenu: () => void;
+  onOpenID3Editor?: (track: Track) => void;
+  onHideTrack?: (track: Track) => void;
+  onStartDelete: (track: Track) => void;
+}
+
+/**
+ * Fila de canción altamente optimizada con React.memo para evitar re-renders innecesarios
+ * en listas grandes de reproducción y garantizar 60 FPS estables en dispositivos móviles.
+ */
+const TrackRow = React.memo<TrackRowProps>(
+  ({
+    track,
+    idx,
+    isCurrent,
+    isPlaying,
+    isSelected,
+    isSelectionMode,
+    isMenuOpen,
+    onPlay,
+    onToggleSelect,
+    onToggleFavorite,
+    onToggleMenu,
+    onCloseMenu,
+    onOpenID3Editor,
+    onHideTrack,
+    onStartDelete,
+  }) => {
+    return (
+      <div
+        id={`track-row-${track.id}`}
+        onClick={(e) => {
+          if (isSelectionMode) {
+            onToggleSelect(track.id, e);
+          } else {
+            onPlay(track, idx);
+          }
+        }}
+        className={`relative flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4 rounded-2xl cursor-pointer transition-all group select-none ${
+          isSelected
+            ? "bg-violet-950/40 border border-violet-500/30 shadow-sm"
+            : isCurrent
+            ? "bg-white/[0.08] shadow-sm border border-white/10"
+            : "hover:bg-white/[0.04] border border-transparent"
+        }`}
+      >
+        {/* Izquierda: Portada + Selección + Título + Artista */}
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          {isSelectionMode && (
+            <button
+              type="button"
+              onClick={(e) => onToggleSelect(track.id, e)}
+              className="w-5 h-5 rounded-md flex items-center justify-center transition-all shrink-0 cursor-pointer"
+            >
+              {isSelected ? (
+                <div className="w-4 h-4 rounded bg-violet-600 text-white flex items-center justify-center shadow">
+                  <Check className="w-3 h-3 stroke-[3]" />
+                </div>
+              ) : (
+                <div className="w-4 h-4 rounded border border-neutral-500 hover:border-white transition-colors" />
+              )}
+            </button>
+          )}
+
+          {/* Portada pequeña con indicador de reproducción */}
+          <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-neutral-900 border border-white/5 shadow-sm group-hover:shadow-md transition-shadow">
+            <img
+              src={track.coverUrl}
+              alt={track.title}
+              loading="lazy"
+              className="w-full h-full object-cover"
+            />
+            {isCurrent ? (
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                <div
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white font-bold shadow"
+                  style={{ backgroundColor: "var(--color-accent, #7C3AED)" }}
+                >
+                  {isPlaying ? "▶" : "❚❚"}
+                </div>
+              </div>
+            ) : (
+              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                <Play className="w-4 h-4 text-white fill-white ml-0.5" />
+              </div>
+            )}
+          </div>
+
+          {/* Título y Artista */}
+          <div className="min-w-0 flex-1">
+            <p
+              className={`text-sm font-semibold truncate ${
+                isCurrent ? "font-bold" : ""
+              }`}
+              style={{
+                color: isCurrent ? "var(--color-accent, #8B5CF6)" : "var(--color-text-primary, #ffffff)",
+              }}
+            >
+              {track.title}
+            </p>
+            <p
+              className="text-xs truncate opacity-65 mt-0.5"
+              style={{ color: "var(--color-text-secondary, #9ca3af)" }}
+            >
+              {track.artist || "Artista Desconocido"}
+            </p>
+          </div>
+        </div>
+
+        {/* Derecha: Duración + Menú tres puntos (...) */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <span className="text-xs font-mono opacity-50 select-none">
+            {formatDuration(track.duration)}
+          </span>
+
+          {/* Menú tres puntos (...) */}
+          <div className="relative">
+            <button
+              id={`track-menu-btn-${track.id}`}
+              type="button"
+              onClick={(e) => onToggleMenu(track.id, e)}
+              title="Opciones"
+              className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer active:scale-95"
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
+            {isMenuOpen && (
+              <div
+                id={`track-options-menu-${track.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute right-0 top-full mt-1 w-44 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
+                style={{
+                  backgroundColor: "var(--color-surface-elevated, #1c1c1c)",
+                  borderColor: "var(--color-border-subtle, rgba(255,255,255,0.12))",
+                }}
+              >
+                {/* Favorita */}
+                <button
+                  onClick={() => {
+                    onToggleFavorite(track.id);
+                    onCloseMenu();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
+                >
+                  <Heart
+                    className={`w-3.5 h-3.5 ${
+                      track.isFavorite ? "fill-red-500 text-red-500" : "text-neutral-400"
+                    }`}
+                  />
+                  <span>{track.isFavorite ? "Quitar de Favoritas" : "Marcar Favorita"}</span>
+                </button>
+
+                {/* Editar ID3 */}
+                {onOpenID3Editor && (
+                  <button
+                    onClick={() => {
+                      onOpenID3Editor(track);
+                      onCloseMenu();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
+                  >
+                    <Tag className="w-3.5 h-3.5 text-violet-400" />
+                    <span>Editar</span>
+                  </button>
+                )}
+
+                {/* Ocultar */}
+                {onHideTrack && (
+                  <button
+                    onClick={() => {
+                      onHideTrack(track);
+                      onCloseMenu();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-neutral-300 hover:text-white"
+                  >
+                    <EyeOff className="w-3.5 h-3.5 text-neutral-400" />
+                    <span>Ocultar Canción</span>
+                  </button>
+                )}
+
+                {/* Eliminar */}
+                <button
+                  onClick={() => {
+                    onCloseMenu();
+                    onStartDelete(track);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-red-500/20 text-left transition-colors cursor-pointer text-red-400"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Eliminar Canción</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  },
+  (prev, next) => {
+    return (
+      prev.track.id === next.track.id &&
+      prev.track.title === next.track.title &&
+      prev.track.artist === next.track.artist &&
+      prev.track.coverUrl === next.track.coverUrl &&
+      prev.track.isFavorite === next.track.isFavorite &&
+      prev.track.duration === next.track.duration &&
+      prev.isCurrent === next.isCurrent &&
+      prev.isPlaying === next.isPlaying &&
+      prev.isSelected === next.isSelected &&
+      prev.isSelectionMode === next.isSelectionMode &&
+      prev.isMenuOpen === next.isMenuOpen
+    );
+  }
+);
 
 export const TrackList: React.FC<TrackListProps> = ({
   tracks,
@@ -53,6 +282,7 @@ export const TrackList: React.FC<TrackListProps> = ({
   onOpenHiddenTracks,
   hiddenCount,
   onDeleteTracks,
+  onOpenID3Editor,
 }) => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -240,186 +470,31 @@ export const TrackList: React.FC<TrackListProps> = ({
         )
       )}
 
-      {/* Lista de Canciones: Filas Modernas con Bordes Redondeados Suaves */}
+      {/* Lista de Canciones: Filas Modernas y Optimizadas con React.memo */}
       <div className="flex flex-col space-y-1">
-        {tracks.map((track, idx) => {
-          const isCurrent = track.id === currentTrackId;
-          const isSelected = selectedIds.has(track.id);
-
-          return (
-            <div
-              key={track.id}
-              id={`track-row-${track.id}`}
-              onClick={(e) => {
-                if (isSelectionMode) {
-                  handleToggleSelect(track.id, e);
-                } else {
-                  onPlayTrack(track, idx);
-                }
-              }}
-              className={`relative flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4 rounded-2xl cursor-pointer transition-all group select-none ${
-                isSelected
-                  ? "bg-violet-950/40 border border-violet-500/30 shadow-sm"
-                  : isCurrent
-                  ? "bg-white/[0.08] shadow-sm border border-white/10"
-                  : "hover:bg-white/[0.04] border border-transparent"
-              }`}
-            >
-              {/* Izquierda: Portada + Selección + Título + Artista */}
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                {isSelectionMode && (
-                  <button
-                    type="button"
-                    onClick={(e) => handleToggleSelect(track.id, e)}
-                    className="w-5 h-5 rounded-md flex items-center justify-center transition-all shrink-0 cursor-pointer"
-                  >
-                    {isSelected ? (
-                      <div className="w-4 h-4 rounded bg-violet-600 text-white flex items-center justify-center shadow">
-                        <Check className="w-3 h-3 stroke-[3]" />
-                      </div>
-                    ) : (
-                      <div className="w-4 h-4 rounded border border-neutral-500 hover:border-white transition-colors" />
-                    )}
-                  </button>
-                )}
-
-                {/* Portada pequeña con indicador de reproducción */}
-                <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-neutral-900 border border-white/5 shadow-sm group-hover:shadow-md transition-shadow">
-                  <img
-                    src={track.coverUrl}
-                    alt={track.title}
-                    className="w-full h-full object-cover"
-                  />
-                  {isCurrent ? (
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <div
-                        className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white font-bold shadow"
-                        style={{ backgroundColor: "var(--color-accent, #7C3AED)" }}
-                      >
-                        {isPlaying ? "▶" : "❚❚"}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                      <Play className="w-4 h-4 text-white fill-white ml-0.5" />
-                    </div>
-                  )}
-                </div>
-
-                {/* Título y Artista */}
-                <div className="min-w-0 flex-1">
-                  <p
-                    className={`text-sm font-semibold truncate ${
-                      isCurrent ? "font-bold" : ""
-                    }`}
-                    style={{
-                      color: isCurrent ? "var(--color-accent, #8B5CF6)" : "var(--color-text-primary, #ffffff)",
-                    }}
-                  >
-                    {track.title}
-                  </p>
-                  <p
-                    className="text-xs truncate opacity-65 mt-0.5"
-                    style={{ color: "var(--color-text-secondary, #9ca3af)" }}
-                  >
-                    {track.artist || "Artista Desconocido"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Derecha: Duración + Menú tres puntos (...) */}
-              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                <span className="text-xs font-mono opacity-50 select-none">
-                  {formatDuration(track.duration)}
-                </span>
-
-                {/* Menú tres puntos (...) */}
-                <div className="relative">
-                  <button
-                    id={`track-menu-btn-${track.id}`}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpenMenuTrackId((prev) => (prev === track.id ? null : track.id));
-                    }}
-                    title="Opciones"
-                    className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer active:scale-95"
-                  >
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
-
-                  {openMenuTrackId === track.id && (
-                    <div
-                      id={`track-options-menu-${track.id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="absolute right-0 top-full mt-1 w-48 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
-                      style={{
-                        backgroundColor: "var(--color-surface-elevated, #1c1c1c)",
-                        borderColor: "var(--color-border-subtle, rgba(255,255,255,0.12))",
-                      }}
-                    >
-                      {/* Favorita */}
-                      <button
-                        onClick={() => {
-                          onToggleFavorite(track.id);
-                          setOpenMenuTrackId(null);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
-                      >
-                        <Heart
-                          className={`w-3.5 h-3.5 ${
-                            track.isFavorite ? "fill-red-500 text-red-500" : "text-neutral-400"
-                          }`}
-                        />
-                        <span>{track.isFavorite ? "Quitar de Favoritas" : "Marcar Favorita"}</span>
-                      </button>
-
-                      {/* Letras */}
-                      <button
-                        onClick={() => {
-                          onOpenLyricsSearchForTrack(track);
-                          setOpenMenuTrackId(null);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
-                      >
-                        <FileText className="w-3.5 h-3.5 text-purple-400" />
-                        <span>Ver / Buscar Letra</span>
-                      </button>
-
-                      {/* Ocultar */}
-                      {onHideTrack && (
-                        <button
-                          onClick={() => {
-                            onHideTrack(track);
-                            setOpenMenuTrackId(null);
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-neutral-300 hover:text-white"
-                        >
-                          <EyeOff className="w-3.5 h-3.5 text-neutral-400" />
-                          <span>Ocultar Canción</span>
-                        </button>
-                      )}
-
-                      {/* Eliminar */}
-                      {onDeleteTracks && (
-                        <button
-                          onClick={() => {
-                            setOpenMenuTrackId(null);
-                            handleStartDeleteSingle(track);
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-red-500/20 text-left transition-colors cursor-pointer text-red-400"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Eliminar Canción</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {tracks.map((track, idx) => (
+          <TrackRow
+            key={track.id}
+            track={track}
+            idx={idx}
+            isCurrent={track.id === currentTrackId}
+            isPlaying={isPlaying}
+            isSelected={selectedIds.has(track.id)}
+            isSelectionMode={isSelectionMode}
+            isMenuOpen={openMenuTrackId === track.id}
+            onPlay={onPlayTrack}
+            onToggleSelect={handleToggleSelect}
+            onToggleFavorite={onToggleFavorite}
+            onToggleMenu={(id, e) => {
+              e.stopPropagation();
+              setOpenMenuTrackId((prev) => (prev === id ? null : id));
+            }}
+            onCloseMenu={() => setOpenMenuTrackId(null)}
+            onOpenID3Editor={onOpenID3Editor}
+            onHideTrack={onHideTrack}
+            onStartDelete={handleStartDeleteSingle}
+          />
+        ))}
       </div>
 
       {/* Confirmation Modal for Deletion */}

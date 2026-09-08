@@ -79,9 +79,9 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               <Sliders className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold tracking-tight">Ecualizador de Audio</h2>
+              <h2 className="text-xl font-bold tracking-tight">Ecualizador Gráfico (10 Bandas)</h2>
               <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                Ajuste fino de frecuencias y refuerzo de graves en tiempo real
+                Ajuste fino de 10 frecuencias ISO y refuerzo de graves en tiempo real
               </p>
             </div>
           </div>
@@ -169,9 +169,9 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
           </button>
         </div>
 
-        {/* 7 Band Sliders */}
+        {/* 10 Band Sliders */}
         <div
-          className="rounded-2xl p-5 border flex flex-col gap-4"
+          className="rounded-2xl p-4 sm:p-5 border flex flex-col gap-4"
           style={{
             backgroundColor: "var(--color-surface, #141414)",
             borderColor: "var(--color-border-subtle)",
@@ -183,7 +183,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
             <span>-12 dB</span>
           </div>
 
-          <div className="grid grid-cols-7 gap-2 sm:gap-4 items-end justify-items-center py-2 min-h-[190px]">
+          <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5 sm:gap-2 items-end justify-items-center py-2 min-h-[190px]">
             {DEFAULT_BANDS.map((band, idx) => {
               const currentGain = eqState.gains[idx] || 0;
               return (
