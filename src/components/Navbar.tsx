@@ -24,7 +24,6 @@ import {
   Plus,
   FileAudio,
   FolderPlus,
-  DownloadCloud,
   Check,
   Filter,
 } from "lucide-react";
@@ -39,7 +38,6 @@ interface NavbarProps {
   onOpenScanner?: () => void;
   onOpenAddFiles: () => void;
   onOpenAddFolder: () => void;
-  onOpenDownloadModal: () => void;
   onOpenEqualizer: () => void;
   onOpenTheme: () => void;
   onOpenHiddenTracks?: () => void;
@@ -60,7 +58,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenScanner,
   onOpenAddFiles,
   onOpenAddFolder,
-  onOpenDownloadModal,
   onOpenEqualizer,
   onOpenTheme,
   onOpenHiddenTracks,
@@ -277,24 +274,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="flex-1">
                     <div className="text-white font-medium text-xs">Agregar manualmente (+)</div>
                     <div className="text-[10px] opacity-60">Seleccionar archivos o carpeta local</div>
-                  </div>
-                </button>
-
-                {/* Descargar Música */}
-                <button
-                  id="settings-download-url-btn"
-                  onClick={() => {
-                    setIsSettingsOpen(false);
-                    onOpenDownloadModal();
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
-                >
-                  <div className="p-2 rounded-lg bg-cyan-500/15 text-cyan-400 group-hover:bg-cyan-500/25 transition-colors">
-                    <DownloadCloud className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-white font-medium text-xs">Descargar música</div>
-                    <div className="text-[10px] opacity-60">Cobalt.tools / Guardar en /Download</div>
                   </div>
                 </button>
 

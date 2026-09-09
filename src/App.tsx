@@ -5,6 +5,7 @@ import {
   ActiveTab,
   ThemeConfig,
   HiddenTrackRecord,
+  SleepTimerConfig,
 } from "./types";
 import { audioEngine } from "./services/audioEngine";
 import { getInitialDemoTracks } from "./services/demoTracks";
@@ -20,7 +21,9 @@ import { LibraryView } from "./components/LibraryView";
 import { FloatingMiniPlayer } from "./components/FloatingMiniPlayer";
 import { InstallAppModal } from "./components/InstallAppModal";
 import { HiddenTracksModal } from "./components/HiddenTracksModal";
-import { DownloadModal } from "./components/DownloadModal";
+import { SleepTimerModal } from "./components/SleepTimerModal";
+import { Capacitor } from "@capacitor/core";
+import { autoScanStartup } from "./services/nativeScanner";
 import { ID3EditorModal } from "./components/ID3EditorModal";
 import { parseAudioFile } from "./services/metadataParser";
 import { AlertCircle } from "lucide-react";
@@ -70,7 +73,6 @@ export default function App() {
   const [isEqualizerOpen, setIsEqualizerOpen] = useState(false);
   const [isThemeOpen, setIsThemeOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [isExpandedPlayerOpen, setIsExpandedPlayerOpen] = useState(false);
   const [expandedSubTab, setExpandedSubTab] = useState<"cover" | "queue" | "lyrics" | "details">("cover");
   const [lyricsSearchTrack, setLyricsSearchTrack] = useState<Track | null>(null);
@@ -81,6 +83,17 @@ export default function App() {
 
   // ID3 Metadata Editor Modal state
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+
+  // Temporizador de Apagado (Sleep Timer)
+  const [isSleepTimerOpen, setIsSleepTimerOpen] = useState(false);
+  const [sleepTimer, setSleepTimer] = useState<SleepTimerConfig>({
+    isActive: false,
+    mode: "minutes",
+    targetTimestamp: null,
+    remainingSeconds: 0,
+    selectedMinutes: undefined,
+    fadeOut: true,
+  });
 
   // Filtro de audios cortos (< 30 segundos: notas de voz, tonos y audios breves)
   const [filterShortAudios, setFilterShortAudios] = useState<boolean>(() => {
@@ -149,13 +162,41 @@ export default function App() {
 
     async function initLibrary() {
       const savedTracks = await loadTracksFromDB();
+      let currentList = savedTracks;
+
       if (savedTracks.length > 0) {
         setTracks(savedTracks);
       } else {
-        // Load initial synthesized demo tracks so player is immediately functional
-        const demos = await getInitialDemoTracks();
-        setTracks(demos);
-        saveTracksToDB(demos);
+        // En entorno web, cargar pistas de demostración iniciales
+        if (!Capacitor.isNativePlatform()) {
+          const demos = await getInitialDemoTracks();
+          currentList = demos;
+          setTracks(demos);
+          saveTracksToDB(demos);
+        }
+      }
+
+      // ESCANEO AUTOMÁTICO PREDETERMINADO EN ANDROID:
+      // Al iniciar la app, solicita permisos de almacenamiento ('@capacitor/filesystem')
+      // y escanea automáticamente la carpeta '/Music' (y '/Download').
+      // Agrega de forma automática las pistas encontradas a la biblioteca.
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const newDiscovered = await autoScanStartup(currentList, filterShortAudios);
+          if (newDiscovered.length > 0) {
+            setTracks((prev) => {
+              const existingIds = new Set(prev.map((t) => t.id));
+              const filteredNew = newDiscovered.filter((t) => !existingIds.has(t.id));
+              if (filteredNew.length === 0) return prev;
+              const merged = [...prev, ...filteredNew];
+              saveTracksToDB(merged);
+              return merged;
+            });
+            setToastMessage(`Biblioteca actualizada: ${newDiscovered.length} canción(es) detectada(s)`);
+          }
+        } catch (scanErr) {
+          console.warn("Auto-escaneo al inicio falló:", scanErr);
+        }
       }
     }
 
@@ -193,41 +234,26 @@ export default function App() {
     }
   }, [currentTrack?.id]);
 
-  // Helper para verificar si una pista es inválida, tiene 0 bytes o duración 0
+  // Helper para verificar si una pista es inválida
   const isTrackCorrupted = (t?: Track | null): boolean => {
     if (!t) return true;
-    if (!t.url) return true;
-    if (t.duration !== undefined && t.duration <= 0) return true;
-    if (t.size !== undefined && t.size === 0) return true;
-    if (t.file && t.file.size === 0) return true;
+    if (!t.url && !t.nativePath) return true;
     return false;
   };
 
-  // 3. Corrección del Reproductor:
-  // Al hacer clic en Play sobre una pista inválida o de 0 bytes, muestra Toast:
-  // 'Esta canción está dañada o no se pudo descargar el archivo de audio'
-  // y limpia automáticamente de la biblioteca cualquier pista que tenga 0 bytes guardados
   const handleCorruptedTrack = (corruptedTrack: Track) => {
-    setToastMessage("Esta canción está dañada o no se pudo descargar el archivo de audio");
+    setToastMessage("No se pudo reproducir este archivo de audio.");
     setTimeout(() => {
       setToastMessage((curr) =>
-        curr === "Esta canción está dañada o no se pudo descargar el archivo de audio" ? null : curr
+        curr === "No se pudo reproducir este archivo de audio." ? null : curr
       );
     }, 4500);
 
     const damagedId = corruptedTrack.id;
-    setTracks((prev) => {
-      const updated = prev.filter((t) => t.id !== damagedId);
-      saveTracksToDB(updated);
-      return updated;
-    });
-    removeTrackFromDB(damagedId);
-
     if (currentTrack?.id === damagedId) {
       setIsPlaying(false);
       if (audioRef.current) {
         audioRef.current.pause();
-        audioRef.current.src = "";
       }
     }
   };
@@ -243,7 +269,6 @@ export default function App() {
       return;
     }
 
-    // Si la pista actual está dañada, tiene 0 bytes o duración 0
     if (isTrackCorrupted(currentTrack)) {
       handleCorruptedTrack(currentTrack);
       return;
@@ -260,7 +285,8 @@ export default function App() {
         .then(() => setIsPlaying(true))
         .catch((e) => {
           console.warn("Error playing audio:", e?.message || "playback failed");
-          handleCorruptedTrack(currentTrack);
+          setToastMessage("No se pudo iniciar la reproducción del archivo.");
+          setIsPlaying(false);
         });
     }
   };
@@ -417,7 +443,6 @@ export default function App() {
 
   // Direct play from list
   const handlePlayTrack = (track: Track, _index: number) => {
-    // Al hacer clic en Play sobre una canción cuyo archivo sea inválido, tenga duración 0 o 0 bytes:
     if (isTrackCorrupted(track)) {
       handleCorruptedTrack(track);
       return;
@@ -435,7 +460,8 @@ export default function App() {
           audioRef.current.src = track.url;
           audioRef.current.play().catch((err) => {
             console.warn("Playback error:", err);
-            handleCorruptedTrack(track);
+            setToastMessage("No se pudo iniciar la reproducción del archivo.");
+            setIsPlaying(false);
           });
         }
       }
@@ -522,30 +548,6 @@ export default function App() {
       setToastMessage("No se encontraron archivos de audio compatibles en la carpeta");
     }
     e.target.value = "";
-  };
-
-  // Handle downloaded track from DownloadModal
-  const handleTrackDownloaded = (newTrack: Track, shouldPlayNow: boolean = false) => {
-    setTracks((prev) => {
-      const filtered = prev.filter((t) => t.id !== newTrack.id);
-      const updated = [newTrack, ...filtered];
-      saveTracksToDB(updated);
-      return updated;
-    });
-
-    setToastMessage(`"${newTrack.title}" descargada e integrada con éxito`);
-
-    if (shouldPlayNow) {
-      setTimeout(() => {
-        setCurrentTrackIndex(0);
-        setIsPlaying(true);
-        if (audioRef.current) {
-          audioRef.current.currentTime = 0;
-          audioRef.current.src = newTrack.url;
-          audioRef.current.play().catch(() => {});
-        }
-      }, 100);
-    }
   };
 
   // Load demos helper
@@ -640,6 +642,130 @@ export default function App() {
     );
   };
 
+  // =========================================================================
+  // FUNCIONES DEL TEMPORIZADOR DE APAGADO (SLEEP TIMER)
+  // =========================================================================
+
+  // Ejecuta la pausa del audio al expirar el temporizador
+  const handleExecuteSleepTimer = () => {
+    setSleepTimer((prev) => ({
+      ...prev,
+      isActive: false,
+      targetTimestamp: null,
+      remainingSeconds: 0,
+    }));
+    audioEngine.setSleepTimerActive(false);
+
+    audioEngine.pausePlayback(audioRef.current, sleepTimer.fadeOut, () => {
+      setIsPlaying(false);
+      setToastMessage("💤 Temporizador de apagado: la música se ha pausado.");
+    });
+  };
+
+  // Activa el temporizador para pausar tras N minutos
+  const handleSetSleepTimerMinutes = (minutes: number, fadeOut: boolean) => {
+    const remainingSeconds = minutes * 60;
+    const targetTimestamp = Date.now() + remainingSeconds * 1000;
+    setSleepTimer({
+      isActive: true,
+      mode: "minutes",
+      targetTimestamp,
+      remainingSeconds,
+      selectedMinutes: minutes,
+      fadeOut,
+    });
+    audioEngine.setSleepTimerActive(true);
+    setToastMessage(`💤 Temporizador configurado: apagado en ${minutes} min`);
+  };
+
+  // Activa el temporizador para pausar al finalizar la canción actual
+  const handleSetSleepTimerEndOfSong = (fadeOut: boolean) => {
+    const rem = Math.max(0, Math.floor(duration - currentTime));
+    setSleepTimer({
+      isActive: true,
+      mode: "end-of-song",
+      targetTimestamp: null,
+      remainingSeconds: rem,
+      selectedMinutes: undefined,
+      fadeOut,
+    });
+    audioEngine.setSleepTimerActive(true);
+    setToastMessage("💤 Temporizador configurado: al terminar esta canción");
+  };
+
+  // Desactiva y cancela el temporizador
+  const handleCancelSleepTimer = () => {
+    setSleepTimer((prev) => ({
+      ...prev,
+      isActive: false,
+      targetTimestamp: null,
+      remainingSeconds: 0,
+      selectedMinutes: undefined,
+    }));
+    audioEngine.setSleepTimerActive(false);
+    setToastMessage("Temporizador de apagado desactivado");
+  };
+
+  // Añade minutos adicionales al temporizador en curso
+  const handleAddSleepTimerMinutes = (extraMinutes: number) => {
+    if (!sleepTimer.isActive) {
+      handleSetSleepTimerMinutes(extraMinutes, sleepTimer.fadeOut);
+      return;
+    }
+    const extraSeconds = extraMinutes * 60;
+    const currentTarget =
+      sleepTimer.targetTimestamp || Date.now() + sleepTimer.remainingSeconds * 1000;
+    const newTarget = currentTarget + extraSeconds * 1000;
+    const newRem = Math.max(0, Math.round((newTarget - Date.now()) / 1000));
+    setSleepTimer((prev) => ({
+      ...prev,
+      mode: "minutes",
+      targetTimestamp: newTarget,
+      remainingSeconds: newRem,
+      selectedMinutes: (prev.selectedMinutes || 0) + extraMinutes,
+    }));
+    setToastMessage(`💤 Se añadieron +${extraMinutes} min al temporizador`);
+  };
+
+  // Cambia la preferencia de fade out
+  const handleToggleFadeOut = (fadeOut: boolean) => {
+    setSleepTimer((prev) => ({ ...prev, fadeOut }));
+  };
+
+  // Efecto del reloj regresivo del temporizador de apagado
+  useEffect(() => {
+    if (!sleepTimer.isActive) return;
+
+    if (sleepTimer.mode === "end-of-song") {
+      const rem = Math.max(0, Math.floor(duration - currentTime));
+      setSleepTimer((prev) => {
+        if (prev.remainingSeconds !== rem) {
+          return { ...prev, remainingSeconds: rem };
+        }
+        return prev;
+      });
+      return;
+    }
+
+    const timerInterval = setInterval(() => {
+      if (!sleepTimer.targetTimestamp) return;
+      const now = Date.now();
+      const diffSec = Math.max(0, Math.round((sleepTimer.targetTimestamp - now) / 1000));
+
+      if (diffSec <= 0) {
+        clearInterval(timerInterval);
+        handleExecuteSleepTimer();
+      } else {
+        setSleepTimer((prev) => {
+          if (!prev.isActive) return prev;
+          return { ...prev, remainingSeconds: diffSec };
+        });
+      }
+    }, 1000);
+
+    return () => clearInterval(timerInterval);
+  }, [sleepTimer.isActive, sleepTimer.mode, sleepTimer.targetTimestamp, duration, currentTime]);
+
   // Filtered tracks for Library / Search / Favorites
   const displayedTracks = useMemo(() => {
     let list = tracks;
@@ -718,20 +844,44 @@ export default function App() {
         }}
         onLoadedMetadata={() => {
           if (audioRef.current) {
-            setDuration(audioRef.current.duration || 0);
+            const realDuration = audioRef.current.duration;
+            if (realDuration && !isNaN(realDuration) && isFinite(realDuration) && realDuration > 0) {
+              setDuration(realDuration);
+              // Actualizar duración de la pista si era 0
+              setTracks((prev) => {
+                const target = prev[currentTrackIndex];
+                if (target && (!target.duration || target.duration <= 0)) {
+                  const updated = prev.map((t, idx) => (idx === currentTrackIndex ? { ...t, duration: realDuration } : t));
+                  saveTracksToDB(updated);
+                  return updated;
+                }
+                return prev;
+              });
+            }
           }
         }}
-        onEnded={handleNext}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
+        onEnded={() => {
+          if (sleepTimer.isActive && sleepTimer.mode === "end-of-song") {
+            handleExecuteSleepTimer();
+          } else {
+            handleNext();
+          }
+        }}
+        onPlay={() => {
+          setIsPlaying(true);
+          audioEngine.setPlaybackState(true);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          audioEngine.setPlaybackState(false);
+        }}
         onError={() => {
           const mediaErr = audioRef.current?.error;
           if (mediaErr) {
             console.warn(`Audio playback issue (code ${mediaErr.code}): ${mediaErr.message || "media load failed"}`);
           }
-          if (currentTrack) {
-            handleCorruptedTrack(currentTrack);
-          }
+          setToastMessage("No se pudo cargar el archivo de audio.");
+          setIsPlaying(false);
         }}
       />
 
@@ -746,7 +896,6 @@ export default function App() {
         onSearchChange={setSearchQuery}
         onOpenAddFiles={() => localFilesInputRef.current?.click()}
         onOpenAddFolder={() => setIsScannerOpen(true)}
-        onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
         onOpenScanner={() => setIsScannerOpen(true)}
         onOpenEqualizer={() => setIsEqualizerOpen(true)}
         onOpenTheme={() => setIsThemeOpen(true)}
@@ -770,7 +919,6 @@ export default function App() {
           onToggleFavorite={handleToggleFavorite}
           onOpenLyricsSearchForTrack={(track) => setLyricsSearchTrack(track)}
           onOpenScanner={() => setIsScannerOpen(true)}
-          onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
           onLoadDemos={handleLoadDemos}
           onHideTrack={handleHideTrack}
           onOpenHiddenTracks={() => setIsHiddenTracksOpen(true)}
@@ -863,6 +1011,8 @@ export default function App() {
         onDeleteTracks={handleDeleteTracks}
         activeSubTab={expandedSubTab}
         onOpenID3Editor={(track) => setEditingTrack(track)}
+        sleepTimer={sleepTimer}
+        onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
       />
 
       {/* Floating Action Toast Notification */}
@@ -914,16 +1064,6 @@ export default function App() {
         onUnhideAll={handleUnhideAll}
       />
 
-      {/* Download / Cobalt Tools Integration Modal */}
-      <DownloadModal
-        isOpen={isDownloadModalOpen}
-        onClose={() => setIsDownloadModalOpen(false)}
-        onTrackDownloaded={handleTrackDownloaded}
-        onTracksImported={handleTracksImported}
-        existingTracks={tracks}
-        filterShortAudios={filterShortAudios}
-      />
-
       {/* Hidden File and Folder Inputs for '+' menu */}
       <input
         ref={localFilesInputRef}
@@ -957,6 +1097,21 @@ export default function App() {
         track={editingTrack}
         onClose={() => setEditingTrack(null)}
         onSave={handleSaveEditedTrack}
+      />
+
+      {/* Temporizador de Apagado (Sleep Timer) Modal */}
+      <SleepTimerModal
+        isOpen={isSleepTimerOpen}
+        onClose={() => setIsSleepTimerOpen(false)}
+        sleepTimer={sleepTimer}
+        currentTrack={currentTrack}
+        currentTime={currentTime}
+        duration={duration}
+        onSetTimerMinutes={handleSetSleepTimerMinutes}
+        onSetTimerEndOfSong={handleSetSleepTimerEndOfSong}
+        onCancelTimer={handleCancelSleepTimer}
+        onAddMinutes={handleAddSleepTimerMinutes}
+        onToggleFadeOut={handleToggleFadeOut}
       />
     </div>
   );

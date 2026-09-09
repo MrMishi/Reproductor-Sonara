@@ -182,7 +182,7 @@ function parseID3v2(buffer: ArrayBuffer): {
 /**
  * Cleans filename into structured title and artist
  */
-function cleanFilename(fileName: string): { title: string; artist: string } {
+export function cleanFilename(fileName: string): { title: string; artist: string } {
   // Remove extension
   const nameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
 
@@ -213,7 +213,7 @@ function cleanFilename(fileName: string): { title: string; artist: string } {
 /**
  * Calculates audio duration asynchronously by loading metadata with fast timeout & estimation
  */
-function getAudioDuration(url: string, fileSize?: number): Promise<number> {
+export function getAudioDuration(url: string, fileSize?: number): Promise<number> {
   return new Promise((resolve) => {
     const audio = new Audio();
     audio.preload = "metadata";

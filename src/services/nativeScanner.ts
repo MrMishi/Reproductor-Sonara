@@ -7,13 +7,16 @@
  * - /Download
  * - /WhatsApp Audio
  *
- * Compatible con Capacitor Android y modo de respaldo en navegador web.
+ * Persistencia nativa:
+ * - Guarda únicamente rutas nativas ('file://...' o URI).
+ * - NO almacena Blobs ni ArrayBuffers en caché o memoria.
+ * - Reproducción directa desde la ruta física local.
  */
 
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Capacitor } from "@capacitor/core";
 import { Track } from "../types";
-import { parseAudioFile } from "./metadataParser";
+import { cleanFilename, generateCoverArt } from "./metadataParser";
 import { isTrackHidden } from "./db";
 
 export interface ScanProgressCallback {
@@ -37,17 +40,37 @@ function isAudioFileName(filename: string): boolean {
 }
 
 /**
- * Rutas nativas estándar a inspeccionar en dispositivos Android
+ * Rutas nativas estándar a inspeccionar en almacenamiento de Android
  */
 export const ANDROID_TARGET_DIRECTORIES = [
   { name: "Music", path: "Music" },
   { name: "Download", path: "Download" },
+  { name: "Downloads", path: "Downloads" },
   { name: "WhatsApp Audio", path: "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Audio" },
   { name: "WhatsApp Audio (Legacy)", path: "WhatsApp/Media/WhatsApp Audio" },
 ];
 
 /**
- * Escanea el sistema de archivos nativo o solicita permisos si está en Capacitor
+ * Solicita permisos de lectura en almacenamiento público
+ */
+export async function requestStoragePermissions(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return true;
+  try {
+    const permStatus = await Filesystem.checkPermissions();
+    if (permStatus.publicStorage !== "granted") {
+      const req = await Filesystem.requestPermissions();
+      return req.publicStorage === "granted";
+    }
+    return true;
+  } catch (permErr) {
+    console.warn("Error al verificar/solicitar permisos de almacenamiento:", permErr);
+    return false;
+  }
+}
+
+/**
+ * Escanea el almacenamiento físico de Android en busca de canciones.
+ * Utiliza rutas nativas y URLs directas sin conversión de Blobs ni saturación de memoria.
  */
 export async function scanNativeMusicDirectories(
   onProgress?: ScanProgressCallback,
@@ -58,8 +81,7 @@ export async function scanNativeMusicDirectories(
   const discoveredTracks: Track[] = [];
 
   if (!isNative) {
-    // Si se ejecuta en navegador Web / Dev server, advertir sobre entorno simulado
-    onProgress?.("Entorno Web", 0, 0, "Dispositivo no nativo. Usa el explorador de archivos local.");
+    onProgress?.("Entorno Web", 0, 0, "Dispositivo no nativo. Usa el explorador de archivos local (+).");
     return {
       tracks: [],
       scannedCount: 0,
@@ -68,16 +90,7 @@ export async function scanNativeMusicDirectories(
   }
 
   try {
-    // Solicitar permisos de almacenamiento si la plataforma lo requiere
-    try {
-      const permStatus = await Filesystem.checkPermissions();
-      if (permStatus.publicStorage !== "granted") {
-        await Filesystem.requestPermissions();
-      }
-    } catch (permErr: unknown) {
-      const msg = permErr instanceof Error ? permErr.message : String(permErr);
-      errors.push(`Permiso de almacenamiento: ${msg}`);
-    }
+    await requestStoragePermissions();
 
     let totalDiscovered = 0;
     let totalProcessed = 0;
@@ -104,81 +117,63 @@ export async function scanNativeMusicDirectories(
           const fullFilePath = `${dirTarget.path}/${fileName}`;
 
           try {
-            onProgress?.(dirTarget.name, totalDiscovered, totalProcessed, `Procesando: ${fileName}`);
+            onProgress?.(dirTarget.name, totalDiscovered, totalProcessed, `Analizando: ${fileName}`);
 
             const fileUriResult = await Filesystem.getUri({
               path: fullFilePath,
               directory: Directory.ExternalStorage,
             });
 
-            // Convertir URI de Capacitor para reproducción nativa (Capacitor.convertFileSrc)
-            const webAudioUrl = Capacitor.convertFileSrc(fileUriResult.uri);
+            const nativeUri = fileUriResult.uri;
+            // Convertir URI a URL directa para el Webview de Capacitor
+            const webAudioUrl = Capacitor.convertFileSrc(nativeUri);
 
-            // Obtener datos binarios o blob para analizar metadatos si es posible
-            let parsedTrack: Track | null = null;
-            try {
-              const fileData = await Filesystem.readFile({
-                path: fullFilePath,
-                directory: Directory.ExternalStorage,
-              });
+            // Obtener título y artista limpios a partir del nombre del archivo
+            const { title, artist } = cleanFilename(fileName);
+            const coverUrl = generateCoverArt(title, artist);
 
-              let blob: Blob;
-              if (typeof fileData.data === "string") {
-                const byteCharacters = atob(fileData.data);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                  byteNumbers[i] = byteCharacters.charCodeAt(i);
-                }
-                const byteArray = new Uint8Array(byteNumbers);
-                blob = new Blob([byteArray], { type: "audio/mpeg" });
-              } else {
-                blob = fileData.data as Blob;
-              }
+            const fileSize =
+              typeof fileEntry === "object" && fileEntry && "size" in fileEntry && typeof fileEntry.size === "number"
+                ? fileEntry.size
+                : 0;
 
-              const nativeFileObj = new File([blob], fileName, { type: "audio/mpeg" });
-              parsedTrack = await parseAudioFile(nativeFileObj);
-              // Asignar url nativa de Capacitor convertFileSrc
-              parsedTrack.url = webAudioUrl;
-              parsedTrack.folderPath = dirTarget.name;
-              parsedTrack.fileName = fileName;
-            } catch {
-              // Si falla la lectura completa del Blob, crear pista básica con el URI nativo
-              parsedTrack = {
-                id: `native_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-                title: fileName.replace(/\.[^/.]+$/, "").replace(/_/g, " "),
-                artist: "Audio Local",
-                album: dirTarget.name,
-                duration: 0,
-                url: webAudioUrl,
-                coverUrl: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80",
-                folderPath: dirTarget.name,
-                fileName,
-                addedAt: Date.now(),
-              };
+            const format = fileName.split(".").pop()?.toUpperCase() || "AUDIO";
+
+            const parsedTrack: Track = {
+              id: `native_${encodeURIComponent(nativeUri)}`,
+              title,
+              artist,
+              album: dirTarget.name,
+              duration: 0, // Se actualiza automáticamente cuando el elemento <audio> carga los metadatos
+              url: webAudioUrl,
+              nativePath: nativeUri,
+              coverUrl,
+              format,
+              size: fileSize,
+              addedAt: Date.now(),
+              isFavorite: false,
+              folderPath: dirTarget.name,
+              fileName,
+            };
+
+            // Filtrar pistas marcadas como ocultas
+            if (isTrackHidden(parsedTrack)) {
+              continue;
             }
 
-            if (parsedTrack) {
-              // Filtrar si está en la lista de ocultas
-              if (isTrackHidden(parsedTrack)) {
-                continue;
-              }
-
-              // Filtro de audios cortos (< 30 segundos)
-              if (filterShortAudios && parsedTrack.duration > 0 && parsedTrack.duration < 30) {
-                continue;
-              }
-
-              discoveredTracks.push(parsedTrack);
-              totalProcessed++;
+            // Filtro opcional de notas de voz cortas
+            if (filterShortAudios && parsedTrack.duration > 0 && parsedTrack.duration < 30) {
+              continue;
             }
+
+            discoveredTracks.push(parsedTrack);
+            totalProcessed++;
           } catch (fileErr: unknown) {
-            console.warn(`No se pudo leer archivo ${fileName}:`, fileErr);
+            console.warn(`No se pudo procesar archivo ${fileName}:`, fileErr);
           }
         }
       } catch (dirErr: unknown) {
-        // La carpeta puede no existir en este dispositivo (ej. WhatsApp Audio si no usa WhatsApp)
-        const errMsg = dirErr instanceof Error ? dirErr.message : String(dirErr);
-        errors.push(`Directorio /${dirTarget.name}: ${errMsg}`);
+        // La carpeta puede no existir en el dispositivo, omitir silenciosamente
       }
     }
 
@@ -199,121 +194,41 @@ export async function scanNativeMusicDirectories(
 }
 
 /**
- * Escaneo rápido enfocado exclusivamente en la carpeta /Download de Android
- * para detectar e incorporar de inmediato los archivos descargados desde Cobalt Tools.
+ * Escaneo automático al iniciar la app.
+ * Solicita permisos de almacenamiento ('@capacitor/filesystem'),
+ * escanea /Music y /Download, y devuelve las nuevas pistas a incorporar.
  */
-export async function scanDownloadsFolderOnly(
+export async function autoScanStartup(
+  existingTracks: Track[],
   filterShortAudios: boolean = true
-): Promise<{ tracks: Track[]; scannedCount: number; errors: string[] }> {
+): Promise<Track[]> {
   const isNative = Capacitor.isNativePlatform();
-  const errors: string[] = [];
-  const discoveredTracks: Track[] = [];
-
-  if (!isNative) {
-    return { tracks: [], scannedCount: 0, errors: ["Entorno web (no nativo)."] };
-  }
+  if (!isNative) return [];
 
   try {
-    try {
-      const permStatus = await Filesystem.checkPermissions();
-      if (permStatus.publicStorage !== "granted") {
-        await Filesystem.requestPermissions();
-      }
-    } catch {
-      // Ignorar si los permisos ya están gestionados
-    }
+    const { tracks } = await scanNativeMusicDirectories(undefined, filterShortAudios);
+    if (!tracks || tracks.length === 0) return [];
 
-    const downloadFolderTargets = [
-      { path: "Download", dir: Directory.ExternalStorage },
-      { path: "Downloads", dir: Directory.ExternalStorage },
-    ];
+    // Filtrar pistas que ya están presentes en la biblioteca para evitar duplicados
+    const existingMap = new Set(
+      existingTracks.map((t) => (t.nativePath || t.url || `${t.title}-${t.artist}`).toLowerCase())
+    );
 
-    for (const target of downloadFolderTargets) {
-      try {
-        const result = await Filesystem.readdir({
-          path: target.path,
-          directory: target.dir,
-        });
+    const newTracks = tracks.filter((t) => {
+      const keyNative = (t.nativePath || "").toLowerCase();
+      const keyUrl = (t.url || "").toLowerCase();
+      const keyName = `${t.title}-${t.artist}`.toLowerCase();
 
-        const filesList = result.files || [];
-        const audioEntries = filesList.filter((f) => {
-          const name = typeof f === "string" ? f : f.name;
-          return isAudioFileName(name);
-        });
+      return (
+        (!keyNative || !existingMap.has(keyNative)) &&
+        (!keyUrl || !existingMap.has(keyUrl)) &&
+        !existingMap.has(keyName)
+      );
+    });
 
-        for (const fileEntry of audioEntries) {
-          const fileName = typeof fileEntry === "string" ? fileEntry : fileEntry.name;
-          const fullPath = `${target.path}/${fileName}`;
-
-          try {
-            const uriResult = await Filesystem.getUri({
-              path: fullPath,
-              directory: target.dir,
-            });
-
-            const webUrl = Capacitor.convertFileSrc(uriResult.uri);
-
-            let parsedTrack: Track | null = null;
-            try {
-              const fileData = await Filesystem.readFile({
-                path: fullPath,
-                directory: target.dir,
-              });
-
-              let blob: Blob;
-              if (typeof fileData.data === "string") {
-                const byteChars = atob(fileData.data);
-                const byteNums = new Array(byteChars.length);
-                for (let i = 0; i < byteChars.length; i++) {
-                  byteNums[i] = byteChars.charCodeAt(i);
-                }
-                blob = new Blob([new Uint8Array(byteNums)], { type: "audio/mpeg" });
-              } else {
-                blob = fileData.data as Blob;
-              }
-
-              const fileObj = new File([blob], fileName, { type: "audio/mpeg" });
-              parsedTrack = await parseAudioFile(fileObj);
-              parsedTrack.url = webUrl;
-              parsedTrack.folderPath = "Download";
-              parsedTrack.fileName = fileName;
-            } catch {
-              parsedTrack = {
-                id: `dl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                title: fileName.replace(/\.[^/.]+$/, "").replace(/_/g, " "),
-                artist: "Descarga",
-                album: "Download",
-                duration: 0,
-                url: webUrl,
-                coverUrl: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80",
-                folderPath: "Download",
-                fileName,
-                addedAt: Date.now(),
-              };
-            }
-
-            if (parsedTrack) {
-              if (isTrackHidden(parsedTrack)) continue;
-              if (filterShortAudios && parsedTrack.duration > 0 && parsedTrack.duration < 30) continue;
-              discoveredTracks.push(parsedTrack);
-            }
-          } catch (itemErr) {
-            console.warn(`Error al leer archivo ${fileName} en /Download:`, itemErr);
-          }
-        }
-      } catch (dirErr: unknown) {
-        // Carpeta no presente o ruta alterna
-      }
-    }
-
-    return {
-      tracks: discoveredTracks,
-      scannedCount: discoveredTracks.length,
-      errors,
-    };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    errors.push(`Error general al escanear /Download: ${msg}`);
-    return { tracks: [], scannedCount: 0, errors };
+    return newTracks;
+  } catch (err) {
+    console.warn("Auto-scan startup error:", err);
+    return [];
   }
 }

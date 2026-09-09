@@ -41,7 +41,6 @@ interface LibraryViewProps {
   onToggleFavorite: (id: string) => void;
   onOpenLyricsSearchForTrack: (track: Track) => void;
   onOpenScanner: () => void;
-  onOpenDownloadModal: () => void;
   onLoadDemos: () => void;
   onHideTrack?: (track: Track) => void;
   onOpenHiddenTracks?: () => void;
@@ -67,7 +66,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   onToggleFavorite,
   onOpenLyricsSearchForTrack,
   onOpenScanner,
-  onOpenDownloadModal,
   onLoadDemos,
   onHideTrack,
   onOpenHiddenTracks,

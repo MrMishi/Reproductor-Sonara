@@ -43,6 +43,8 @@ class AudioEngine {
   private currentPreamp: number = 0;
   private currentPresetId: string = "flat";
   private isEnabled: boolean = true;
+  private isAudioPlaying: boolean = false;
+  private isSleepTimerActive: boolean = false;
 
   public init(audioElement: HTMLAudioElement) {
     if (this.isInitialized && this.connectedElement === audioElement) {
@@ -210,7 +212,94 @@ class AudioEngine {
       gains: [...this.currentGains],
       bassBoost: this.currentBassBoost,
       preamp: this.currentPreamp,
+      isAudioPlaying: this.isAudioPlaying,
+      isSleepTimerActive: this.isSleepTimerActive,
     };
+  }
+
+  /**
+   * Actualiza el estado de reproducción en el motor de audio
+   */
+  public setPlaybackState(isPlaying: boolean) {
+    this.isAudioPlaying = isPlaying;
+  }
+
+  public getPlaybackState(): boolean {
+    return this.isAudioPlaying;
+  }
+
+  /**
+   * Marca o desmarca si el temporizador de apagado está activo
+   */
+  public setSleepTimerActive(active: boolean) {
+    this.isSleepTimerActive = active;
+  }
+
+  public isSleepTimerRunning(): boolean {
+    return this.isSleepTimerActive;
+  }
+
+  /**
+   * Pausa la reproducción de música actualizando el estado del motor de audio.
+   * Si fadeOut es true, atenúa suavemente el volumen mediante Web Audio API antes de pausar.
+   */
+  public pausePlayback(
+    audioElement: HTMLAudioElement | null,
+    fadeOut: boolean = true,
+    onPaused?: () => void
+  ) {
+    if (!audioElement) {
+      this.isAudioPlaying = false;
+      this.isSleepTimerActive = false;
+      onPaused?.();
+      return;
+    }
+
+    if (!fadeOut || !this.preampGainNode || !this.ctx || this.ctx.state !== "running") {
+      try {
+        audioElement.pause();
+      } catch (err) {
+        console.warn("Error pausing audio element:", err);
+      }
+      this.isAudioPlaying = false;
+      this.isSleepTimerActive = false;
+      onPaused?.();
+      return;
+    }
+
+    // Atenuación suave progresiva (fade out de 2 segundos)
+    try {
+      const now = this.ctx.currentTime;
+      const currentGain = this.preampGainNode.gain.value;
+      this.preampGainNode.gain.cancelScheduledValues(now);
+      this.preampGainNode.gain.setValueAtTime(currentGain, now);
+      this.preampGainNode.gain.linearRampToValueAtTime(0.0001, now + 2.0);
+
+      setTimeout(() => {
+        try {
+          audioElement.pause();
+        } catch (err) {
+          console.warn("Error pausing audio element after fade:", err);
+        }
+
+        // Restaurar ganancia original de preamplificación para futuras reproducciones
+        if (this.preampGainNode && this.ctx) {
+          const originalGain = Math.pow(10, this.currentPreamp / 20);
+          this.preampGainNode.gain.cancelScheduledValues(this.ctx.currentTime);
+          this.preampGainNode.gain.setValueAtTime(originalGain, this.ctx.currentTime + 0.05);
+        }
+
+        this.isAudioPlaying = false;
+        this.isSleepTimerActive = false;
+        onPaused?.();
+      }, 2050);
+    } catch (e) {
+      // Fallback inmediato si falla la rampa Web Audio
+      audioElement.pause();
+      this.isAudioPlaying = false;
+      this.isSleepTimerActive = false;
+      onPaused?.();
+    }
   }
 }
 

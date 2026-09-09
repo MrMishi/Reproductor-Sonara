@@ -17,7 +17,8 @@ export interface Track {
   artist: string;
   album: string;
   duration: number; // en segundos
-  url: string; // Object URL de blob local o URL remota
+  url: string; // URL de reproducción directa o convertFileSrc
+  nativePath?: string; // Ruta nativa absoluta ('file://...' o URI) en el almacenamiento interno
   file?: File; // Objeto File original cargado desde el dispositivo
   coverUrl?: string; // Carátula oficial en HD o carátula generada
   year?: string;
@@ -102,5 +103,14 @@ export interface Playlist {
   trackIds: string[];
   createdAt: number;
   coverUrl?: string;
+}
+
+export interface SleepTimerConfig {
+  isActive: boolean;
+  mode: "minutes" | "end-of-song";
+  targetTimestamp: number | null;
+  remainingSeconds: number;
+  selectedMinutes?: number;
+  fadeOut: boolean;
 }
 

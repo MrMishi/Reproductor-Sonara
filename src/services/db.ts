@@ -2,12 +2,17 @@
  * ============================================================================
  * SONARA MUSIC - SERVICIO DE BASE DE DATOS LOCAL (IndexedDB & LocalStorage)
  * ============================================================================
+ * Persistencia nativa sin caché:
+ * - NO almacena Blobs ni ArrayBuffers en IndexedDB.
+ * - Guarda metadatos y la ruta nativa física absoluta ('file://...' o URI).
+ * - En plataformas nativas, regenera la URL de reproducción directa con Capacitor.convertFileSrc.
  */
 
+import { Capacitor } from "@capacitor/core";
 import { Track, HiddenTrackRecord } from "../types";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented for clean native-only schema
 const STORE_TRACKS = "tracks";
 const STORE_PLAYLISTS = "playlists";
 const STORE_FAVORITES = "favorites";
@@ -32,7 +37,7 @@ export function getHiddenTracks(): HiddenTrackRecord[] {
 export function addHiddenTrack(track: Track): void {
   try {
     const list = getHiddenTracks();
-    const fileName = track.file?.name || "";
+    const fileName = track.fileName || track.file?.name || "";
     const exists = list.some(
       (h) =>
         h.id === track.id ||
@@ -85,7 +90,7 @@ export function clearAllHiddenTracks(): void {
 }
 
 /**
- * Comprueba si una pista está en la lista de ocultas (acepta objeto Track o título/artista/archivo)
+ * Comprueba si una pista está en la lista de ocultas
  */
 export function isTrackHidden(trackOrTitle: Track | string, artist?: string, fileName?: string): boolean {
   try {
@@ -153,7 +158,8 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Guarda o actualiza un array de pistas de audio y sus archivos binarios en IndexedDB
+ * Guarda o actualiza un array de pistas en IndexedDB sin almacenar Blobs ni ArrayBuffers
+ * Guarda únicamente la ruta nativa absoluta ('file://...' o URI) y los metadatos
  */
 export async function saveTracksToDB(tracks: Track[]): Promise<void> {
   try {
@@ -162,41 +168,29 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
     const store = tx.objectStore(STORE_TRACKS);
 
     for (const track of tracks) {
-      const serializable: any = {
+      const nativePath = track.nativePath || (track.url?.startsWith("file://") ? track.url : undefined);
+
+      const record: any = {
         id: track.id,
         title: track.title,
         artist: track.artist,
         album: track.album,
-        duration: track.duration,
+        duration: track.duration || 0,
         coverUrl: track.coverUrl,
         year: track.year,
         genre: track.genre,
         format: track.format,
-        size: track.size,
+        size: track.size || 0,
         addedAt: track.addedAt || Date.now(),
-        isFavorite: track.isFavorite,
+        isFavorite: track.isFavorite || false,
+        folderPath: track.folderPath,
+        fileName: track.fileName || track.file?.name,
         lyrics: track.lyrics,
+        nativePath: nativePath || track.nativePath,
         url: track.url,
       };
 
-      // Si existe un archivo o Blob de audio, se almacena directamente
-      const audioBlob = track.file || (track as any).blob;
-      if (audioBlob) {
-        serializable.blob = audioBlob;
-        serializable.fileName = track.file?.name || (track as any).fileName || `${track.title}.mp3`;
-        serializable.fileType = track.file?.type || (track as any).fileType || "audio/mpeg";
-      }
-
-      // Persistencia de archivo .lrc en IndexedDB
-      if (track.lrcBlob) {
-        serializable.lrcBlob = track.lrcBlob;
-        serializable.lrcFileName = track.lrcFileName || `${track.artist} - ${track.title}.lrc`;
-      } else if (track.lyrics?.rawLrc) {
-        serializable.lrcBlob = new Blob([track.lyrics.rawLrc], { type: "text/plain;charset=utf-8" });
-        serializable.lrcFileName = track.lrcFileName || `${track.artist} - ${track.title}.lrc`;
-      }
-
-      store.put(serializable);
+      store.put(record);
     }
 
     return new Promise((resolve, reject) => {
@@ -209,7 +203,8 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
 }
 
 /**
- * Carga todas las pistas persistidas desde IndexedDB y regenera los ObjectURLs válidos
+ * Carga todas las pistas persistidas desde IndexedDB
+ * Para rutas nativas de dispositivo, regenera la URL válida con Capacitor.convertFileSrc
  */
 export async function loadTracksFromDB(): Promise<Track[]> {
   try {
@@ -222,56 +217,44 @@ export async function loadTracksFromDB(): Promise<Track[]> {
       request.onsuccess = () => {
         const records = request.result || [];
         const loaded: Track[] = [];
+        const isNative = Capacitor.isNativePlatform();
 
         for (const item of records) {
-          // Solo borra si el blob explícitamente tiene 0 bytes
-          const isZeroBytes = item.blob && item.blob.size === 0;
-
-          if (isZeroBytes) {
-            console.warn(`Limpiando pista de 0 bytes de IndexedDB: ${item.title} (${item.id})`);
-            store.delete(item.id);
-            continue;
-          }
-
-          let generatedUrl = "";
-          let file: File | undefined = undefined;
-
-          // Reconstruir el archivo de audio desde el Blob almacenado
+          // Limpieza de datos heredados si existieran blobs de versiones anteriores
           if (item.blob) {
-            file = new File([item.blob], item.fileName || "track.mp3", {
-              type: item.fileType || "audio/mpeg",
-            });
-            generatedUrl = URL.createObjectURL(file);
+            delete item.blob;
           }
 
-          const finalUrl = generatedUrl || item.url || "";
+          let finalUrl = item.url || "";
+          const nativePath = item.nativePath || (item.url?.startsWith("file://") ? item.url : undefined);
 
-          const lrcBlob: Blob | undefined = item.lrcBlob || undefined;
-          const lrcFileName: string | undefined = item.lrcFileName || undefined;
+          // Si estamos en entorno nativo y tenemos la ruta física, regenerar URL válida
+          if (isNative && nativePath) {
+            finalUrl = Capacitor.convertFileSrc(nativePath);
+          }
 
           if (finalUrl) {
-            const trackObj: any = {
+            const trackObj: Track = {
               id: item.id,
               title: item.title || "Sin título",
               artist: item.artist || "Artista desconocido",
               album: item.album || "Álbum desconocido",
               duration: item.duration || 0,
               url: finalUrl,
-              audioUrl: finalUrl, // Compatibilidad con vistas que usen audioUrl
-              file,
+              nativePath: nativePath || item.nativePath,
               coverUrl: item.coverUrl,
               year: item.year,
               genre: item.genre,
               format: item.format,
-              size: item.size || file?.size || 0,
+              size: item.size || 0,
               addedAt: item.addedAt || Date.now(),
               isFavorite: item.isFavorite || false,
               lyrics: item.lyrics,
-              lrcBlob,
-              lrcFileName,
+              folderPath: item.folderPath,
+              fileName: item.fileName,
             };
 
-            loaded.push(trackObj as Track);
+            loaded.push(trackObj);
           }
         }
 

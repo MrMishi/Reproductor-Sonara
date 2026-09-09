@@ -26,7 +26,7 @@ import {
   Sparkles,
   Tag,
 } from "lucide-react";
-import { Track, PlaybackMode } from "../types";
+import { Track, PlaybackMode, SleepTimerConfig } from "../types";
 import { getActiveLyricIndex, hasJapaneseText } from "../services/lyricsService";
 import { VisualizerCanvas } from "./VisualizerCanvas";
 
@@ -54,6 +54,8 @@ export interface ExpandedPlayerProps {
   onDeleteTracks?: (trackIds: string[]) => void;
   onOpenID3Editor?: (track: Track) => void;
   activeSubTab?: "cover" | "queue" | "lyrics" | "details";
+  sleepTimer?: SleepTimerConfig;
+  onOpenSleepTimer?: () => void;
 }
 
 function formatTime(seconds: number): string {
@@ -87,6 +89,8 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   onDeleteTracks,
   onOpenID3Editor,
   activeSubTab = "cover",
+  sleepTimer,
+  onOpenSleepTimer,
 }) => {
   const [activeTab, setActiveTab] = useState<"cover" | "queue" | "lyrics" | "details">(
     activeSubTab || "cover"
@@ -343,6 +347,35 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
 
         {/* Right Header Actions */}
         <div className="flex items-center gap-1.5">
+          {/* Botón de Temporizador de Apagado (Símbolo 💤) */}
+          {onOpenSleepTimer && (
+            <button
+              id="expanded-sleep-timer-btn"
+              onClick={onOpenSleepTimer}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 text-xs font-semibold border ${
+                sleepTimer?.isActive
+                  ? "bg-indigo-500/25 text-indigo-200 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse"
+                  : "hover:bg-white/10 text-neutral-300 hover:text-white border-white/10"
+              }`}
+              title={
+                sleepTimer?.isActive
+                  ? `Temporizador de apagado activo (${Math.floor(sleepTimer.remainingSeconds / 60)}m restantes)`
+                  : "Temporizador de apagado (Dormir)"
+              }
+              aria-label="Temporizador de apagado"
+            >
+              <span className="text-base leading-none select-none">💤</span>
+              {sleepTimer?.isActive ? (
+                <span className="font-mono text-[11px] font-bold text-indigo-300">
+                  {Math.floor(sleepTimer.remainingSeconds / 60)}:
+                  {(sleepTimer.remainingSeconds % 60).toString().padStart(2, "0")}
+                </span>
+              ) : (
+                <span className="hidden sm:inline">Dormir</span>
+              )}
+            </button>
+          )}
+
           {onToggleMiniMode && (
             <button
               id="expanded-mini-mode-btn"
@@ -552,6 +585,30 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     title="Editar etiquetas ID3 y carátula"
                   >
                     <Tag className="w-5 h-5 text-purple-400" />
+                  </button>
+                )}
+
+                {/* Botón de Temporizador de Apagado (Símbolo 💤) en barra de acciones */}
+                {onOpenSleepTimer && (
+                  <button
+                    id="expanded-track-sleep-timer-btn"
+                    onClick={onOpenSleepTimer}
+                    className={`p-3 rounded-full transition-all active:scale-90 relative ${
+                      sleepTimer?.isActive
+                        ? "bg-indigo-500/25 text-indigo-300 shadow-[0_0_14px_rgba(99,102,241,0.35)]"
+                        : "hover:bg-white/10 text-neutral-400 hover:text-white"
+                    }`}
+                    title={
+                      sleepTimer?.isActive
+                        ? `Temporizador activo (${Math.floor(sleepTimer.remainingSeconds / 60)}m restantes)`
+                        : "Temporizador de apagado 💤"
+                    }
+                    aria-label="Temporizador de apagado"
+                  >
+                    <span className="text-lg leading-none select-none">💤</span>
+                    {sleepTimer?.isActive && (
+                      <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+                    )}
                   </button>
                 )}
               </div>
@@ -1005,6 +1062,44 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                 Modifica las 7 bandas de frecuencia (60Hz a 14kHz), el refuerzo de graves y la ganancia previa en tiempo real.
               </p>
             </div>
+
+            {/* Quick Sleep Timer Card in Details */}
+            {onOpenSleepTimer && (
+              <div
+                className="rounded-2xl p-5 border flex flex-col gap-3"
+                style={{
+                  backgroundColor: "var(--color-bg, #090909)",
+                  borderColor: sleepTimer?.isActive ? "rgba(99, 102, 241, 0.4)" : "var(--color-border-subtle)",
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-xl select-none leading-none">💤</span>
+                    <div>
+                      <span className="font-bold text-sm text-white">Temporizador de apagado</span>
+                      {sleepTimer?.isActive && (
+                        <span className="ml-2 font-mono text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-500/30">
+                          {Math.floor(sleepTimer.remainingSeconds / 60)}:
+                          {(sleepTimer.remainingSeconds % 60).toString().padStart(2, "0")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    id="details-open-sleep-timer-btn"
+                    onClick={onOpenSleepTimer}
+                    className="px-4 py-1.5 rounded-full text-xs font-bold text-white transition-all hover:scale-105 active:scale-95 shadow cursor-pointer bg-indigo-600 hover:bg-indigo-500"
+                  >
+                    {sleepTimer?.isActive ? "Modificar" : "Configurar"}
+                  </button>
+                </div>
+                <p className="text-xs opacity-70">
+                  {sleepTimer?.isActive
+                    ? `La música se pausará automáticamente al terminar el temporizador, actualizando el estado del motor de audio.`
+                    : "Programa el apagado automático de la música tras 15, 30, 60 minutos o al finalizar la pista actual."}
+                </p>
+              </div>
+            )}
           </div>
         )}
       </main>
