@@ -226,11 +226,15 @@ export async function loadTracksFromDB(): Promise<Track[]> {
           }
 
           let finalUrl = item.url || "";
-          const nativePath = item.nativePath || (item.url?.startsWith("file://") ? item.url : undefined);
+          const nativePath =
+            item.nativePath ||
+            (item.url?.startsWith("file://") || item.url?.startsWith("/storage/") ? item.url : undefined);
 
-          // Si estamos en entorno nativo y tenemos la ruta física, regenerar URL válida
+          // Si estamos en entorno nativo y tenemos la ruta física o file://, regenerar URL válida con Capacitor.convertFileSrc
           if (isNative && nativePath) {
             finalUrl = Capacitor.convertFileSrc(nativePath);
+          } else if (isNative && finalUrl && (finalUrl.startsWith("file://") || finalUrl.startsWith("/storage/"))) {
+            finalUrl = Capacitor.convertFileSrc(finalUrl);
           }
 
           if (finalUrl) {

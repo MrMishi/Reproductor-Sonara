@@ -2,15 +2,16 @@
  * ============================================================================
  * SONARA MUSIC - SERVICIO DE ESCANEO NATIVO DE AUDIO (@capacitor/filesystem)
  * ============================================================================
- * Escaneo y detección de pistas locales en directorios estándar de Android:
- * - /Music
- * - /Download
- * - /WhatsApp Audio
+ * Escaneo y detección de pistas locales en Android:
+ * - Solicitud explícita de permisos con Filesystem.requestPermissions() (READ_MEDIA_AUDIO / READ_EXTERNAL_STORAGE).
+ * - Acceso a la raíz (/storage/emulated/0/) mediante Directory.ExternalStorage y Directory.Documents.
+ * - Escaneo recursivo de la raíz y subcarpetas comunes:
+ *   'Music', 'Download', 'YMusic', 'WhatsApp/Media/WhatsApp Audio', etc.
  *
- * Persistencia nativa:
- * - Guarda únicamente rutas nativas ('file://...' o URI).
- * - NO almacena Blobs ni ArrayBuffers en caché o memoria.
- * - Reproducción directa desde la ruta física local.
+ * Persistencia nativa sin conversión de caché:
+ * - Guarda únicamente rutas nativas ('file://...' o URI) y URLs directas con Capacitor.convertFileSrc().
+ * - NO almacena Blobs ni ArrayBuffers en caché o IndexedDB.
+ * - Reproducción directa desde la ruta física local en el WebView de Capacitor.
  */
 
 import { Filesystem, Directory } from "@capacitor/filesystem";
@@ -32,45 +33,176 @@ const SUPPORTED_AUDIO_EXTENSIONS = [
   ".ogg",
   ".opus",
   ".webm",
+  ".wma",
 ];
 
 function isAudioFileName(filename: string): boolean {
+  if (!filename) return false;
   const lower = filename.toLowerCase();
   return SUPPORTED_AUDIO_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /**
- * Rutas nativas estándar a inspeccionar en almacenamiento de Android
+ * Carpetas comunes de música en Android a inspeccionar con prioridad
  */
-export const ANDROID_TARGET_DIRECTORIES = [
+export const ANDROID_COMMON_MUSIC_DIRECTORIES = [
   { name: "Music", path: "Music" },
   { name: "Download", path: "Download" },
   { name: "Downloads", path: "Downloads" },
-  { name: "WhatsApp Audio", path: "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Audio" },
-  { name: "WhatsApp Audio (Legacy)", path: "WhatsApp/Media/WhatsApp Audio" },
+  { name: "YMusic", path: "YMusic" },
+  { name: "Music/YMusic", path: "Music/YMusic" },
+  { name: "WhatsApp Audio", path: "WhatsApp/Media/WhatsApp Audio" },
+  { name: "WhatsApp Audio (Media)", path: "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Audio" },
+  { name: "Podcasts", path: "Podcasts" },
+  { name: "Audiobooks", path: "Audiobooks" },
+  { name: "Recordings", path: "Recordings" },
+  { name: "Telegram Audio", path: "Telegram/Telegram Audio" },
+  { name: "Snaptube Audio", path: "snaptube/download/Snaptube Audio" },
 ];
 
 /**
- * Solicita permisos de lectura en almacenamiento público
+ * Carpetas del sistema a ignorar durante el escaneo recursivo para maximizar velocidad
+ */
+const IGNORED_SYSTEM_FOLDERS = new Set([
+  "node_modules",
+  ".git",
+  ".svn",
+  ".vscode",
+  ".thumbnails",
+  ".trash",
+  ".cache",
+  "lost.dir",
+  "android/data",
+  "android/obb",
+  "dcim",
+  "pictures",
+  "movies",
+  "cache",
+  "temp",
+  "tmp",
+  "appdata",
+  "system volume information",
+  "$recycle.bin",
+]);
+
+function isIgnoredFolder(folderName: string, fullPath: string): boolean {
+  const lowerName = folderName.toLowerCase();
+  const lowerPath = fullPath.toLowerCase();
+  if (lowerName.startsWith(".")) return true;
+  if (IGNORED_SYSTEM_FOLDERS.has(lowerName)) return true;
+  if (lowerPath.includes("android/data") || lowerPath.includes("android/obb")) return true;
+  return false;
+}
+
+/**
+ * Solicita explícitamente permisos de almacenamiento en Android ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE')
+ * llamando directamente a Filesystem.requestPermissions()
  */
 export async function requestStoragePermissions(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return true;
   try {
-    const permStatus = await Filesystem.checkPermissions();
-    if (permStatus.publicStorage !== "granted") {
-      const req = await Filesystem.requestPermissions();
-      return req.publicStorage === "granted";
+    console.log("[NativeScanner] Solicitando permisos con Filesystem.requestPermissions()...");
+    const req = await Filesystem.requestPermissions();
+    console.log("[NativeScanner] Resultado requestPermissions:", req);
+    if (req?.publicStorage === "granted") {
+      return true;
     }
-    return true;
+    const check = await Filesystem.checkPermissions();
+    console.log("[NativeScanner] Resultado checkPermissions:", check);
+    return check?.publicStorage === "granted";
   } catch (permErr) {
-    console.warn("Error al verificar/solicitar permisos de almacenamiento:", permErr);
-    return false;
+    console.warn("[NativeScanner] Error al solicitar permisos de almacenamiento:", permErr);
+    try {
+      const check = await Filesystem.checkPermissions();
+      return check?.publicStorage === "granted";
+    } catch {
+      return false;
+    }
+  }
+}
+
+interface DiscoveredAudioEntry {
+  path: string;
+  fileName: string;
+  folderName: string;
+  size?: number;
+  directory: Directory;
+}
+
+/**
+ * Recorre recursivamente un directorio en el almacenamiento físico de Android
+ */
+async function scanFolderRecursively(
+  baseDirectory: Directory,
+  subPath: string,
+  depth: number,
+  maxDepth: number,
+  visitedPaths: Set<string>,
+  audioFiles: DiscoveredAudioEntry[],
+  onProgress?: (folder: string, count: number, msg: string) => void
+): Promise<void> {
+  if (depth > maxDepth) return;
+  const normalizedKey = `${baseDirectory}:${subPath.replace(/^\/+|\/+$/g, "")}`.toLowerCase();
+  if (visitedPaths.has(normalizedKey)) return;
+  visitedPaths.add(normalizedKey);
+
+  try {
+    const readResult = await Filesystem.readdir({
+      path: subPath,
+      directory: baseDirectory,
+    });
+
+    const entries = readResult.files || [];
+    const displayFolder = subPath || "Almacenamiento raíz";
+    onProgress?.(displayFolder, audioFiles.length, `Explorando /${displayFolder}...`);
+
+    for (const entry of entries) {
+      const entryName = typeof entry === "string" ? entry : entry.name;
+      if (!entryName) continue;
+
+      const childPath = subPath ? `${subPath}/${entryName}` : entryName;
+      const entrySize =
+        typeof entry === "object" && entry && "size" in entry && typeof entry.size === "number"
+          ? entry.size
+          : 0;
+      const isDir = typeof entry === "object" && entry && "type" in entry ? entry.type === "directory" : undefined;
+      const isFile = typeof entry === "object" && entry && "type" in entry ? entry.type === "file" : undefined;
+
+      if (isAudioFileName(entryName) && isDir !== true) {
+        audioFiles.push({
+          path: childPath,
+          fileName: entryName,
+          folderName: subPath || "Almacenamiento Local",
+          size: entrySize,
+          directory: baseDirectory,
+        });
+      } else if (isFile !== true && !isIgnoredFolder(entryName, childPath)) {
+        try {
+          await scanFolderRecursively(
+            baseDirectory,
+            childPath,
+            depth + 1,
+            maxDepth,
+            visitedPaths,
+            audioFiles,
+            onProgress
+          );
+        } catch {
+          // Omitir subcarpeta protegida o inaccesible
+        }
+      }
+    }
+  } catch {
+    // Si la carpeta no existe o no tiene permisos, omitir silenciosamente
   }
 }
 
 /**
  * Escanea el almacenamiento físico de Android en busca de canciones.
- * Utiliza rutas nativas y URLs directas sin conversión de Blobs ni saturación de memoria.
+ * - Utiliza Directory.ExternalStorage (/storage/emulated/0/) con fallback a Directory.Documents.
+ * - Escaneo recursivo de la raíz y subcarpetas comunes: 'Music', 'Download', 'YMusic', 'WhatsApp/Media/WhatsApp Audio'.
+ * - Persistencia nativa: asigna Capacitor.convertFileSrc(nativeUri) y guarda 'file://...'.
+ * - CERO Blobs y CERO ArrayBuffers en IndexedDB o caché.
  */
 export async function scanNativeMusicDirectories(
   onProgress?: ScanProgressCallback,
@@ -90,90 +222,117 @@ export async function scanNativeMusicDirectories(
   }
 
   try {
-    await requestStoragePermissions();
+    // 1. Solicitar permisos de almacenamiento explícitamente
+    onProgress?.("Permisos", 0, 0, "Solicitando permisos de almacenamiento...");
+    const hasPermission = await requestStoragePermissions();
+    if (!hasPermission) {
+      console.warn("[NativeScanner] Permisos de almacenamiento no confirmados; intentando escaneo de todas formas...");
+    }
 
-    let totalDiscovered = 0;
+    const visitedPaths = new Set<string>();
+    const audioEntries: DiscoveredAudioEntry[] = [];
+
+    // 2. Escaneo recursivo en subcarpetas comunes prioritarias en Directory.ExternalStorage
+    for (const commonDir of ANDROID_COMMON_MUSIC_DIRECTORIES) {
+      onProgress?.(commonDir.name, audioEntries.length, 0, `Inspeccionando /${commonDir.name}...`);
+      await scanFolderRecursively(
+        Directory.ExternalStorage,
+        commonDir.path,
+        0,
+        5, // Hasta 5 niveles de profundidad (ej. Music/Artista/Álbum/CD1)
+        visitedPaths,
+        audioEntries,
+        (folder, count, msg) => onProgress?.(folder, count, 0, msg)
+      );
+    }
+
+    // 3. Escaneo recursivo en la raíz del almacenamiento (/storage/emulated/0/)
+    onProgress?.("Raíz", audioEntries.length, 0, "Escaneando raíz de almacenamiento (/storage/emulated/0/)...");
+    await scanFolderRecursively(
+      Directory.ExternalStorage,
+      "",
+      0,
+      3, // Hasta 3 niveles en la raíz para capturar carpetas personalizadas sin saturar
+      visitedPaths,
+      audioEntries,
+      (folder, count, msg) => onProgress?.(folder, count, 0, msg)
+    );
+
+    // 4. Fallback a Directory.Documents si no se encontraron pistas o para completar
+    if (audioEntries.length === 0) {
+      onProgress?.("Documentos", 0, 0, "Intentando escaneo en Directory.Documents...");
+      await scanFolderRecursively(
+        Directory.Documents,
+        "",
+        0,
+        4,
+        visitedPaths,
+        audioEntries,
+        (folder, count, msg) => onProgress?.(folder, count, 0, msg)
+      );
+    }
+
+    const totalDiscovered = audioEntries.length;
     let totalProcessed = 0;
 
-    for (const dirTarget of ANDROID_TARGET_DIRECTORIES) {
-      onProgress?.(dirTarget.name, totalDiscovered, totalProcessed, `Inspeccionando /${dirTarget.name}...`);
+    // 5. Convertir entradas a pistas con rutas nativas y URLs directas (sin Blobs)
+    const seenUris = new Set<string>();
 
+    for (const item of audioEntries) {
       try {
-        const readResult = await Filesystem.readdir({
-          path: dirTarget.path,
-          directory: Directory.ExternalStorage,
+        onProgress?.(item.folderName, totalDiscovered, totalProcessed, `Procesando: ${item.fileName}`);
+
+        const fileUriResult = await Filesystem.getUri({
+          path: item.path,
+          directory: item.directory,
         });
 
-        const filesList = readResult.files || [];
-        const audioEntries = filesList.filter((f) => {
-          const name = typeof f === "string" ? f : f.name;
-          return isAudioFileName(name);
-        });
-
-        totalDiscovered += audioEntries.length;
-
-        for (const fileEntry of audioEntries) {
-          const fileName = typeof fileEntry === "string" ? fileEntry : fileEntry.name;
-          const fullFilePath = `${dirTarget.path}/${fileName}`;
-
-          try {
-            onProgress?.(dirTarget.name, totalDiscovered, totalProcessed, `Analizando: ${fileName}`);
-
-            const fileUriResult = await Filesystem.getUri({
-              path: fullFilePath,
-              directory: Directory.ExternalStorage,
-            });
-
-            const nativeUri = fileUriResult.uri;
-            // Convertir URI a URL directa para el Webview de Capacitor
-            const webAudioUrl = Capacitor.convertFileSrc(nativeUri);
-
-            // Obtener título y artista limpios a partir del nombre del archivo
-            const { title, artist } = cleanFilename(fileName);
-            const coverUrl = generateCoverArt(title, artist);
-
-            const fileSize =
-              typeof fileEntry === "object" && fileEntry && "size" in fileEntry && typeof fileEntry.size === "number"
-                ? fileEntry.size
-                : 0;
-
-            const format = fileName.split(".").pop()?.toUpperCase() || "AUDIO";
-
-            const parsedTrack: Track = {
-              id: `native_${encodeURIComponent(nativeUri)}`,
-              title,
-              artist,
-              album: dirTarget.name,
-              duration: 0, // Se actualiza automáticamente cuando el elemento <audio> carga los metadatos
-              url: webAudioUrl,
-              nativePath: nativeUri,
-              coverUrl,
-              format,
-              size: fileSize,
-              addedAt: Date.now(),
-              isFavorite: false,
-              folderPath: dirTarget.name,
-              fileName,
-            };
-
-            // Filtrar pistas marcadas como ocultas
-            if (isTrackHidden(parsedTrack)) {
-              continue;
-            }
-
-            // Filtro opcional de notas de voz cortas
-            if (filterShortAudios && parsedTrack.duration > 0 && parsedTrack.duration < 30) {
-              continue;
-            }
-
-            discoveredTracks.push(parsedTrack);
-            totalProcessed++;
-          } catch (fileErr: unknown) {
-            console.warn(`No se pudo procesar archivo ${fileName}:`, fileErr);
-          }
+        const nativeUri = fileUriResult.uri;
+        if (seenUris.has(nativeUri)) {
+          continue;
         }
-      } catch (dirErr: unknown) {
-        // La carpeta puede no existir en el dispositivo, omitir silenciosamente
+        seenUris.add(nativeUri);
+
+        // Convertir URI a URL directa para el WebView de Capacitor
+        const webAudioUrl = Capacitor.convertFileSrc(nativeUri);
+
+        // Obtener título y artista limpios a partir del nombre del archivo
+        const { title, artist } = cleanFilename(item.fileName);
+        const coverUrl = generateCoverArt(title, artist);
+
+        const format = item.fileName.split(".").pop()?.toUpperCase() || "AUDIO";
+
+        const parsedTrack: Track = {
+          id: `native_${encodeURIComponent(nativeUri)}`,
+          title,
+          artist,
+          album: item.folderName || "Almacenamiento Local",
+          duration: 0, // Se autocompleta con el elemento <audio> al reproducir o cargar metadatos
+          url: webAudioUrl,
+          nativePath: nativeUri,
+          coverUrl,
+          format,
+          size: item.size || 0,
+          addedAt: Date.now(),
+          isFavorite: false,
+          folderPath: item.folderName,
+          fileName: item.fileName,
+        };
+
+        // Filtrar pistas marcadas como ocultas
+        if (isTrackHidden(parsedTrack)) {
+          continue;
+        }
+
+        // Filtro opcional de notas de voz cortas
+        if (filterShortAudios && parsedTrack.duration > 0 && parsedTrack.duration < 30) {
+          continue;
+        }
+
+        discoveredTracks.push(parsedTrack);
+        totalProcessed++;
+      } catch (fileErr: unknown) {
+        console.warn(`[NativeScanner] No se pudo resolver ruta para ${item.fileName}:`, fileErr);
       }
     }
 
@@ -196,7 +355,7 @@ export async function scanNativeMusicDirectories(
 /**
  * Escaneo automático al iniciar la app.
  * Solicita permisos de almacenamiento ('@capacitor/filesystem'),
- * escanea /Music y /Download, y devuelve las nuevas pistas a incorporar.
+ * escanea el almacenamiento nativo de forma recursiva y devuelve las nuevas pistas a incorporar.
  */
 export async function autoScanStartup(
   existingTracks: Track[],
@@ -206,6 +365,9 @@ export async function autoScanStartup(
   if (!isNative) return [];
 
   try {
+    // Solicita permisos explícitamente antes de escanear
+    await requestStoragePermissions();
+
     const { tracks } = await scanNativeMusicDirectories(undefined, filterShortAudios);
     if (!tracks || tracks.length === 0) return [];
 
@@ -232,3 +394,4 @@ export async function autoScanStartup(
     return [];
   }
 }
+

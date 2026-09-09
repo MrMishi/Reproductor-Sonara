@@ -460,13 +460,13 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
 
   /**
    * Escaneo nativo automático en directorios estándar de Android (@capacitor/filesystem)
-   * Inspecciona /Music, /Download y /WhatsApp Audio
+   * Inspecciona /Music, /Download, /YMusic, /WhatsApp Audio y raíz del almacenamiento
    */
   const handleScanNativeAndroidFolders = async () => {
     isCancelledRef.current = false;
     setIsScanning(true);
     setStatusType("info");
-    setProgressStatus("Iniciando escaneo automático en /Music, /Download y /WhatsApp Audio...");
+    setProgressStatus("Solicitando permisos y escaneando /Music, /Download, /YMusic y /WhatsApp Audio...");
     setDiscoveredCount(0);
     setProcessedCount(0);
 
@@ -509,7 +509,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
         setProgressStatus(
           result.errors.length > 0
             ? `No se detectaron pistas de audio (${result.errors[0]}). Puedes seleccionar tu carpeta manualmente.`
-            : "No se encontraron canciones en /Music, /Download ni /WhatsApp Audio. Selecciona una carpeta manualmente."
+            : "No se encontraron canciones en /Music, /Download, /YMusic ni almacenamiento. Selecciona una carpeta manualmente."
         );
       }
     } catch (err: unknown) {
@@ -691,7 +691,9 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
                     Capacitor Native
                   </span>
                 </div>
-                <span className="text-[11px] opacity-70">Detecta /Music, /Download y /WhatsApp Audio</span>
+                <span className="text-[11px] opacity-70">
+                  Escaneo recursivo: /Music, /Download, /YMusic, WhatsApp y raíz
+                </span>
               </div>
             </button>
 
