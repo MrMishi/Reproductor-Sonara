@@ -23,7 +23,7 @@ import { InstallAppModal } from "./components/InstallAppModal";
 import { HiddenTracksModal } from "./components/HiddenTracksModal";
 import { SleepTimerModal } from "./components/SleepTimerModal";
 import { Capacitor } from "@capacitor/core";
-import { autoScanStartup } from "./services/nativeScanner";
+import { autoScanStartup, requestStoragePermissions } from "./services/nativeScanner";
 import { ID3EditorModal } from "./components/ID3EditorModal";
 import { parseAudioFile } from "./services/metadataParser";
 import { AlertCircle } from "lucide-react";
@@ -177,11 +177,12 @@ export default function App() {
       }
 
       // ESCANEO AUTOMÁTICO PREDETERMINADO EN ANDROID:
-      // Al iniciar la app, solicita permisos de almacenamiento ('@capacitor/filesystem')
-      // y escanea automáticamente la carpeta '/Music' (y '/Download').
-      // Agrega de forma automática las pistas encontradas a la biblioteca.
+      // Al iniciar la app, solicita permisos de almacenamiento ('READ_MEDIA_AUDIO' y 'READ_EXTERNAL_STORAGE')
+      // y escanea automáticamente la carpeta '/Music' y '/Download' guardando rutas nativas.
       if (Capacitor.isNativePlatform()) {
         try {
+          console.log("[App] Solicitando permisos nativos de almacenamiento en inicio de app...");
+          await requestStoragePermissions();
           const newDiscovered = await autoScanStartup(currentList, filterShortAudios);
           if (newDiscovered.length > 0) {
             setTracks((prev) => {
@@ -203,13 +204,28 @@ export default function App() {
     initLibrary();
   }, []);
 
-  // Pistas visibles con filtro de audios cortos (< 30s) opcional
+  // Pistas visibles con filtro estricto de notas de voz ('PTT-') y audios cortos (< 30s)
   const visibleTracks = useMemo(() => {
-    if (!filterShortAudios) return tracks;
-    return tracks.filter((t) => !t.duration || t.duration >= 30);
+    return tracks.filter((t) => {
+      if (t.fileName && /^PTT-/i.test(t.fileName)) return false;
+      if (t.title && /^PTT-/i.test(t.title)) return false;
+      if (filterShortAudios && t.duration && t.duration > 0 && t.duration < 30) return false;
+      return true;
+    });
   }, [tracks, filterShortAudios]);
 
-  const currentTrack = tracks[currentTrackIndex] || null;
+  const currentTrack = visibleTracks[currentTrackIndex] || tracks[currentTrackIndex] || null;
+
+  // Refs estables para eventos de MediaSession y segundo plano en Android
+  const isPlayingRef = useRef(isPlaying);
+  const handleTogglePlayRef = useRef<() => void>(() => {});
+  const handleNextRef = useRef<() => void>(() => {});
+  const handlePrevRef = useRef<() => void>(() => {});
+  const handleSeekRef = useRef<(time: number) => void>(() => {});
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // Initialize AudioEngine when audio element is ready
   useEffect(() => {
@@ -261,8 +277,9 @@ export default function App() {
   // Handle Play/Pause
   const handleTogglePlay = () => {
     if (!audioRef.current || !currentTrack) {
-      if (tracks.length > 0) {
-        handlePlayTrack(tracks[0], 0);
+      const activeList = visibleTracks.length > 0 ? visibleTracks : tracks;
+      if (activeList.length > 0) {
+        handlePlayTrack(activeList[0], 0);
       } else {
         setIsScannerOpen(true);
       }
@@ -279,10 +296,18 @@ export default function App() {
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "paused";
+      }
     } else {
       audioRef.current
         .play()
-        .then(() => setIsPlaying(true))
+        .then(() => {
+          setIsPlaying(true);
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = "playing";
+          }
+        })
         .catch((e) => {
           console.warn("Error playing audio:", e?.message || "playback failed");
           setToastMessage("No se pudo iniciar la reproducción del archivo.");
@@ -293,10 +318,11 @@ export default function App() {
 
   // Next Track
   const handleNext = () => {
-    if (tracks.length === 0) return;
+    const activeList = visibleTracks.length > 0 ? visibleTracks : tracks;
+    if (activeList.length === 0) return;
 
     if (playbackMode === "shuffle") {
-      const nextIdx = Math.floor(Math.random() * tracks.length);
+      const nextIdx = Math.floor(Math.random() * activeList.length);
       setCurrentTrackIndex(nextIdx);
     } else if (playbackMode === "repeat-one") {
       if (audioRef.current) {
@@ -305,7 +331,7 @@ export default function App() {
       }
     } else {
       // Normal or repeat-all
-      const nextIdx = (currentTrackIndex + 1) % tracks.length;
+      const nextIdx = (currentTrackIndex + 1) % activeList.length;
       setCurrentTrackIndex(nextIdx);
     }
     setIsPlaying(true);
@@ -313,7 +339,8 @@ export default function App() {
 
   // Previous Track
   const handlePrev = () => {
-    if (tracks.length === 0) return;
+    const activeList = visibleTracks.length > 0 ? visibleTracks : tracks;
+    if (activeList.length === 0) return;
 
     if (currentTime > 3) {
       if (audioRef.current) {
@@ -323,7 +350,7 @@ export default function App() {
       return;
     }
 
-    const prevIdx = (currentTrackIndex - 1 + tracks.length) % tracks.length;
+    const prevIdx = (currentTrackIndex - 1 + activeList.length) % activeList.length;
     setCurrentTrackIndex(prevIdx);
     setIsPlaying(true);
   };
@@ -336,63 +363,137 @@ export default function App() {
     }
   };
 
-  // Integración completa con MediaSession API para notificaciones y pantalla de bloqueo de Android
+  // Mantener los handlers actualizados para invocaciones externas de MediaSession
+  useEffect(() => {
+    handleTogglePlayRef.current = handleTogglePlay;
+    handleNextRef.current = handleNext;
+    handlePrevRef.current = handlePrev;
+    handleSeekRef.current = handleSeek;
+  });
+
+  // Asegurar la reproducción continua en segundo plano cuando la app se minimiza o se bloquea la pantalla
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // App minimizada o pantalla bloqueada en Android / MIUI / HyperOS
+        if (isPlayingRef.current && audioRef.current) {
+          audioEngine.resumeContext();
+          if (audioRef.current.paused) {
+            audioRef.current.play().catch((err) => {
+              console.warn("[BackgroundPlayback] Manteniendo reproducción en segundo plano:", err);
+            });
+          }
+        }
+      } else {
+        // App restaurada al primer plano
+        if (isPlayingRef.current && audioRef.current && audioRef.current.paused) {
+          audioEngine.resumeContext();
+          audioRef.current.play().catch(() => {});
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  // Integración completa con MediaSession API para notificaciones, pantalla de bloqueo y Centro de Control (MIUI/HyperOS)
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
 
     if (currentTrack) {
       try {
-        const coverSrc = currentTrack.coverUrl || "/icon.svg";
+        const origin = window.location.origin;
+        const coverSrc = currentTrack.coverUrl || `${origin}/icon.svg`;
+
+        const artworkList = [
+          { src: coverSrc, sizes: "96x96", type: "image/png" },
+          { src: coverSrc, sizes: "128x128", type: "image/png" },
+          { src: coverSrc, sizes: "192x192", type: "image/png" },
+          { src: coverSrc, sizes: "256x256", type: "image/png" },
+          { src: coverSrc, sizes: "384x384", type: "image/png" },
+          { src: coverSrc, sizes: "512x512", type: "image/png" },
+          // Respaldo de alta resolución para el Centro de Control de MIUI / HyperOS
+          { src: `${origin}/pwa-192x192.png`, sizes: "192x192", type: "image/png" },
+          { src: `${origin}/pwa-512x512.png`, sizes: "512x512", type: "image/png" },
+        ];
+
         navigator.mediaSession.metadata = new MediaMetadata({
           title: currentTrack.title || "Sonora Music",
           artist: currentTrack.artist || "Artista Desconocido",
-          album: currentTrack.album || "Sonora",
-          artwork: [
-            { src: coverSrc, sizes: "96x96", type: "image/png" },
-            { src: coverSrc, sizes: "128x128", type: "image/png" },
-            { src: coverSrc, sizes: "192x192", type: "image/png" },
-            { src: coverSrc, sizes: "256x256", type: "image/png" },
-            { src: coverSrc, sizes: "512x512", type: "image/png" },
-          ],
+          album: currentTrack.album || "Sonora Player",
+          artwork: artworkList,
         });
       } catch (e) {
         console.warn("Error setting MediaSession metadata:", e);
       }
     }
 
+    // Configurar acciones estándar de Media Session requeridas por Android y MIUI/HyperOS
     try {
       navigator.mediaSession.setActionHandler("play", () => {
-        if (!isPlaying) handleTogglePlay();
-      });
-      navigator.mediaSession.setActionHandler("pause", () => {
-        if (isPlaying) handleTogglePlay();
-      });
-      navigator.mediaSession.setActionHandler("previoustrack", () => {
-        handlePrev();
-      });
-      navigator.mediaSession.setActionHandler("nexttrack", () => {
-        handleNext();
-      });
-      navigator.mediaSession.setActionHandler("seekto", (details) => {
-        if (details.seekTime !== undefined && details.seekTime !== null) {
-          handleSeek(details.seekTime);
+        audioEngine.resumeContext();
+        if (audioRef.current && audioRef.current.paused) {
+          audioRef.current.play().then(() => {
+            setIsPlaying(true);
+            if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+          }).catch(console.warn);
+        } else {
+          handleTogglePlayRef.current();
         }
       });
+
+      navigator.mediaSession.setActionHandler("pause", () => {
+        if (audioRef.current && !audioRef.current.paused) {
+          audioRef.current.pause();
+          setIsPlaying(false);
+          if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+        } else {
+          handleTogglePlayRef.current();
+        }
+      });
+
+      navigator.mediaSession.setActionHandler("previoustrack", () => {
+        handlePrevRef.current();
+      });
+
+      navigator.mediaSession.setActionHandler("nexttrack", () => {
+        handleNextRef.current();
+      });
+
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        if (details.seekTime !== undefined && details.seekTime !== null) {
+          handleSeekRef.current(details.seekTime);
+        }
+      });
+
       navigator.mediaSession.setActionHandler("seekbackward", (details) => {
         const offset = details.seekOffset || 10;
         const cur = audioRef.current?.currentTime || 0;
-        handleSeek(Math.max(0, cur - offset));
+        handleSeekRef.current(Math.max(0, cur - offset));
       });
+
       navigator.mediaSession.setActionHandler("seekforward", (details) => {
         const offset = details.seekOffset || 10;
         const cur = audioRef.current?.currentTime || 0;
         const dur = audioRef.current?.duration || duration || 0;
-        handleSeek(Math.min(dur, cur + offset));
+        handleSeekRef.current(Math.min(dur, cur + offset));
+      });
+
+      navigator.mediaSession.setActionHandler("stop", () => {
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+        }
+        setIsPlaying(false);
+        if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "none";
       });
     } catch (err) {
       console.warn("Error setting MediaSession action handlers:", err);
     }
-  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.coverUrl, isPlaying, duration]);
+  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.coverUrl, duration]);
 
   // Sincronizar estado de reproducción y barra de progreso en MediaSession
   useEffect(() => {
@@ -402,10 +503,11 @@ export default function App() {
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
 
       if ("setPositionState" in navigator.mediaSession && duration > 0 && !isNaN(duration) && isFinite(duration)) {
+        const cur = Math.min(Math.max(0, audioRef.current?.currentTime || currentTime), duration);
         navigator.mediaSession.setPositionState({
           duration: Math.max(0, duration),
           playbackRate: audioRef.current?.playbackRate || 1,
-          position: Math.min(Math.max(0, currentTime), duration),
+          position: cur,
         });
       }
     } catch (e) {
@@ -832,11 +934,12 @@ export default function App() {
         color: "var(--color-text-primary, #ffffff)",
       }}
     >
-      {/* Hidden Audio Tag */}
+      {/* Hidden Audio Tag with playsInline for native Android background playback */}
       <audio
         ref={audioRef}
         id="native-audio-element"
         crossOrigin="anonymous"
+        playsInline
         onTimeUpdate={() => {
           if (audioRef.current) {
             setCurrentTime(audioRef.current.currentTime);
@@ -847,6 +950,14 @@ export default function App() {
             const realDuration = audioRef.current.duration;
             if (realDuration && !isNaN(realDuration) && isFinite(realDuration) && realDuration > 0) {
               setDuration(realDuration);
+
+              // Si la pista resulta ser menor a 30s, omitir inmediatamente y avanzar
+              if (realDuration < 30) {
+                console.log(`[Sonora] Descartando automáticamente audio corto (${realDuration.toFixed(1)}s)...`);
+                handleNext();
+                return;
+              }
+
               // Actualizar duración de la pista si era 0
               setTracks((prev) => {
                 const target = prev[currentTrackIndex];
@@ -870,10 +981,16 @@ export default function App() {
         onPlay={() => {
           setIsPlaying(true);
           audioEngine.setPlaybackState(true);
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = "playing";
+          }
         }}
         onPause={() => {
           setIsPlaying(false);
           audioEngine.setPlaybackState(false);
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = "paused";
+          }
         }}
         onError={() => {
           const mediaErr = audioRef.current?.error;

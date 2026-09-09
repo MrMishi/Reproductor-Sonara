@@ -246,7 +246,7 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
 
     const timer = setTimeout(() => {
       finish(estimatedSec);
-    }, 1500);
+    }, 800);
 
     audio.onloadedmetadata = () => {
       finish(audio.duration);
@@ -272,9 +272,16 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
 }
 
 /**
- * Parses a File object into a rich Track object
+ * Parses a File object into a rich Track object.
+ * Descarta automáticamente durante el escaneo todo archivo con duración menor a 30 segundos
+ * o cuyo nombre comience por 'PTT-'.
  */
-export async function parseAudioFile(file: File): Promise<Track> {
+export async function parseAudioFile(file: File): Promise<Track | null> {
+  // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' (WhatsApp Push-To-Talk)
+  if (/^PTT-/i.test(file.name)) {
+    return null;
+  }
+
   const url = URL.createObjectURL(file);
   const { title: fallbackTitle, artist: fallbackArtist } = cleanFilename(file.name);
 
@@ -290,6 +297,12 @@ export async function parseAudioFile(file: File): Promise<Track> {
   }
 
   const duration = await getAudioDuration(url, file.size);
+
+  // Filtro de notas de voz: descarta automáticamente todo archivo con duración menor a 30 segundos
+  if (duration > 0 && duration < 30) {
+    return null;
+  }
+
   const finalTitle = id3.title || fallbackTitle;
   const finalArtist = id3.artist || fallbackArtist;
   const coverUrl = id3.coverUrl || generateCoverArt(finalTitle, finalArtist);

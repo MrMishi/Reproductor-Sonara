@@ -1,6 +1,6 @@
 {
   "name": "Sonora - Music Player",
-  "description": "Reproductor de música Hi-Fi local y offline con persistencia nativa en almacenamiento interno (/Music y /Download), ecualizador gráfico multibanda y letras sincronizadas.",
+  "description": "Reproductor de música Hi-Fi local y offline con escaneo nativo ultrarrápido (/Music, /Download, /YMusic), controles de MediaSession para MIUI/HyperOS, ecualizador gráfico y letras sincronizadas.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

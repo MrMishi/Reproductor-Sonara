@@ -27,13 +27,22 @@ import {
   EyeOff,
   VolumeX,
   Smartphone,
+  ArrowLeft,
+  ChevronRight,
+  Folder,
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { Track } from "../types";
 import { parseAudioFile } from "../services/metadataParser";
 import { getInitialDemoTracks } from "../services/demoTracks";
 import { isTrackHidden, getHiddenTracks } from "../services/db";
-import { scanNativeMusicDirectories } from "../services/nativeScanner";
+import {
+  scanNativeMusicDirectories,
+  scanSpecificNativeDirectory,
+  requestStoragePermissions,
+  ANDROID_QUICK_FOLDERS,
+  AndroidFolderOption,
+} from "../services/nativeScanner";
 
 interface DeviceScannerModalProps {
   isOpen: boolean;
@@ -79,6 +88,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   const [discoveredCount, setDiscoveredCount] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isNativeFolderPickerOpen, setIsNativeFolderPickerOpen] = useState(false);
 
   // Audio Duration & Blacklist Filters (Default: 75 seconds minimum to eliminate WhatsApp audio / voice notes)
   const [filterShortAudios, setFilterShortAudios] = useState<boolean>(true);
@@ -98,6 +108,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
       setDiscoveredCount(0);
       setProcessedCount(0);
       setStatusType("info");
+      setIsNativeFolderPickerOpen(false);
     }
   }, [isOpen]);
 
@@ -248,6 +259,12 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
    * Modern File System Access API: showDirectoryPicker() with full abort/cancel safety
    */
   const handleScanDeviceDirectory = async () => {
+    // Si estamos en entorno Android nativo, abrir selector de carpetas con Filesystem.readdir()
+    if (Capacitor.isNativePlatform()) {
+      setIsNativeFolderPickerOpen(true);
+      return;
+    }
+
     isCancelledRef.current = false;
     setProgressStatus("");
     setStatusType("info");
@@ -459,14 +476,81 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   };
 
   /**
+   * Escaneo nativo de una carpeta específica de Android con Filesystem.readdir()
+   */
+  const handleScanSpecificFolder = async (folder: AndroidFolderOption) => {
+    isCancelledRef.current = false;
+    setIsScanning(true);
+    setStatusType("info");
+    setProgressStatus(`Solicitando permisos nativos y leyendo ${folder.displayPath}...`);
+    setDiscoveredCount(0);
+    setProcessedCount(0);
+
+    try {
+      const result = await scanSpecificNativeDirectory(
+        folder.path,
+        folder.name,
+        (currentFolder, found, processed, msg) => {
+          if (isCancelledRef.current) return;
+          setProgressStatus(`[${currentFolder}] ${msg}`);
+          setDiscoveredCount(found);
+          setProcessedCount(processed);
+        },
+        filterShortAudios
+      );
+
+      if (isCancelledRef.current) {
+        setStatusType("cancelled");
+        setProgressStatus("Escaneo cancelado por el usuario.");
+        setIsScanning(false);
+        return;
+      }
+
+      if (result.tracks.length > 0) {
+        setStatusType("success");
+        setProgressStatus(`¡Se importaron ${result.tracks.length} canciones de ${folder.name}!`);
+        onTracksImported(result.tracks);
+        setIsNativeFolderPickerOpen(false);
+        setTimeout(() => {
+          onClose();
+        }, 1200);
+      } else {
+        setStatusType("error");
+        setProgressStatus(
+          result.errors.length > 0
+            ? `No se detectaron pistas (${result.errors[0]}).`
+            : `No se encontraron pistas de audio en ${folder.displayPath}.`
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusType("error");
+      setProgressStatus(`Error al leer carpeta: ${msg}`);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  /**
+   * Disparo limpio del selector nativo de archivos de audio
+   */
+  const handleSelectFilesClick = () => {
+    if (filesInputRef.current) {
+      filesInputRef.current.value = "";
+      filesInputRef.current.click();
+    }
+  };
+
+  /**
    * Escaneo nativo automático en directorios estándar de Android (@capacitor/filesystem)
-   * Inspecciona /Music, /Download, /YMusic, /WhatsApp Audio y raíz del almacenamiento
+   * Solicita explícitamente permisos con Filesystem.requestPermissions() ('READ_MEDIA_AUDIO' y 'READ_EXTERNAL_STORAGE')
+   * y lee directamente de /Music y /Download guardando rutas nativas file://...
    */
   const handleScanNativeAndroidFolders = async () => {
     isCancelledRef.current = false;
     setIsScanning(true);
     setStatusType("info");
-    setProgressStatus("Solicitando permisos y escaneando /Music, /Download, /YMusic y /WhatsApp Audio...");
+    setProgressStatus("Solicitando permisos nativos ('READ_MEDIA_AUDIO' y 'READ_EXTERNAL_STORAGE')...");
     setDiscoveredCount(0);
     setProcessedCount(0);
 
@@ -480,6 +564,10 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
     }
 
     try {
+      console.log("[DeviceScanner] Solicitando permisos explícitos...");
+      await requestStoragePermissions();
+      setProgressStatus("Permisos comprobados. Escaneo ultrarrápido en /Music, /Download y /YMusic...");
+
       const result = await scanNativeMusicDirectories(
         (folder, found, processed, msg) => {
           if (isCancelledRef.current) return;
@@ -509,7 +597,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
         setProgressStatus(
           result.errors.length > 0
             ? `No se detectaron pistas de audio (${result.errors[0]}). Puedes seleccionar tu carpeta manualmente.`
-            : "No se encontraron canciones en /Music, /Download, /YMusic ni almacenamiento. Selecciona una carpeta manualmente."
+            : "No se encontraron canciones en /Music, /Download ni /YMusic. Selecciona una carpeta manualmente con el explorador."
         );
       }
     } catch (err: unknown) {
@@ -580,167 +668,215 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           accept="audio/*"
           className="hidden"
           onChange={handleFolderInputSelected}
-          onCancel={() => {
-            setIsScanning(false);
-            setProgressStatus("");
-          }}
         />
         <input
           ref={filesInputRef}
           type="file"
           multiple
-          accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus"
+          accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.webm,.wma"
           className="hidden"
           onChange={handleFilesInputSelected}
-          onCancel={() => {
-            setIsScanning(false);
-            setProgressStatus("");
-          }}
         />
 
-        {/* Drag & Drop Zone */}
-        <div
-          id="device-scanner-dropzone"
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragOver(true);
-          }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-2xl p-6 text-center flex flex-col items-center justify-center gap-3 transition-all ${
-            isDragOver ? "scale-[1.01] bg-white/10" : "hover:border-white/40"
-          }`}
-          style={{
-            borderColor: isDragOver ? "var(--color-accent)" : "var(--color-border-subtle)",
-            backgroundColor: isDragOver ? "rgba(255,255,255,0.04)" : "transparent",
-          }}
-        >
-          <div
-            className="w-12 h-12 rounded-full flex items-center justify-center transition-transform hover:scale-110 shadow-lg"
-            style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
-          >
-            <UploadCloud className="w-6 h-6" />
-          </div>
-          <div>
-            <p className="text-sm font-bold">Arrastra carpetas o canciones aquí</p>
-            <p className="text-xs opacity-70 mt-0.5">Compatible con MP3, FLAC, WAV, M4A, AAC, OGG y OPUS</p>
-          </div>
-        </div>
-
-        {/* Filtro simplificado de audios cortos */}
-        <div
-          id="smart-filter-settings-box"
-          className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all"
-          style={{
-            backgroundColor: "var(--color-surface, #141414)",
-            borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
-          }}
-        >
-          <label className="flex items-center gap-2.5 text-xs cursor-pointer select-none">
-            <input
-              id="filter-short-audios-toggle"
-              type="checkbox"
-              checked={filterShortAudios}
-              onChange={(e) => setFilterShortAudios(e.target.checked)}
-              className="w-4 h-4 rounded accent-violet-500 cursor-pointer"
-            />
-            <span className="font-semibold text-neutral-200">
-              Omitir audios cortos
-            </span>
-          </label>
-
-          {filterShortAudios && (
-            <div className="flex items-center gap-2 text-xs shrink-0 self-end sm:self-auto">
-              <span className="opacity-70 text-[11px]">Duración mínima:</span>
-              <select
-                id="min-duration-select"
-                value={minDurationSeconds}
-                onChange={(e) => setMinDurationSeconds(Number(e.target.value))}
-                className="bg-neutral-800 text-white rounded-lg px-2.5 py-1.5 text-xs border border-white/10 font-bold focus:outline-none cursor-pointer hover:border-white/20"
+        {isNativeFolderPickerOpen ? (
+          <div className="flex flex-col gap-3.5 animate-in fade-in duration-200">
+            {/* Header de navegación nativa */}
+            <div
+              className="flex items-center justify-between pb-3 border-b"
+              style={{ borderColor: "var(--color-border-subtle)" }}
+            >
+              <button
+                id="native-folder-picker-back-btn"
+                onClick={() => setIsNativeFolderPickerOpen(false)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-neutral-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-all cursor-pointer"
               >
-                <option value={75}>75s (Recomendado)</option>
-                <option value={60}>60s</option>
-                <option value={90}>90s</option>
-                <option value={120}>120s</option>
-                <option value={30}>30s</option>
-              </select>
+                <ArrowLeft className="w-4 h-4" />
+                <span>Volver a opciones</span>
+              </button>
+
+              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20 font-semibold">
+                Filesystem.readdir() Nativo
+              </span>
             </div>
-          )}
-        </div>
 
-        {/* Sección unificada: Importar Música Local (archivos o carpetas) */}
-        <div className="flex flex-col gap-2.5">
-          <div className="text-[10px] font-bold uppercase tracking-wider opacity-50 px-1 select-none">
-            Importar Música Local
+            <div>
+              <h3 className="text-sm font-bold text-white">Explorador de Carpetas Android</h3>
+              <p className="text-xs text-neutral-400 mt-0.5">
+                Selecciona una carpeta para leer directamente con Filesystem.readdir() sin interrupciones del WebView:
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {ANDROID_QUICK_FOLDERS.map((folder) => (
+                <button
+                  key={folder.id}
+                  id={`native-folder-${folder.id}-btn`}
+                  disabled={isScanning}
+                  onClick={() => handleScanSpecificFolder(folder)}
+                  className="p-3 rounded-xl border flex items-center justify-between text-left hover:bg-white/5 transition-all disabled:opacity-50 cursor-pointer group hover:border-emerald-500/40"
+                  style={{ borderColor: "var(--color-border-subtle)" }}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover:scale-105 transition-transform shrink-0">
+                      <Folder className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-bold block text-white truncate">{folder.name}</span>
+                      <span className="text-[10px] text-neutral-400 block truncate">{folder.displayPath}</span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-neutral-500 group-hover:text-emerald-400 shrink-0" />
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Escaneo Automático Android Nativo */}
-            <button
-              id="scan-native-directories-btn"
-              disabled={isScanning}
-              onClick={handleScanNativeAndroidFolders}
-              className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-emerald-500/10 transition-all disabled:opacity-50 cursor-pointer group col-span-1 sm:col-span-2 bg-emerald-500/5 border-emerald-500/20"
+        ) : (
+          <>
+            {/* Drag & Drop Zone */}
+            <div
+              id="device-scanner-dropzone"
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOver(true);
+              }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={handleDrop}
+              className={`border-2 border-dashed rounded-2xl p-6 text-center flex flex-col items-center justify-center gap-3 transition-all ${
+                isDragOver ? "scale-[1.01] bg-white/10" : "hover:border-white/40"
+              }`}
+              style={{
+                borderColor: isDragOver ? "var(--color-accent)" : "var(--color-border-subtle)",
+                backgroundColor: isDragOver ? "rgba(255,255,255,0.04)" : "transparent",
+              }}
             >
-              <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 group-hover:scale-105 transition-transform shrink-0">
-                <Smartphone className="w-4 h-4" />
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center transition-transform hover:scale-110 shadow-lg"
+                style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}
+              >
+                <UploadCloud className="w-6 h-6" />
               </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold block text-white">Escaneo Automático Android</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold">
-                    Capacitor Native
-                  </span>
-                </div>
-                <span className="text-[11px] opacity-70">
-                  Escaneo recursivo: /Music, /Download, /YMusic, WhatsApp y raíz
+              <div>
+                <p className="text-sm font-bold">Arrastra carpetas o canciones aquí</p>
+                <p className="text-xs opacity-70 mt-0.5">Compatible con MP3, FLAC, WAV, M4A, AAC, OGG y OPUS</p>
+              </div>
+            </div>
+
+            {/* Filtro simplificado de audios cortos */}
+            <div
+              id="smart-filter-settings-box"
+              className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all"
+              style={{
+                backgroundColor: "var(--color-surface, #141414)",
+                borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
+              }}
+            >
+              <label className="flex items-center gap-2.5 text-xs cursor-pointer select-none">
+                <input
+                  id="filter-short-audios-toggle"
+                  type="checkbox"
+                  checked={filterShortAudios}
+                  onChange={(e) => setFilterShortAudios(e.target.checked)}
+                  className="w-4 h-4 rounded accent-violet-500 cursor-pointer"
+                />
+                <span className="font-semibold text-neutral-200">
+                  Omitir audios cortos
                 </span>
-              </div>
-            </button>
+              </label>
 
-            <button
-              id="select-audio-files-btn"
-              disabled={isScanning}
-              onClick={() => filesInputRef.current?.click()}
-              className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-white/5 transition-all disabled:opacity-50 cursor-pointer group"
-              style={{ borderColor: "var(--color-border-subtle)" }}
-            >
-              <div className="p-2 rounded-lg bg-cyan-500/15 text-cyan-400 group-hover:scale-105 transition-transform shrink-0">
-                <Music className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-xs font-bold block text-white">Seleccionar Archivos</span>
-                <span className="text-[11px] opacity-70">Elige canciones específicas</span>
-              </div>
-            </button>
+              {filterShortAudios && (
+                <div className="flex items-center gap-2 text-xs shrink-0 self-end sm:self-auto">
+                  <span className="opacity-70 text-[11px]">Duración mínima:</span>
+                  <select
+                    id="min-duration-select"
+                    value={minDurationSeconds}
+                    onChange={(e) => setMinDurationSeconds(Number(e.target.value))}
+                    className="bg-neutral-800 text-white rounded-lg px-2.5 py-1.5 text-xs border border-white/10 font-bold focus:outline-none cursor-pointer hover:border-white/20"
+                  >
+                    <option value={75}>75s (Recomendado)</option>
+                    <option value={60}>60s</option>
+                    <option value={90}>90s</option>
+                    <option value={120}>120s</option>
+                    <option value={30}>30s</option>
+                  </select>
+                </div>
+              )}
+            </div>
 
-            <button
-              id="scan-device-folder-btn"
-              disabled={isScanning}
-              onClick={handleScanDeviceDirectory}
-              className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-white/5 transition-all disabled:opacity-50 cursor-pointer group"
-              style={{ borderColor: "var(--color-border-subtle)" }}
-            >
-              <div className="p-2 rounded-lg bg-amber-500/15 text-amber-400 group-hover:scale-105 transition-transform shrink-0">
-                <FolderSearch className="w-4 h-4" />
+            {/* Sección unificada: Importar Música Local (archivos o carpetas) */}
+            <div className="flex flex-col gap-2.5">
+              <div className="text-[10px] font-bold uppercase tracking-wider opacity-50 px-1 select-none">
+                Importar Música Local
               </div>
-              <div>
-                <span className="text-xs font-bold block text-white">Seleccionar Carpeta</span>
-                <span className="text-[11px] opacity-70">Escanea un directorio completo</span>
-              </div>
-            </button>
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Escaneo Automático Android Nativo */}
+                <button
+                  id="scan-native-directories-btn"
+                  disabled={isScanning}
+                  onClick={handleScanNativeAndroidFolders}
+                  className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-emerald-500/10 transition-all disabled:opacity-50 cursor-pointer group col-span-1 sm:col-span-2 bg-emerald-500/5 border-emerald-500/20"
+                >
+                  <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 group-hover:scale-105 transition-transform shrink-0">
+                    <Smartphone className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold block text-white">Escaneo Automático Android</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold">
+                        Capacitor Native
+                      </span>
+                    </div>
+                    <span className="text-[11px] opacity-70">
+                      Escaneo recursivo: /Music, /Download, /YMusic, WhatsApp y raíz
+                    </span>
+                  </div>
+                </button>
 
-          <button
-            id="load-demo-tracks-btn"
-            disabled={isScanning}
-            onClick={handleLoadDemo}
-            className="w-full p-2.5 rounded-xl border flex items-center justify-center gap-2 text-xs font-medium hover:bg-white/5 transition-all disabled:opacity-50 opacity-70 hover:opacity-100 cursor-pointer"
-            style={{ borderColor: "var(--color-border-subtle)" }}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Cargar Música de Prueba (Lo-Fi / Sintetizador)</span>
-          </button>
-        </div>
+                <button
+                  id="select-audio-files-btn"
+                  disabled={isScanning}
+                  onClick={handleSelectFilesClick}
+                  className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-white/5 transition-all disabled:opacity-50 cursor-pointer group"
+                  style={{ borderColor: "var(--color-border-subtle)" }}
+                >
+                  <div className="p-2 rounded-lg bg-cyan-500/15 text-cyan-400 group-hover:scale-105 transition-transform shrink-0">
+                    <Music className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold block text-white">Seleccionar Archivos</span>
+                    <span className="text-[11px] opacity-70">Elige canciones específicas</span>
+                  </div>
+                </button>
+
+                <button
+                  id="scan-device-folder-btn"
+                  disabled={isScanning}
+                  onClick={handleScanDeviceDirectory}
+                  className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-white/5 transition-all disabled:opacity-50 cursor-pointer group"
+                  style={{ borderColor: "var(--color-border-subtle)" }}
+                >
+                  <div className="p-2 rounded-lg bg-amber-500/15 text-amber-400 group-hover:scale-105 transition-transform shrink-0">
+                    <FolderSearch className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold block text-white">Seleccionar Carpeta</span>
+                    <span className="text-[11px] opacity-70">Escanea un directorio completo</span>
+                  </div>
+                </button>
+              </div>
+
+              <button
+                id="load-demo-tracks-btn"
+                disabled={isScanning}
+                onClick={handleLoadDemo}
+                className="w-full p-2.5 rounded-xl border flex items-center justify-center gap-2 text-xs font-medium hover:bg-white/5 transition-all disabled:opacity-50 opacity-70 hover:opacity-100 cursor-pointer"
+                style={{ borderColor: "var(--color-border-subtle)" }}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Cargar Música de Prueba (Lo-Fi / Sintetizador)</span>
+              </button>
+            </div>
+          </>
+        )}
 
         {/* Scanning In-Progress Display with CANCEL button */}
         {isScanning && (
