@@ -273,10 +273,13 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
 
 /**
  * Parses a File object into a rich Track object.
- * Descarta automáticamente durante el escaneo todo archivo con duración menor a 30 segundos
- * o cuyo nombre comience por 'PTT-'.
+ * Asegura que el filtro de duración (75s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
  */
-export async function parseAudioFile(file: File): Promise<Track | null> {
+export async function parseAudioFile(
+  file: File,
+  filterShortAudios: boolean = false,
+  minDurationSeconds: number = 75
+): Promise<Track | null> {
   // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' (WhatsApp Push-To-Talk)
   if (/^PTT-/i.test(file.name)) {
     return null;
@@ -298,8 +301,9 @@ export async function parseAudioFile(file: File): Promise<Track | null> {
 
   const duration = await getAudioDuration(url, file.size);
 
-  // Filtro de notas de voz: descarta automáticamente todo archivo con duración menor a 30 segundos
-  if (duration > 0 && duration < 30) {
+  // Filtro de notas de voz / audios cortos:
+  // NO descarta canciones si el metadato de tiempo aún no se ha terminado de leer (duration <= 0).
+  if (filterShortAudios && duration && duration > 0 && duration < minDurationSeconds) {
     return null;
   }
 

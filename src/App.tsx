@@ -178,12 +178,32 @@ export default function App() {
 
       // ESCANEO AUTOMÁTICO PREDETERMINADO EN ANDROID:
       // Al iniciar la app, solicita permisos de almacenamiento ('READ_MEDIA_AUDIO' y 'READ_EXTERNAL_STORAGE')
-      // y escanea automáticamente la carpeta '/Music' y '/Download' guardando rutas nativas.
+      // y escanea automáticamente la carpeta '/Music', '/Download' y '/YMusic' guardando rutas nativas y actualizando la lista al instante.
       if (Capacitor.isNativePlatform()) {
         try {
           console.log("[App] Solicitando permisos nativos de almacenamiento en inicio de app...");
           await requestStoragePermissions();
-          const newDiscovered = await autoScanStartup(currentList, filterShortAudios);
+          const newDiscovered = await autoScanStartup(
+            currentList,
+            filterShortAudios,
+            (newTrack) => {
+              // 3. AGREGAR A BIBLIOTECA:
+              // Registra de inmediato en el estado global para que se refleje en la lista al instante
+              setTracks((prev) => {
+                if (
+                  prev.some(
+                    (t) =>
+                      t.id === newTrack.id ||
+                      (t.nativePath && t.nativePath === newTrack.nativePath) ||
+                      (t.url && t.url === newTrack.url)
+                  )
+                ) {
+                  return prev;
+                }
+                return [...prev, newTrack];
+              });
+            }
+          );
           if (newDiscovered.length > 0) {
             setTracks((prev) => {
               const existingIds = new Set(prev.map((t) => t.id));
@@ -204,12 +224,22 @@ export default function App() {
     initLibrary();
   }, []);
 
-  // Pistas visibles con filtro estricto de notas de voz ('PTT-') y audios cortos (< 30s)
+  // Pistas visibles con filtro estricto de notas de voz ('PTT-') y audios cortos (< 75s)
+  // Asegurarse de que el filtro de duración (75s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
   const visibleTracks = useMemo(() => {
     return tracks.filter((t) => {
       if (t.fileName && /^PTT-/i.test(t.fileName)) return false;
       if (t.title && /^PTT-/i.test(t.title)) return false;
-      if (filterShortAudios && t.duration && t.duration > 0 && t.duration < 30) return false;
+      if (
+        filterShortAudios &&
+        t.duration !== undefined &&
+        t.duration !== null &&
+        !isNaN(t.duration) &&
+        t.duration > 0 &&
+        t.duration < 75
+      ) {
+        return false;
+      }
       return true;
     });
   }, [tracks, filterShortAudios]);
@@ -951,9 +981,9 @@ export default function App() {
             if (realDuration && !isNaN(realDuration) && isFinite(realDuration) && realDuration > 0) {
               setDuration(realDuration);
 
-              // Si la pista resulta ser menor a 30s, omitir inmediatamente y avanzar
-              if (realDuration < 30) {
-                console.log(`[Sonora] Descartando automáticamente audio corto (${realDuration.toFixed(1)}s)...`);
+              // Si la pista resulta ser una nota de voz identificada por 'PTT-' menor a 75s, omitir inmediatamente y avanzar
+              if (realDuration < 75 && currentTrack?.fileName && /^PTT-/i.test(currentTrack.fileName)) {
+                console.log(`[Sonora] Descartando automáticamente nota de voz (${realDuration.toFixed(1)}s)...`);
                 handleNext();
                 return;
               }

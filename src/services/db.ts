@@ -203,6 +203,49 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
 }
 
 /**
+ * Guarda o actualiza una única pista en IndexedDB de forma inmediata
+ * Registra la URL directa de Capacitor.convertFileSrc y la ruta nativa sin Blobs
+ */
+export async function addSingleTrackToDB(track: Track): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_TRACKS, "readwrite");
+    const store = tx.objectStore(STORE_TRACKS);
+
+    const nativePath = track.nativePath || (track.url?.startsWith("file://") ? track.url : undefined);
+
+    const record: any = {
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      duration: track.duration || 0,
+      coverUrl: track.coverUrl,
+      year: track.year,
+      genre: track.genre,
+      format: track.format,
+      size: track.size || 0,
+      addedAt: track.addedAt || Date.now(),
+      isFavorite: track.isFavorite || false,
+      folderPath: track.folderPath,
+      fileName: track.fileName || track.file?.name,
+      lyrics: track.lyrics,
+      nativePath: nativePath || track.nativePath,
+      url: track.url,
+    };
+
+    store.put(record);
+
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn("Error saving single track to IndexedDB:", err);
+  }
+}
+
+/**
  * Carga todas las pistas persistidas desde IndexedDB
  * Para rutas nativas de dispositivo, regenera la URL válida con Capacitor.convertFileSrc
  */

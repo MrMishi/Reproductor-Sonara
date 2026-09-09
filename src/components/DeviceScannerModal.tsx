@@ -50,7 +50,17 @@ interface DeviceScannerModalProps {
   onTracksImported: (newTracks: Track[]) => void;
 }
 
-const AUDIO_EXTENSIONS = [".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus", ".webm", ".wma"];
+const AUDIO_EXTENSIONS = [
+  ".mp3",
+  ".m4a",
+  ".flac",
+  ".wav",
+  ".ogg",
+  ".opus",
+  ".aac",
+  ".webm",
+  ".wma",
+];
 
 const IGNORED_DIRECTORIES = new Set([
   "node_modules",
@@ -73,8 +83,9 @@ const IGNORED_DIRECTORIES = new Set([
 ]);
 
 function isAudioFile(name: string): boolean {
-  const lower = name.toLowerCase();
-  return AUDIO_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  if (!name || typeof name !== "string") return false;
+  const lower = name.trim().toLowerCase();
+  return AUDIO_EXTENSIONS.some((ext) => lower.endsWith(ext.toLowerCase()));
 }
 
 export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
@@ -179,7 +190,15 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
               }
 
               // Verify duration: ignore WhatsApp voice notes or short sounds under minDurationSeconds
-              if (filterShortAudios && track.duration < minDurationSeconds) {
+              // Asegurarse de que el filtro de duración (75s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
+              if (
+                filterShortAudios &&
+                track.duration !== undefined &&
+                track.duration !== null &&
+                !isNaN(track.duration) &&
+                track.duration > 0 &&
+                track.duration < minDurationSeconds
+              ) {
                 skippedShortCount++;
                 return null;
               }
@@ -496,7 +515,12 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           setDiscoveredCount(found);
           setProcessedCount(processed);
         },
-        filterShortAudios
+        filterShortAudios,
+        (discoveredTrack) => {
+          // 3. AGREGAR A BIBLIOTECA:
+          // Registra de inmediato en IndexedDB/Estado global para que se refleje en la lista al instante.
+          onTracksImported([discoveredTrack]);
+        }
       );
 
       if (isCancelledRef.current) {
@@ -575,7 +599,13 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           setDiscoveredCount(found);
           setProcessedCount(processed);
         },
-        filterShortAudios
+        filterShortAudios,
+        (discoveredTrack) => {
+          // 3. AGREGAR A BIBLIOTECA:
+          // Registra de inmediato en IndexedDB/Estado global la ruta devuelta 'Capacitor.convertFileSrc(path)'
+          // para que se reflejen en la lista al instante.
+          onTracksImported([discoveredTrack]);
+        }
       );
 
       if (isCancelledRef.current) {
