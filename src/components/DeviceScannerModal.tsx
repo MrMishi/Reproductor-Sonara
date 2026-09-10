@@ -33,9 +33,6 @@ import {
   EyeOff,
   VolumeX,
   Smartphone,
-  ArrowLeft,
-  ChevronRight,
-  Folder,
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { Track } from "../types";
@@ -44,13 +41,9 @@ import { getInitialDemoTracks } from "../services/demoTracks";
 import { isTrackHidden, getHiddenTracks } from "../services/db";
 import {
   scanNativeMusicDirectories,
-  scanSpecificNativeDirectory,
   requestStoragePermissions,
-  ANDROID_QUICK_FOLDERS,
-  AndroidFolderOption,
-  listNativeDirectories,
-  NativeFolderItem,
 } from "../services/nativeScanner";
+import { pickAndScanNativeSafFolder } from "../services/nativeFolderPicker";
 
 interface DeviceScannerModalProps {
   isOpen: boolean;
@@ -107,12 +100,6 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   const [discoveredCount, setDiscoveredCount] = useState(0);
   const [processedCount, setProcessedCount] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [isNativeFolderPickerOpen, setIsNativeFolderPickerOpen] = useState(false);
-
-  // Estado para la navegación libre de carpetas nativas en Android
-  const [nativeCurrentPath, setNativeCurrentPath] = useState<string>("");
-  const [nativeFoldersList, setNativeFoldersList] = useState<NativeFolderItem[]>([]);
-  const [isLoadingNativeFolders, setIsLoadingNativeFolders] = useState<boolean>(false);
 
   // Audio Duration & Blacklist Filters (Default: 30 seconds minimum to eliminate WhatsApp audio / voice notes)
   const [filterShortAudios, setFilterShortAudios] = useState<boolean>(true);
@@ -132,54 +119,8 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
       setDiscoveredCount(0);
       setProcessedCount(0);
       setStatusType("info");
-      setIsNativeFolderPickerOpen(false);
-      setNativeCurrentPath("");
-      setNativeFoldersList([]);
     }
   }, [isOpen]);
-
-  // Carga dinámica de carpetas al navegar por el almacenamiento nativo de Android
-  useEffect(() => {
-    if (!isNativeFolderPickerOpen) return;
-    let isMounted = true;
-    setIsLoadingNativeFolders(true);
-
-    listNativeDirectories(nativeCurrentPath)
-      .then((items) => {
-        if (isMounted) {
-          setNativeFoldersList(items);
-          setIsLoadingNativeFolders(false);
-        }
-      })
-      .catch((err) => {
-        console.warn("[DeviceScannerModal] Error cargando carpetas nativas:", err);
-        if (isMounted) {
-          setNativeFoldersList([]);
-          setIsLoadingNativeFolders(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isNativeFolderPickerOpen, nativeCurrentPath]);
-
-  const handleNavigateToFolder = (path: string) => {
-    setNativeCurrentPath(path);
-  };
-
-  const handleNavigateUp = () => {
-    const parts = nativeCurrentPath.split("/").filter(Boolean);
-    parts.pop();
-    setNativeCurrentPath(parts.join("/"));
-  };
-
-  const handleOpenSystemSAF = () => {
-    if (folderInputRef.current) {
-      folderInputRef.current.value = "";
-      folderInputRef.current.click();
-    }
-  };
 
   if (!isOpen) return null;
 
@@ -333,19 +274,77 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   };
 
   /**
-   * Modern File System Access API: showDirectoryPicker() with full abort/cancel safety
+   * Selector oficial de carpetas:
+   * - En Android nativo: Invoca DIRECTAMENTE el Intent nativo 'Intent.ACTION_OPEN_DOCUMENT_TREE' (SAF)
+   *   abriendo la ventana oficial del sistema Android (pantalla nativa del teléfono) para que el usuario
+   *   elija cualquier carpeta y presione 'Usar esta carpeta'.
+   *   Registra las canciones directamente en IndexedDB utilizando sus rutas nativas devueltas ('Capacitor.convertFileSrc'),
+   *   exactamente con la misma lógica que usa 'Seleccionar Archivos', sin pasar por caché ni blobs.
+   * - En Navegador / Web: Utiliza la API File System Access (showDirectoryPicker) o input nativo de carpetas.
    */
   const handleScanDeviceDirectory = async () => {
-    // Si estamos en entorno Android nativo, abrir selector de carpetas con Filesystem.readdir()
-    if (Capacitor.isNativePlatform()) {
-      setIsNativeFolderPickerOpen(true);
-      return;
-    }
-
     isCancelledRef.current = false;
     setProgressStatus("");
     setStatusType("info");
 
+    // 1. Entorno Android nativo: Ejecutar Intent oficial ACTION_OPEN_DOCUMENT_TREE (SAF)
+    if (Capacitor.isNativePlatform()) {
+      setIsScanning(true);
+      setProgressStatus("Abriendo selector oficial de carpetas del sistema Android (SAF)...");
+      setDiscoveredCount(0);
+      setProcessedCount(0);
+
+      try {
+        const result = await pickAndScanNativeSafFolder({
+          filterShortAudios,
+          minDurationSeconds,
+          filterHiddenTracks,
+          onProgress: (folder, discovered, processed, msg) => {
+            if (isCancelledRef.current) return;
+            setProgressStatus(`[${folder}] ${msg}`);
+            setDiscoveredCount(discovered);
+            setProcessedCount(processed);
+          },
+          onTrackDiscovered: (discoveredTrack) => {
+            // Registro directo a la biblioteca con su ruta nativa exactamente como en Selección de Archivos
+            onTracksImported([discoveredTrack]);
+          },
+          isCancelled: () => isCancelledRef.current,
+        });
+
+        if (isCancelledRef.current || result.cancelled) {
+          setStatusType("cancelled");
+          setProgressStatus("Selección de carpeta cancelada.");
+          setIsScanning(false);
+          return;
+        }
+
+        if (result.tracks && result.tracks.length > 0) {
+          setStatusType("success");
+          setProgressStatus(`¡Se importaron ${result.tracks.length} canciones con sus rutas nativas!`);
+          onTracksImported(result.tracks);
+          setTimeout(() => {
+            onClose();
+          }, 1500);
+        } else {
+          setStatusType("info");
+          setProgressStatus(
+            result.error
+              ? `Aviso: ${result.error}`
+              : "No se encontraron canciones compatibles en la carpeta seleccionada."
+          );
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatusType("error");
+        setProgressStatus(`Error en selector SAF: ${msg}`);
+      } finally {
+        setIsScanning(false);
+      }
+      return;
+    }
+
+    // 2. Entorno Web / Navegador: File System Access API
     // Fallback if showDirectoryPicker is not supported
     // @ts-ignore
     if (typeof window.showDirectoryPicker !== "function") {
@@ -552,69 +551,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
     }
   };
 
-  /**
-   * Escaneo nativo de una carpeta específica de Android o de la RAÍZ física (/storage/emulated/0/)
-   * con Filesystem.readdir() y registro directo en la base de datos sin pasar por caché ni blobs.
-   */
-  const handleScanSpecificFolder = async (folderPath: string, folderName: string = "Carpeta seleccionada") => {
-    isCancelledRef.current = false;
-    setIsScanning(true);
-    setStatusType("info");
-    const display = folderPath ? `/storage/emulated/0/${folderPath}` : "/storage/emulated/0/ (Raíz)";
-    setProgressStatus(`Solicitando permisos nativos y leyendo ${display}...`);
-    setDiscoveredCount(0);
-    setProcessedCount(0);
 
-    try {
-      const result = await scanSpecificNativeDirectory(
-        folderPath,
-        folderName,
-        (currentFolder, found, processed, msg) => {
-          if (isCancelledRef.current) return;
-          setProgressStatus(`[${currentFolder}] ${msg}`);
-          setDiscoveredCount(found);
-          setProcessedCount(processed);
-        },
-        filterShortAudios,
-        (discoveredTrack) => {
-          // 3. REGISTRO DIRECTO A BIBLIOTECA COMO EN SELECCIÓN INDIVIDUAL:
-          // Registra de inmediato en IndexedDB/Estado global la ruta devuelta 'Capacitor.convertFileSrc(path)'
-          // sin pasar por caché ni blobs, reflejándose en la lista al instante.
-          onTracksImported([discoveredTrack]);
-        }
-      );
-
-      if (isCancelledRef.current) {
-        setStatusType("cancelled");
-        setProgressStatus("Escaneo cancelado por el usuario.");
-        setIsScanning(false);
-        return;
-      }
-
-      if (result.tracks.length > 0) {
-        setStatusType("success");
-        setProgressStatus(`¡Se importaron ${result.tracks.length} canciones de ${folderName}!`);
-        onTracksImported(result.tracks);
-        setIsNativeFolderPickerOpen(false);
-        setTimeout(() => {
-          onClose();
-        }, 1200);
-      } else {
-        setStatusType("error");
-        setProgressStatus(
-          result.errors.length > 0
-            ? `No se detectaron pistas (${result.errors[0]}).`
-            : `No se encontraron pistas de audio en ${display}.`
-        );
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatusType("error");
-      setProgressStatus(`Error al leer carpeta: ${msg}`);
-    } finally {
-      setIsScanning(false);
-    }
-  };
 
   /**
    * Disparo limpio del selector nativo de archivos de audio
@@ -769,136 +706,9 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           onChange={handleFilesInputSelected}
         />
 
-        {isNativeFolderPickerOpen ? (
-          <div className="flex flex-col gap-3.5 animate-in fade-in duration-200">
-            {/* Header de navegación nativa */}
-            <div
-              className="flex items-center justify-between pb-3 border-b"
-              style={{ borderColor: "var(--color-border-subtle)" }}
-            >
-              <button
-                id="native-folder-picker-back-btn"
-                onClick={() => {
-                  if (nativeCurrentPath) {
-                    handleNavigateUp();
-                  } else {
-                    setIsNativeFolderPickerOpen(false);
-                  }
-                }}
-                className="flex items-center gap-1.5 text-xs font-semibold text-neutral-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-all cursor-pointer"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>{nativeCurrentPath ? "Subir nivel" : "Volver a opciones"}</span>
-              </button>
-
-              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20 font-semibold">
-                Memoria Interna Física
-              </span>
-            </div>
-
-            {/* Ruta actual / Breadcrumbs */}
-            <div
-              className="p-2.5 rounded-xl border flex items-center justify-between gap-2"
-              style={{
-                backgroundColor: "var(--color-surface, #141414)",
-                borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
-              }}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <Folder className="w-4 h-4 text-amber-400 shrink-0" />
-                <span className="text-xs font-mono text-neutral-200 truncate">
-                  /storage/emulated/0{nativeCurrentPath ? `/${nativeCurrentPath}` : ""}
-                </span>
-              </div>
-            </div>
-
-            {/* Acciones principales: Escanear actual o Escanear raíz completa + Selector del sistema (SAF) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button
-                id="native-scan-current-dir-btn"
-                disabled={isScanning}
-                onClick={() =>
-                  handleScanSpecificFolder(
-                    nativeCurrentPath,
-                    nativeCurrentPath ? nativeCurrentPath.split("/").pop() || nativeCurrentPath : "Almacenamiento Completo"
-                  )
-                }
-                className="p-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer disabled:opacity-50"
-              >
-                <FolderSearch className="w-4 h-4" />
-                <span>
-                  {nativeCurrentPath
-                    ? `Escanear esta carpeta (${nativeCurrentPath.split("/").pop()})`
-                    : "Escanear almacenamiento completo (/)"}
-                </span>
-              </button>
-
-              <button
-                id="native-open-system-saf-btn"
-                disabled={isScanning}
-                onClick={handleOpenSystemSAF}
-                className="p-3 rounded-xl border border-neutral-700 bg-neutral-800/80 hover:bg-neutral-700 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-              >
-                <Smartphone className="w-4 h-4 text-cyan-400" />
-                <span>Selector del Sistema (SAF / Picker)</span>
-              </button>
-            </div>
-
-            {/* Listado dinámico de carpetas para explorar libremente */}
-            <div className="flex flex-col gap-1.5 mt-1">
-              <div className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider flex items-center justify-between">
-                <span>Carpetas en {nativeCurrentPath ? `/${nativeCurrentPath}` : "la Raíz"}</span>
-                {isLoadingNativeFolders && <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />}
-              </div>
-
-              <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5 pr-1">
-                {nativeFoldersList.length > 0 ? (
-                  nativeFoldersList.map((item) => (
-                    <div
-                      key={item.path}
-                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2 hover:bg-white/5 transition-all group"
-                      style={{ borderColor: "var(--color-border-subtle)" }}
-                    >
-                      <button
-                        onClick={() => handleNavigateToFolder(item.path)}
-                        disabled={isScanning}
-                        className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
-                        title={`Entrar a /${item.path}`}
-                      >
-                        <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-400 shrink-0">
-                          <Folder className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <span className="text-xs font-bold block text-white truncate">{item.name}</span>
-                          <span className="text-[10px] text-neutral-400 block truncate">{item.displayPath}</span>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-neutral-500 group-hover:text-white shrink-0" />
-                      </button>
-
-                      <button
-                        onClick={() => handleScanSpecificFolder(item.path, item.name)}
-                        disabled={isScanning}
-                        className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-400 text-[11px] font-semibold flex items-center gap-1 shrink-0 transition-all cursor-pointer disabled:opacity-50"
-                        title={`Escanear recursivamente /${item.path}`}
-                      >
-                        <FolderSearch className="w-3.5 h-3.5" />
-                        <span>Escanear</span>
-                      </button>
-                    </div>
-                  ))
-                ) : !isLoadingNativeFolders ? (
-                  <div className="p-4 text-center text-xs text-neutral-400 bg-white/5 rounded-xl border border-white/5">
-                    No se detectaron más subcarpetas aquí. Pulsa &quot;Escanear esta carpeta&quot; para buscar audios directamente.
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Drag & Drop Zone */}
-            <div
-              id="device-scanner-dropzone"
+        {/* Drag & Drop Zone */}
+        <div
+          id="device-scanner-dropzone"
               onDragOver={(e) => {
                 e.preventDefault();
                 setIsDragOver(true);
@@ -1023,7 +833,11 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
                   </div>
                   <div>
                     <span className="text-xs font-bold block text-white">Seleccionar Carpeta</span>
-                    <span className="text-[11px] opacity-70">Escanea un directorio completo</span>
+                    <span className="text-[11px] opacity-70">
+                      {Capacitor.isNativePlatform()
+                        ? "Selector oficial de Android (SAF)"
+                        : "Escanea un directorio completo"}
+                    </span>
                   </div>
                 </button>
               </div>
@@ -1039,8 +853,6 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
                 <span>Cargar Música de Prueba (Lo-Fi / Sintetizador)</span>
               </button>
             </div>
-          </>
-        )}
 
         {/* Scanning In-Progress Display with CANCEL button */}
         {isScanning && (
