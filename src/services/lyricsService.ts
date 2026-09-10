@@ -2,20 +2,30 @@
  * ============================================================================
  * SONARA MUSIC - SERVICIO DE LETRAS Y SINCRONIZACIÓN LRC (lyricsService.ts)
  * ============================================================================
- * Responsabilidad:
- * Búsqueda, descarga, análisis sintáctico y sincronización en tiempo real de letras
- * musicales estándar y sincronizadas (formato .LRC).
+ * Propósito y función del archivo:
+ * Este servicio proporciona las capacidades de obtención, análisis sintáctico (parsing)
+ * y sincronización temporal de letras musicales, tanto en texto plano como en formato .LRC.
  *
- * Características principales:
- * - Búsqueda en la API abierta LRCLIB: "https://lrclib.net/api/search?q="
- * - Procesamiento estricto de codificación UTF-8 para preservar caracteres japoneses
- *   (Hiragana, Katakana, Kanji) y transliteraciones a Romaji.
- * - Cálculo del verso activo según el tiempo actual de reproducción (currentTime).
- * - Generación y empaquetado de archivos .lrc para almacenamiento en IndexedDB.
+ * ¿Cómo funciona?:
+ * 1. Búsqueda directa a LRCLIB: Consulta en primer lugar la API pública https://lrclib.net/api/search?q=
+ *    con los nombres normalizados de pista y artista.
+ * 2. Endpoint de respaldo: Si falla o hay restricciones de CORS, acude al backend local `/api/lyrics/search`.
+ * 3. Parser LRC avanzado (`parseLrc`): Convierte timestamps con precisión de centésimas/milisegundos
+ *    ([mm:ss.xx] o [mm:ss.xxx]) a segundos flotantes y ordena cronológicamente los versos.
+ * 4. Soporte Bilingüe y Japonés (`parseBilingualLine`): Detecta caracteres Kanji, Hiragana y Katakana
+ *    y extrae automáticamente transliteraciones a Romaji cuando vienen en formatos tipo "漢字 (Romaji)".
+ * 5. Resaltado temporal (`getActiveLyricIndex`): Calcula con un anticipo de 200 ms qué línea debe
+ *    destacarse en pantalla durante la reproducción en vivo.
+ *
+ * Guía para futuras actualizaciones:
+ * - Si se añade un nuevo proveedor de letras (Genius, Musixmatch, etc.), integrarlo en `searchLyricsOnline()`.
  */
 
 import { SyncedLyricLine } from "../types";
 
+/**
+ * Estructura de respuesta devuelta por la API pública de LRCLIB.
+ */
 export interface LrclibSearchItem {
   id?: number;
   trackName?: string;
@@ -27,11 +37,14 @@ export interface LrclibSearchItem {
   syncedLyrics?: string;
 }
 
+/**
+ * Resultado procesado y normalizado para el reproductor Sonora.
+ */
 export interface LyricsResult {
   source: string;
   track: string;
   artist: string;
-  album?: string; // Nombre del álbum detectado en LRCLIB o metadatos
+  album?: string;
   plainLyrics: string;
   syncedLyrics: SyncedLyricLine[] | null;
   rawLrc?: string | null;
@@ -40,12 +53,17 @@ export interface LyricsResult {
 }
 
 /**
- * Expresión regular para detectar caracteres japoneses nativos (Hiragana, Katakana, Kanji)
+ * Expresión regular para detectar caracteres japoneses nativos:
+ * - Hiragana (\u3040-\u309F)
+ * - Katakana (\u30A0-\u30FF)
+ * - Kanji (\u4E00-\u9FAF)
  */
 export const JAPANESE_CHAR_REGEX = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/;
 
 /**
- * Comprueba si un texto contiene caracteres japoneses
+ * Función: hasJapaneseText
+ * Propósito: Determina si una cadena de texto contiene caracteres de la escritura japonesa.
+ * Retorna: boolean
  */
 export function hasJapaneseText(text: string): boolean {
   if (!text) return false;
@@ -53,8 +71,12 @@ export function hasJapaneseText(text: string): boolean {
 }
 
 /**
- * Separa una línea bilingüe que combina texto japonés nativo con Romaji.
- * Ejemplo: "夜に駆ける (Yoru ni kakeru)" -> native: "夜に駆ける", romaji: "Yoru ni kakeru"
+ * Función: parseBilingualLine
+ * Propósito: Separa una línea que contiene texto original japonés junto con su fonética romanizada (Romaji).
+ * ¿Cómo funciona?:
+ * 1. Evalúa si el texto contiene caracteres japoneses.
+ * 2. Busca separadores por barra ("日本語 / Romaji") o por paréntesis/corchetes ("日本語 (Romaji)").
+ * 3. Si coincide, devuelve un objeto separando `nativeText` y `romaji`.
  */
 export function parseBilingualLine(text: string): {
   nativeText?: string;
@@ -95,8 +117,14 @@ export function parseBilingualLine(text: string): {
 }
 
 /**
- * Analiza el texto en bruto de un archivo .LRC y genera una lista ordenada de versos
- * con sus marcas de tiempo exactas en segundos. Aplica normalización Unicode NFC (UTF-8).
+ * Función: parseLrc
+ * Propósito: Analiza sintácticamente el texto plano de un archivo `.lrc` y lo transforma en versos ordenados.
+ * ¿Cómo funciona?:
+ * 1. Aplica normalización canónica Unicode NFC para preservar diacríticos y caracteres internacionales.
+ * 2. Comprueba si existe la etiqueta de desfase temporal global `[offset: +/-ms]`.
+ * 3. Ignora encabezados de metadatos como `[ti:...]` o `[ar:...]`.
+ * 4. Extrae etiquetas de tiempo `[mm:ss.xx]` o `[mm:ss.xxx]` y calcula el segundo exacto en número flotante.
+ * 5. Ordena cronológicamente todas las líneas por marca de tiempo ascendente.
  */
 export function parseLrc(lrcText: string): SyncedLyricLine[] {
   if (!lrcText) return [];
@@ -175,14 +203,17 @@ export function parseLrc(lrcText: string): SyncedLyricLine[] {
 }
 
 /**
- * Determina el índice del verso que debe resaltarse en el reproductor según el tiempo actual (segundos)
+ * Función: getActiveLyricIndex
+ * Propósito: Determina el índice de la línea que debe resaltarse según el tiempo actual de la canción.
+ * ¿Cómo funciona?:
+ * Recorre la lista de líneas sincronizadas aplicando una pequeña anticipación de 200 milisegundos (-0.2s)
+ * para compensar la latencia visual y permitir una lectura fluida antes de que suene la vocal.
  */
 export function getActiveLyricIndex(syncedLyrics: SyncedLyricLine[] | null | undefined, currentTime: number): number {
   if (!syncedLyrics || syncedLyrics.length === 0) return -1;
 
   let activeIndex = -1;
   for (let i = 0; i < syncedLyrics.length; i++) {
-    // Anticipación de 200ms para una transición visual suave
     if (currentTime >= syncedLyrics[i].time - 0.2) {
       activeIndex = i;
     } else {
@@ -193,10 +224,13 @@ export function getActiveLyricIndex(syncedLyrics: SyncedLyricLine[] | null | und
 }
 
 /**
- * Busca letras de canciones en línea.
- * Integra prioritariamente la búsqueda directa en la API abierta de LRCLIB:
- * "https://lrclib.net/api/search?q="
- * y recurre al endpoint interno de respaldo en caso de limitaciones de red o CORS.
+ * Función: searchLyricsOnline
+ * Propósito: Búsqueda automatizada de letras sincronizadas o planas en internet.
+ * ¿Cómo funciona?:
+ * 1. Limpia sufijos ruidosos del título (ej. "(Official Music Video)", "Remastered", etc.).
+ * 2. Consulta en primer lugar la API pública de LRCLIB (GET https://lrclib.net/api/search?q=...).
+ * 3. Si encuentra versos sincronizados (.syncedLyrics), los parsea con `parseLrc` y los retorna.
+ * 4. Si falla o no hay conexión, recurre como respaldo al backend proxy `/api/lyrics/search`.
  */
 export async function searchLyricsOnline(
   track: string,
@@ -211,7 +245,7 @@ export async function searchLyricsOnline(
   const cleanArtist = (artist || "").trim();
   const searchQuery = `${cleanArtist} ${cleanTrack}`.trim();
 
-  // 1. Intento directo a la API pública de LRCLIB: https://lrclib.net/api/search?q=
+  // 1. Intento directo a la API pública de LRCLIB
   try {
     const lrclibUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`;
     const lrcDirectRes = await fetch(lrclibUrl, {
@@ -225,7 +259,7 @@ export async function searchLyricsOnline(
     if (lrcDirectRes && lrcDirectRes.ok) {
       const results: LrclibSearchItem[] = await lrcDirectRes.json().catch(() => []);
       if (Array.isArray(results) && results.length > 0) {
-        // Priorizar el resultado que tenga letras sincronizadas (.lrc)
+        // Priorizar el resultado que contenga letras sincronizadas (.lrc)
         const best = results.find((item: LrclibSearchItem) => item.syncedLyrics) || results[0];
         if (best && (best.syncedLyrics || best.plainLyrics)) {
           const rawLrc = best.syncedLyrics || null;

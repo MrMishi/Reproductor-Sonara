@@ -1,3 +1,26 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MINIREPRODUCTOR FLOTANTE Y MODO PiP (FloatingMiniPlayer.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente proporciona un reproductor compacto y flotante (Picture-in-Picture)
+ * que se puede arrastrar y reubicar libremente por la pantalla mientras se
+ * interactúa con otras partes de la aplicación o se trabaja en segundo plano.
+ *
+ * ¿Cómo funciona?:
+ * 1. Movimiento y arrastre (Drag & Drop):
+ *    - Registra eventos de ratón (`pointerdown`, `pointermove`, `pointerup`) y táctiles
+ *      para desplazar suavemente la ventana dentro de los límites del viewport.
+ * 2. Modos visuales:
+ *    - Compacto (barra delgada) y Expandido (carátula, controles de volumen, avance).
+ * 3. Integración con Document Picture-in-Picture API si está disponible en el navegador.
+ * 4. Persiste la posición en pantalla y estado entre sesiones.
+ *
+ * Guía para futuras actualizaciones:
+ * - Asegúrese de mantener los límites del viewport para evitar que el reproductor
+ *   se desborde fuera de la pantalla en dispositivos móviles.
+ */
+
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Play,

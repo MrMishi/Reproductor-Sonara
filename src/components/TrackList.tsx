@@ -1,3 +1,25 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - LISTA DE PISTAS Y GESTIÓN MULTI-SELECCIÓN (TrackList.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente muestra la lista de canciones en formato tabla/lista interactiva.
+ * Soporta selección individual, selección múltiple para acciones por lote,
+ * marcado de favoritos, edición de metadatos ID3 y ocultamiento/eliminación de pistas.
+ *
+ * ¿Cómo funciona?:
+ * 1. Indicador de reproducción activa: Resalta la pista actualmente en curso con
+ *    ondas de sonido animadas y colores de acento.
+ * 2. Modo Multi-Selección (`isSelectionMode`): Permite marcar múltiples canciones
+ *    para ocultar o eliminar en bloque de la biblioteca.
+ * 3. Menú de acciones contextuales: Proporciona accesos para editar etiquetas ID3,
+ *    buscar letras online, ocultar canción o eliminarla de IndexedDB.
+ *
+ * Guía para futuras actualizaciones:
+ * - Para añadir una nueva acción en masa, agregue un botón en la barra de selección múltiple
+ *   y ejecute la función correspondiente con `Array.from(selectedTrackIds)`.
+ */
+
 import React, { useState } from "react";
 import {
   Play,

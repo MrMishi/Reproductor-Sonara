@@ -2,13 +2,19 @@
  * ============================================================================
  * SONARA MUSIC - MODAL DE IMPORTACIÓN LOCAL DE MÚSICA (DeviceScannerModal.tsx)
  * ============================================================================
- * Responsabilidad:
- * Permite al usuario incorporar música almacenada en su dispositivo local:
+ * Propósito y función del archivo:
+ * Este componente permite al usuario incorporar música almacenada en su dispositivo local:
  * - Selección de archivos individuales o escaneo recursivo de directorios.
- * - Arrastrar y soltar (Drag & Drop) de carpetas y archivos.
+ * - Arrastrar y soltar (Drag & Drop) de carpetas y archivos en el navegador.
+ * - En Android nativo (Capacitor): Escaneo rápido y directo de /Music, /Download y /YMusic
+ *   sin cargar Blobs a memoria, preservando rutas directas.
  * - Extracción y análisis de metadatos ID3 (título, artista, álbum, carátula incrustada).
- * - Filtro inteligente de duración mínima (elimina notas de voz y audios de mensajería).
+ * - Filtro inteligente de notas de voz y audios breves (< 30s o que comiencen con 'PTT-').
  * - Carga de pistas demo sintéticas Lo-Fi / Synthwave.
+ *
+ * Guía para futuras actualizaciones:
+ * - Toda nueva fuente de archivos de audio debe procesarse mediante `parseAudioFile`
+ *   o `scanNativeMusicDirectories` para mantener la coherencia de metadatos y portadas.
  */
 
 import React, { useState, useRef, useEffect } from "react";
@@ -101,9 +107,9 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isNativeFolderPickerOpen, setIsNativeFolderPickerOpen] = useState(false);
 
-  // Audio Duration & Blacklist Filters (Default: 75 seconds minimum to eliminate WhatsApp audio / voice notes)
+  // Audio Duration & Blacklist Filters (Default: 30 seconds minimum to eliminate WhatsApp audio / voice notes)
   const [filterShortAudios, setFilterShortAudios] = useState<boolean>(true);
-  const [minDurationSeconds, setMinDurationSeconds] = useState<number>(75);
+  const [minDurationSeconds, setMinDurationSeconds] = useState<number>(30);
   const [filterHiddenTracks, setFilterHiddenTracks] = useState<boolean>(true);
 
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -180,7 +186,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
             }
 
             try {
-              const track = await parseAudioFile(file);
+              const track = await parseAudioFile(file, filterShortAudios, minDurationSeconds);
               if (!track) return null;
 
               // Check if track is marked as hidden by title or artist
@@ -190,7 +196,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
               }
 
               // Verify duration: ignore WhatsApp voice notes or short sounds under minDurationSeconds
-              // Asegurarse de que el filtro de duración (75s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
+              // Asegurarse de que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
               if (
                 filterShortAudios &&
                 track.duration !== undefined &&
@@ -822,11 +828,11 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
                     onChange={(e) => setMinDurationSeconds(Number(e.target.value))}
                     className="bg-neutral-800 text-white rounded-lg px-2.5 py-1.5 text-xs border border-white/10 font-bold focus:outline-none cursor-pointer hover:border-white/20"
                   >
-                    <option value={75}>75s (Recomendado)</option>
+                    <option value={30}>30s (Recomendado)</option>
                     <option value={60}>60s</option>
+                    <option value={75}>75s</option>
                     <option value={90}>90s</option>
                     <option value={120}>120s</option>
-                    <option value={30}>30s</option>
                   </select>
                 </div>
               )}

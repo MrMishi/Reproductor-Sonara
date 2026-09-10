@@ -1,3 +1,33 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - REPRODUCTOR EXPANDIDO A PANTALLA COMPLETA (ExpandedPlayer.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente es la vista inmersiva principal del reproductor de música.
+ * Ofrece la experiencia completa de reproducción, incluyendo carátula de alta
+ * resolución, espectrograma de audio en vivo, visualizador de letras sincronizadas
+ * estilo karaoke con desplazamiento automático, cola de reproducción interactiva
+ * y acceso a ajustes de audio (ecualizador, temporizador de apagado, editor ID3).
+ *
+ * ¿Cómo funciona?:
+ * 1. Sub-pestañas (`activeSubTab`):
+ *    - "cover": Carátula grande, espectrograma en tiempo real (`VisualizerCanvas`) y controles.
+ *    - "queue": Lista interactiva de la cola de reproducción con selección directa.
+ *    - "lyrics": Modo karaoke con versos sincronizados (.lrc) o texto plano, soporte bilingüe
+ *      japonés/romaji y botón de sincronización directa a cualquier verso tocándolo.
+ *    - "details": Ficha técnica con metadatos ID3 (formato, bitrate estimado, frecuencia, tamaño).
+ * 2. Desplazamiento inteligente de letras:
+ *    - `getActiveLyricIndex` calcula la línea actual; el componente realiza scroll suave
+ *      automático manteniendo el verso activo visible al centro.
+ * 3. Controles avanzados:
+ *    - Modos de reproducción (bucle, bucle único, aleatorio).
+ *    - Ocultar pista, marcar favoritos, temporizador de apagado y acceso al ecualizador.
+ *
+ * Guía para futuras actualizaciones:
+ * - Para añadir un nuevo panel dentro de este reproductor, defina una nueva subpestaña
+ *   en `activeSubTab` y agréguele su botón de acceso en la barra superior.
+ */
+
 import React, { useState, useEffect, useRef } from "react";
 import {
   ChevronDown,

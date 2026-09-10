@@ -1,3 +1,37 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - COMPONENTE PRINCIPAL Y ORQUESTADOR (App.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este es el componente raíz de la aplicación Sonara Music. Centraliza el estado
+ * global del reproductor, la sincronización de la Web Audio API (`audioEngine`),
+ * la carga inicial y persistencia con IndexedDB, la navegación entre vistas
+ * (Biblioteca, Explorador, Colecciones) y la gestión de diálogos modales.
+ *
+ * ¿Cómo funciona?:
+ * 1. Inicialización (`useEffect` de arranque):
+ *    - Carga pistas persistidas en IndexedDB (`loadTracksFromDB`).
+ *    - Si la base de datos está vacía, genera y monta las pistas demo (`getInitialDemoTracks`).
+ *    - En plataformas móviles nativas (Android con Capacitor), ejecuta el escáner silencioso de inicio (`autoScanStartup`).
+ *    - Carga y aplica el tema visual guardado en `localStorage`.
+ * 2. Pipeline de audio:
+ *    - Conecta el motor de audio (`audioEngine`) a través de listeners para actualizar el tiempo actual,
+ *      duración, estado de reproducción y eventos de finalización de pista (`track-ended`).
+ * 3. Gestión de Modales y Subventanas:
+ *    - Ecualizador de 10 bandas + Bass Boost (`EqualizerModal`).
+ *    - Selector de Temas Visuales (`ThemeModal`).
+ *    - Escáner Nativo de Dispositivo (`DeviceScannerModal`).
+ *    - Visor y Sincronizador de Letras (`LyricsSearchModal`).
+ *    - Reproductor Expandido y Modo Mini Flotante (`ExpandedPlayer` y `FloatingMiniPlayer`).
+ *    - Temporizador de Apagado progresivo (`SleepTimerModal`).
+ *    - Editor de Etiquetas ID3 (`ID3EditorModal`).
+ *    - Gestor de Pistas Ocultas (`HiddenTracksModal`).
+ *
+ * Guía para futuras actualizaciones:
+ * - Para añadir una nueva funcionalidad global, declare su estado en este componente y
+ *   páselo como prop a la vista o modal correspondiente.
+ */
+
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Track,
@@ -224,19 +258,19 @@ export default function App() {
     initLibrary();
   }, []);
 
-  // Pistas visibles con filtro estricto de notas de voz ('PTT-') y audios cortos (< 75s)
-  // Asegurarse de que el filtro de duración (75s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
+  // Pistas visibles con filtro estricto de notas de voz ('AUD-' y 'PTT-') y audios cortos (< 30s)
+  // Asegurarse de que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
   const visibleTracks = useMemo(() => {
     return tracks.filter((t) => {
-      if (t.fileName && /^PTT-/i.test(t.fileName)) return false;
-      if (t.title && /^PTT-/i.test(t.title)) return false;
+      if (t.fileName && /^(PTT-|AUD-)/i.test(t.fileName)) return false;
+      if (t.title && /^(PTT-|AUD-)/i.test(t.title)) return false;
       if (
         filterShortAudios &&
         t.duration !== undefined &&
         t.duration !== null &&
         !isNaN(t.duration) &&
         t.duration > 0 &&
-        t.duration < 75
+        t.duration < 30
       ) {
         return false;
       }
@@ -436,8 +470,14 @@ export default function App() {
     if (currentTrack) {
       try {
         const origin = window.location.origin;
-        const coverSrc = currentTrack.coverUrl || `${origin}/icon.svg`;
+        const defaultPng = `${origin}/pwa-512x512.png`;
+        const coverSrc =
+          currentTrack.coverUrl && !currentTrack.coverUrl.includes("svg")
+            ? currentTrack.coverUrl
+            : defaultPng;
 
+        // Lista completa de resoluciones en PNG para asegurar compatibilidad con Android,
+        // la pantalla de bloqueo y el Centro de Control de MIUI / HyperOS
         const artworkList = [
           { src: coverSrc, sizes: "96x96", type: "image/png" },
           { src: coverSrc, sizes: "128x128", type: "image/png" },
@@ -445,9 +485,10 @@ export default function App() {
           { src: coverSrc, sizes: "256x256", type: "image/png" },
           { src: coverSrc, sizes: "384x384", type: "image/png" },
           { src: coverSrc, sizes: "512x512", type: "image/png" },
-          // Respaldo de alta resolución para el Centro de Control de MIUI / HyperOS
+          // Respaldo de alta resolución para el Centro de Control de MIUI / HyperOS y Android Lock Screen
           { src: `${origin}/pwa-192x192.png`, sizes: "192x192", type: "image/png" },
           { src: `${origin}/pwa-512x512.png`, sizes: "512x512", type: "image/png" },
+          { src: `${origin}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" },
         ];
 
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -466,10 +507,13 @@ export default function App() {
       navigator.mediaSession.setActionHandler("play", () => {
         audioEngine.resumeContext();
         if (audioRef.current && audioRef.current.paused) {
-          audioRef.current.play().then(() => {
-            setIsPlaying(true);
-            if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
-          }).catch(console.warn);
+          audioRef.current
+            .play()
+            .then(() => {
+              setIsPlaying(true);
+              if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+            })
+            .catch(console.warn);
         } else {
           handleTogglePlayRef.current();
         }
@@ -496,6 +540,15 @@ export default function App() {
       navigator.mediaSession.setActionHandler("seekto", (details) => {
         if (details.seekTime !== undefined && details.seekTime !== null) {
           handleSeekRef.current(details.seekTime);
+          if ("setPositionState" in navigator.mediaSession && duration > 0) {
+            try {
+              navigator.mediaSession.setPositionState({
+                duration: Math.max(0, duration),
+                playbackRate: audioRef.current?.playbackRate || 1,
+                position: Math.min(Math.max(0, details.seekTime), duration),
+              });
+            } catch {}
+          }
         }
       });
 
@@ -972,7 +1025,22 @@ export default function App() {
         playsInline
         onTimeUpdate={() => {
           if (audioRef.current) {
-            setCurrentTime(audioRef.current.currentTime);
+            const curTime = audioRef.current.currentTime;
+            setCurrentTime(curTime);
+
+            // Sincronización en tiempo real con la barra de progreso de Android / MIUI / HyperOS
+            if ("mediaSession" in navigator && "setPositionState" in navigator.mediaSession) {
+              const dur = audioRef.current.duration;
+              if (dur && !isNaN(dur) && isFinite(dur) && dur > 0) {
+                try {
+                  navigator.mediaSession.setPositionState({
+                    duration: dur,
+                    playbackRate: audioRef.current.playbackRate || 1,
+                    position: Math.min(Math.max(0, curTime), dur),
+                  });
+                } catch {}
+              }
+            }
           }
         }}
         onLoadedMetadata={() => {
@@ -981,8 +1049,8 @@ export default function App() {
             if (realDuration && !isNaN(realDuration) && isFinite(realDuration) && realDuration > 0) {
               setDuration(realDuration);
 
-              // Si la pista resulta ser una nota de voz identificada por 'PTT-' menor a 75s, omitir inmediatamente y avanzar
-              if (realDuration < 75 && currentTrack?.fileName && /^PTT-/i.test(currentTrack.fileName)) {
+              // Si la pista resulta ser una nota de voz identificada por 'AUD-' o 'PTT-' menor a 30s, omitir inmediatamente y avanzar
+              if (realDuration < 30 && currentTrack?.fileName && /^(PTT-|AUD-)/i.test(currentTrack.fileName)) {
                 console.log(`[Sonora] Descartando automáticamente nota de voz (${realDuration.toFixed(1)}s)...`);
                 handleNext();
                 return;

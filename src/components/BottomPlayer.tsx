@@ -1,3 +1,26 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - BARRA INFERIOR DE REPRODUCCIÓN (BottomPlayer.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente renderiza la barra persistente de reproducción anclada en la parte
+ * inferior de la pantalla. Proporciona controles rápidos y fluidos sin interrumpir
+ * la navegación de la biblioteca.
+ *
+ * ¿Cómo funciona?:
+ * 1. Muestra la carátula, título y artista de la pista actual (`currentTrack`).
+ * 2. Barra de progreso interactiva: Permite hacer clic o arrastrar para saltar
+ *    a cualquier punto de la pista mediante `onSeek`.
+ * 3. Botones de transporte: Play/Pausa (`onTogglePlay`), Anterior (`onPrev`),
+ *    Siguiente (`onNext`).
+ * 4. Apertura del reproductor expandido: Al tocar la información de la pista o el botón
+ *    dedicado, ejecuta `onOpenExpanded` para mostrar la carátula gigante y el karaoke.
+ *
+ * Guía para futuras actualizaciones:
+ * - Los colores de fondo y acento responden a las variables CSS dinámicas del tema
+ *   `--color-player-bg` y `--color-accent`.
+ */
+
 import React, { useState, useRef } from "react";
 import {
   Play,

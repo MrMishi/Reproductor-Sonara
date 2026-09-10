@@ -1,3 +1,21 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - GESTOR DE PISTAS OCULTAS (HiddenTracksModal.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente permite al usuario revisar y restaurar canciones que fueron
+ * marcadas como "ocultas" (para que no aparezcan en la biblioteca ni en el reproductor).
+ *
+ * ¿Cómo funciona?:
+ * 1. Muestra la lista de pistas ocultas registradas en `localStorage` (`HiddenTrackRecord`).
+ * 2. Desocultar individual (`onUnhideTrack`): Restaura la pista a la biblioteca visible.
+ * 3. Desocultar todas (`onUnhideAll`): Restaura todas las pistas en bloque.
+ *
+ * Guía para futuras actualizaciones:
+ * - El almacenamiento y verificación de pistas ocultas se delega a `db.ts`
+ *   (`addHiddenTrack`, `getHiddenTracks`, `removeHiddenTrack`).
+ */
+
 import React from "react";
 import { X, EyeOff, Eye, Trash2, Music, Clock, AlertCircle } from "lucide-react";
 import { HiddenTrackRecord } from "../types";

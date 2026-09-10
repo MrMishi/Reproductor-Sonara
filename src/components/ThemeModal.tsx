@@ -1,3 +1,26 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MODAL DE PERSONALIZACIÓN Y TEMAS (ThemeModal.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente permite al usuario personalizar el aspecto estético de Sonora.
+ * Ofrece una galería de temas predefinidos (OLED negro profundo, estilos oscuros
+ * con acentos violeta/cian/esmeralda, estilos claros de alto contraste) y un
+ * editor personalizado para ajustar colores hexadecimales de fondo, superficie,
+ * acento, bordes y curvatura de esquinas.
+ *
+ * ¿Cómo funciona?:
+ * 1. Pestaña "Predefinidos": Muestra tarjetas interactivas con vista previa de
+ *    cada preset definido en `THEME_PRESETS`.
+ * 2. Pestaña "Personalizado": Permite seleccionar colores de acento rápidos (`QUICK_ACCENTS`),
+ *    fondos (`DARK_BG_OPTIONS`, `LIGHT_BG_OPTIONS`) y radios de borde (`borderRadius`).
+ * 3. En cada cambio, ejecuta `applyThemeToDocument(theme)` para actualizar las variables
+ *    CSS globales en tiempo real y persiste la preferencia con `saveTheme(theme)`.
+ *
+ * Guía para futuras actualizaciones:
+ * - Para añadir opciones de acento rápido, actualice el array `QUICK_ACCENTS`.
+ */
+
 import React, { useState } from "react";
 import { X, Palette, Check, Sparkles, RefreshCw, Sun, Moon } from "lucide-react";
 import { ThemeConfig } from "../types";

@@ -2,14 +2,18 @@
  * ============================================================================
  * SONARA MUSIC - EDITOR DE ETIQUETAS ID3 Y METADATOS (ID3EditorModal.tsx)
  * ============================================================================
- * Responsabilidad:
- * Permite al usuario editar los metadatos de cualquier pista de su biblioteca:
+ * Propósito y función del archivo:
+ * Permite al usuario corregir y enriquecer los metadatos de cualquier pista de su biblioteca:
  * - Título de la canción
- * - Artista (ID3)
- * - Álbum (ID3)
- * - Año y Género
- * - Cambiar foto de portada (subir imagen local con previsualización en vivo)
- * - Guardado reactivo y persistente en IndexedDB
+ * - Artista principal
+ * - Álbum discográfico
+ * - Año de lanzamiento y Género musical
+ * - Cambiar foto de portada (cargar imagen JPEG/PNG local con previsualización en vivo)
+ * - Guardado reactivo y persistente en IndexedDB (`updateTrackInDb`)
+ *
+ * Guía para futuras actualizaciones:
+ * - Cualquier nuevo metadato que se añada a la interfaz `Track` (ej. número de pista, discográfica)
+ *   debe incluirse en los campos de este formulario.
  */
 
 import React, { useState, useRef } from "react";

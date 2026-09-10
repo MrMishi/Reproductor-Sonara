@@ -1,3 +1,29 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - VISUALIZADOR DE ESPECTRO EN TIEMPO REAL (VisualizerCanvas.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente renderiza animaciones visuales de audio de 60 FPS mediante un
+ * elemento `<canvas>` acelerado por hardware y los datos del `AnalyserNode`
+ * proporcionados por `audioEngine`.
+ *
+ * ¿Cómo funciona?:
+ * 1. Tipos de visualización (`type`):
+ *    - "bars": Barras de frecuencia con esquinas redondeadas y gradientes dinámicos.
+ *    - "wave": Osciloscopio con forma de onda continua y brillo suave.
+ *    - "circle": Espectro radial circular expandido alrededor del centro.
+ * 2. Adaptación de resolución y Retina: Utiliza `window.devicePixelRatio` (limitado a 2x)
+ *    para nitidez en pantallas de alta densidad sin degradar la batería.
+ * 3. Bucle de animación (`requestAnimationFrame`):
+ *    - Cuando la música suena (`isPlaying = true`), extrae `getByteFrequencyData`
+ *      o `getByteTimeDomainData` del motor de audio.
+ *    - Cuando está en pausa, dibuja una onda plana o barras mínimas de reposo.
+ *
+ * Guía para futuras actualizaciones:
+ * - Si se añaden nuevos modos de visualización (ej. partículas o túnel 3D),
+ *   agréguelos como caso dentro del bucle de dibujo `draw()`.
+ */
+
 import React, { useEffect, useRef } from "react";
 import { audioEngine } from "../services/audioEngine";
 

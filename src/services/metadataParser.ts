@@ -1,7 +1,42 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - PARSER DE METADATOS Y PORTADAS (metadataParser.ts)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este módulo extrae información estructurada de archivos de audio locales:
+ * etiquetas ID3v2 (título, artista, álbum, año, carátula incrustada), cálculo
+ * de duración en segundos y generación de portadas vectoriales deterministas.
+ *
+ * ¿Cómo funciona?:
+ * 1. `generateCoverArt(title, artist)`: Para pistas sin carátula en los metadatos,
+ *    genera un SVG vectorial colorido y determinista (mediante hashing de título y artista)
+ *    con efecto de vinilo discográfico e iniciales, codificado en Data URI.
+ * 2. `parseID3v2(buffer)`: Lee los primeros 128 KB del archivo en un `ArrayBuffer`.
+ *    Analiza cabeceras ID3v2.3 e ID3v2.4 para extraer campos clave (TIT2, TPE1, TALB, APIC)
+ *    y decodifica texto en UTF-8, UTF-16 con BOM e ISO-8859-1.
+ * 3. `cleanFilename(fileName)`: Limpia el nombre del archivo eliminando extensiones
+ *    y separando patrones comunes ("Artista - Canción", "01. Pista", etc.).
+ * 4. `getAudioDuration(url, fileSize)`: Carga el audio con `preload="metadata"`
+ *    y un temporizador de seguridad de 800 ms con estimación por tasa de bits
+ *    si la lectura del DOM falla o es lenta.
+ * 5. `parseAudioFile(file, ...)`: Orquesta todo el proceso y crea el objeto `Track`
+ *    completo con su URL en memoria y atributos de biblioteca.
+ *
+ * Guía para futuras actualizaciones:
+ * - Para soportar otros formatos con metadatos específicos (Vorbis comments de OGG/FLAC),
+ *   añadir lectores de cabeceras complementarios aquí.
+ */
+
 import { Track } from "../types";
 
 /**
- * Generate a deterministic colorful SVG gradient cover art for tracks that lack embedded album art
+ * Función: generateCoverArt
+ * Propósito: Genera una portada en formato SVG vectorial determinista para pistas sin carátula incrustada.
+ * ¿Cómo funciona?:
+ * 1. Calcula un hash numérico basado en los caracteres de `title` y `artist`.
+ * 2. Deriva dos tonalidades HSL complementarias para el degradado de fondo.
+ * 3. Dibuja un disco de vinilo estilizado con surcos radiales concéntricos y centro oscuro.
+ * 4. Coloca las iniciales en tipografía sans-serif y retorna un data URI (`data:image/svg+xml;...`).
  */
 export function generateCoverArt(title: string, artist: string): string {
   const seed = `${title}-${artist}`;
@@ -38,7 +73,18 @@ export function generateCoverArt(title: string, artist: string): string {
 }
 
 /**
- * Parses ID3v2 tags from an ArrayBuffer slice (first 128KB of audio file)
+ * Función: parseID3v2
+ * Propósito: Lee y extrae etiquetas ID3v2 (título, artista, álbum, año y carátula APIC) de los primeros 128 KB.
+ * ¿Cómo funciona?:
+ * 1. Verifica los 3 primeros bytes mágicos ('ID3'). Si no coinciden, retorna un objeto vacío.
+ * 2. Determina el tamaño del bloque ID3 mediante codificación "syncsafe" de 7 bits por byte.
+ * 3. Itera a través de los frames:
+ *    - TIT2: Título de la pista.
+ *    - TPE1 / TPE2: Artista o intérprete.
+ *    - TALB: Nombre del álbum.
+ *    - TYER / TDRC: Año o fecha de grabación.
+ *    - APIC: Carátula incrustada (extrae el tipo MIME y genera un Blob URL con los bytes de imagen).
+ * 4. Soporta decodificación de texto en UTF-8, UTF-16LE, UTF-16BE e ISO-8859-1.
  */
 function parseID3v2(buffer: ArrayBuffer): {
   title?: string;
@@ -180,7 +226,13 @@ function parseID3v2(buffer: ArrayBuffer): {
 }
 
 /**
- * Cleans filename into structured title and artist
+ * Función: cleanFilename
+ * Propósito: Limpia y descompone el nombre del archivo en título y artista legibles cuando faltan etiquetas ID3.
+ * ¿Cómo funciona?:
+ * 1. Elimina la extensión del archivo (.mp3, .flac, etc.).
+ * 2. Reconoce separadores tipo "Artista - Título" o "01 - Artista - Título".
+ * 3. Remueve números de pista y prefijos de índice (ej: "01. ", "02_").
+ * 4. Devuelve un objeto `{ title, artist }` con valores de respaldo claros.
  */
 export function cleanFilename(fileName: string): { title: string; artist: string } {
   // Remove extension
@@ -211,7 +263,14 @@ export function cleanFilename(fileName: string): { title: string; artist: string
 }
 
 /**
- * Calculates audio duration asynchronously by loading metadata with fast timeout & estimation
+ * Función: getAudioDuration
+ * Propósito: Determina la duración exacta de un archivo de audio mediante la API de Audio de HTML5.
+ * ¿Cómo funciona?:
+ * 1. Instancia un elemento `new Audio()` efímero con `preload = "metadata"`.
+ * 2. Escucha los eventos `onloadedmetadata` y `ondurationchange`.
+ * 3. Incluye un temporizador de seguridad de 800 ms que calcula un tiempo estimado
+ *    basado en el tamaño del archivo (~16 KB/s para 128 kbps) si el navegador tarda en responder.
+ * 4. Limpia los eventos y resuelve la promesa de forma segura.
  */
 export function getAudioDuration(url: string, fileSize?: number): Promise<number> {
   return new Promise((resolve) => {
@@ -272,16 +331,24 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
 }
 
 /**
- * Parses a File object into a rich Track object.
- * Asegura que el filtro de duración (75s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
+ * Función: parseAudioFile
+ * Propósito: Convierte un objeto `File` seleccionado del sistema en una pista completa (`Track`) para la biblioteca.
+ * ¿Cómo funciona?:
+ * 1. Filtro estricto: Descarta notas de voz de WhatsApp si el nombre inicia con 'PTT-'.
+ * 2. Genera una URL en memoria (`URL.createObjectURL(file)`).
+ * 3. Lee los primeros 128 KB para extraer etiquetas ID3v2 (título, artista, año, carátula incrustada).
+ * 4. Obtiene la duración en segundos con `getAudioDuration()`.
+ * 5. Si no posee carátula en ID3, genera una vectorial personalizada mediante `generateCoverArt()`.
+ * 6. Extrae la jerarquía de carpetas relativas si el usuario subió una carpeta completa (`webkitRelativePath`).
+ * 7. Retorna la pista instanciada con identificador único.
  */
 export async function parseAudioFile(
   file: File,
   filterShortAudios: boolean = false,
-  minDurationSeconds: number = 75
+  minDurationSeconds: number = 30
 ): Promise<Track | null> {
-  // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' (WhatsApp Push-To-Talk)
-  if (/^PTT-/i.test(file.name)) {
+  // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' o 'AUD-' (WhatsApp / Grabadora)
+  if (/^(PTT-|AUD-)/i.test(file.name)) {
     return null;
   }
 

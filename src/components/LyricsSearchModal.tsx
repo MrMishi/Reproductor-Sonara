@@ -1,3 +1,24 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MODAL DE BÚSQUEDA Y EDICIÓN DE LETRAS (LyricsSearchModal.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente permite buscar letras en internet (LRCLIB) o escribirlas/pegarlas
+ * manualmente para cualquier canción de la biblioteca.
+ *
+ * ¿Cómo funciona?:
+ * 1. Inicialización: Autocompleta los campos de búsqueda con el título y artista de la pista.
+ * 2. Búsqueda online (`handleSearch`): Invoca `searchLyricsOnline` de `lyricsService.ts`
+ *    consultando la base de datos de LRCLIB para obtener letras sincronizadas (.lrc) o texto plano.
+ * 3. Editor manual: Permite al usuario pegar sus propias letras o formato con marcas de tiempo.
+ * 4. Aplicación (`handleApply`): Asigna las letras a la pista mediante `onLyricsApplied`
+ *    y las guarda persistentemente en IndexedDB.
+ *
+ * Guía para futuras actualizaciones:
+ * - Si se añade un nuevo proveedor de letras o motor de búsqueda por audio (reconocimiento),
+ *   integrarlo en el flujo de `handleSearch`.
+ */
+
 import React, { useState, useEffect } from "react";
 import { X, Search, FileText, Check, Loader2, Globe, Sparkles } from "lucide-react";
 import { Track } from "../types";

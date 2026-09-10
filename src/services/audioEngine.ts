@@ -1,5 +1,33 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MOTOR DE AUDIO Y ECUALIZADOR (audioEngine.ts)
+ * ============================================================================
+ * Propósito y arquitectura técnica:
+ * Este módulo gestiona la cadena de procesamiento de audio en tiempo real utilizando
+ * la Web Audio API del navegador. Modela un rack de efectos Hi-Fi modular conectado
+ * directamente a la etiqueta `<audio>` de HTML5:
+ *
+ * Cadena de nodos de audio (Audio Graph):
+ * [HTMLAudioElement]
+ *   -> MediaElementAudioSourceNode (Captura de señal limpia)
+ *   -> GainNode (Preamplificador: -6 dB a +6 dB)
+ *   -> BiquadFilterNode[] (10 Bandas paramétricas: 31 Hz a 16 kHz)
+ *   -> BiquadFilterNode (Bass Boost: Filtro Low-shelf centrado en 80 Hz)
+ *   -> AnalyserNode (FFT para visualizadores de espectro y forma de onda)
+ *   -> AudioDestinationNode (Salida a altavoces / auriculares)
+ *
+ * Características para futuras actualizaciones:
+ * - Compatible con navegadores móviles y políticas de reproducción automática (Auto-play).
+ * - Modulación de parámetros en rampa asíncrona (`setTargetAtTime`) para evitar chasquidos (audio clicks/pops).
+ * - Pausa con rampa de desvanecimiento suave (Fade Out de 2s) para el temporizador de sueño.
+ */
+
 import { EqualizerBand, EqualizerPreset } from "../types";
 
+/**
+ * Configuración predeterminada de las 10 bandas del ecualizador.
+ * Abarca desde sub-graves (31 Hz) hasta agudos cristalinos (16 kHz).
+ */
 export const DEFAULT_BANDS: EqualizerBand[] = [
   { frequency: 31, gain: 0, type: "lowshelf", label: "31 Hz" },
   { frequency: 62, gain: 0, type: "peaking", label: "62 Hz" },
@@ -13,6 +41,9 @@ export const DEFAULT_BANDS: EqualizerBand[] = [
   { frequency: 16000, gain: 0, type: "highshelf", label: "16 kHz" },
 ];
 
+/**
+ * Catálogo de perfiles de ecualización acústica predefinidos (Presets).
+ */
 export const EQUALIZER_PRESETS: EqualizerPreset[] = [
   { id: "flat", name: "Plano (Por defecto)", gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bassBoost: 0 },
   { id: "bass-boost", name: "Refuerzo de graves (Bass Boost)", gains: [8, 7, 5, 2, 0, 0, 0, 0, -1, -2], bassBoost: 6 },
@@ -28,6 +59,10 @@ export const EQUALIZER_PRESETS: EqualizerPreset[] = [
   { id: "custom", name: "Personalizado", gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], bassBoost: 0 },
 ];
 
+/**
+ * Clase controladora del motor de audio (AudioEngine).
+ * Mantiene la instancia singleton y el grafo de nodos de Web Audio API.
+ */
 class AudioEngine {
   private ctx: AudioContext | null = null;
   private source: MediaElementAudioSourceNode | null = null;
@@ -46,6 +81,11 @@ class AudioEngine {
   private isAudioPlaying: boolean = false;
   private isSleepTimerActive: boolean = false;
 
+  /**
+   * Conecta e inicializa el grafo de Web Audio API al elemento <audio> principal.
+   * Configura listeners de gestos táctiles ('click', 'touchstart') para reactivar
+   * el AudioContext si el navegador lo suspende por políticas de ahorro de energía.
+   */
   public init(audioElement: HTMLAudioElement) {
     if (this.isInitialized && this.connectedElement === audioElement) {
       return;
@@ -57,6 +97,7 @@ class AudioEngine {
         this.ctx = new AudioContextClass();
       }
 
+      // Si el contexto fue suspendido por falta de interacción del usuario, reanudar en el primer toque
       if (this.ctx.state === "suspended") {
         const resume = () => {
           this.ctx?.resume();
@@ -68,14 +109,15 @@ class AudioEngine {
       }
 
       if (!this.source && this.ctx) {
+        // Enlaza el elemento HTML con el grafo de Web Audio
         this.source = this.ctx.createMediaElementSource(audioElement);
         this.connectedElement = audioElement;
 
-        // Preamp gain
+        // Nodo de Ganancia del Preamplificador
         this.preampGainNode = this.ctx.createGain();
         this.preampGainNode.gain.value = 1.0;
 
-        // Create EQ filter chain
+        // Creación de los filtros biquad de las 10 bandas
         this.filters = DEFAULT_BANDS.map((band) => {
           const filter = this.ctx!.createBiquadFilter();
           filter.type = band.type;
@@ -84,18 +126,18 @@ class AudioEngine {
           return filter;
         });
 
-        // Dedicated Bass Boost Node (Low-shelf 80Hz)
+        // Nodo dedicado para Bass Boost (filtro Low-shelf a 80 Hz)
         this.bassBoostNode = this.ctx.createBiquadFilter();
         this.bassBoostNode.type = "lowshelf";
         this.bassBoostNode.frequency.value = 80;
         this.bassBoostNode.gain.value = 0;
 
-        // Analyser node for spectrum and waveform visualization
+        // Analizador FFT para renderizado en canvas de espectro y osciloscopio
         this.analyserNode = this.ctx.createAnalyser();
         this.analyserNode.fftSize = 256;
         this.analyserNode.smoothingTimeConstant = 0.85;
 
-        // Connect chain: source -> preamp -> filters[0..N] -> bassBoost -> analyser -> destination
+        // Conexión en serie: fuente -> preamp -> filtros[0..9] -> bassBoost -> analyser -> salida
         let lastNode: AudioNode = this.source;
         lastNode.connect(this.preampGainNode);
         lastNode = this.preampGainNode;
@@ -118,12 +160,19 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Reanuda el AudioContext si se encuentra en estado 'suspended'
+   */
   public resumeContext() {
     if (this.ctx && this.ctx.state === "suspended") {
       this.ctx.resume();
     }
   }
 
+  /**
+   * Ajusta la ganancia en decibelios de una banda de frecuencia específica (0 a 9).
+   * Utiliza setTargetAtTime para una transición auditiva suave sin chasquidos.
+   */
   public setBandGain(bandIndex: number, gainDb: number) {
     if (bandIndex >= 0 && bandIndex < this.currentGains.length) {
       this.currentGains[bandIndex] = gainDb;
@@ -133,8 +182,11 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Modifica el refuerzo de frecuencias bajas (Bass Boost).
+   * @param level Valor de 0 a 10 que se escala proporcionalmente a un realce de 0 a 12 dB.
+   */
   public setBassBoost(level: number) {
-    // level: 0 to 10 -> maps to 0 to 12 dB
     this.currentBassBoost = level;
     const gainDb = (level / 10) * 12;
     if (this.bassBoostNode && this.isEnabled) {
@@ -142,8 +194,11 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Configura la ganancia del preamplificador.
+   * @param gainDb Nivel en dB (-6 dB a +6 dB), convertido a ganancia lineal: 10^(dB/20).
+   */
   public setPreamp(gainDb: number) {
-    // gainDb: -6 to +6 dB -> linear amplitude = 10^(dB / 20)
     this.currentPreamp = gainDb;
     const linearGain = Math.pow(10, gainDb / 20);
     if (this.preampGainNode && this.isEnabled) {
@@ -151,6 +206,9 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Aplica todas las ganancias y valores de Bass Boost de un preset predefinido.
+   */
   public applyPreset(preset: EqualizerPreset) {
     this.currentPresetId = preset.id;
     this.currentGains = [...preset.gains];
@@ -164,10 +222,14 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Activa o desactiva los efectos del ecualizador.
+   * Al desactivarlo (bypass), aplana todas las bandas a 0 dB sin romper el grafo de audio.
+   */
   public toggleEqualizer(enabled: boolean) {
     this.isEnabled = enabled;
     if (!enabled) {
-      // Flatten filters
+      // Pone en plano los filtros (0 dB)
       this.filters.forEach((filter) => {
         filter.gain.setTargetAtTime(0, this.ctx?.currentTime || 0, 0.05);
       });
@@ -178,7 +240,7 @@ class AudioEngine {
         this.preampGainNode.gain.setTargetAtTime(1.0, this.ctx?.currentTime || 0, 0.05);
       }
     } else {
-      // Re-apply current values
+      // Restaura las ganancias configuradas por el usuario
       this.currentGains.forEach((gain, idx) => {
         if (this.filters[idx]) {
           this.filters[idx].gain.setTargetAtTime(gain, this.ctx?.currentTime || 0, 0.05);
@@ -189,6 +251,9 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Copia los datos de frecuencias actuales en un buffer de bytes para graficar espectros de barras.
+   */
   public getFrequencyData(array: Uint8Array) {
     if (this.analyserNode) {
       this.analyserNode.getByteFrequencyData(array);
@@ -197,6 +262,9 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Copia los datos de forma de onda en el dominio del tiempo para visualizadores tipo osciloscopio.
+   */
   public getTimeDomainData(array: Uint8Array) {
     if (this.analyserNode) {
       this.analyserNode.getByteTimeDomainData(array);
@@ -205,6 +273,9 @@ class AudioEngine {
     }
   }
 
+  /**
+   * Retorna una instantánea del estado actual del motor de ecualización.
+   */
   public getState() {
     return {
       isEnabled: this.isEnabled,
@@ -224,6 +295,9 @@ class AudioEngine {
     this.isAudioPlaying = isPlaying;
   }
 
+  /**
+   * Obtiene si el audio se encuentra en reproducción
+   */
   public getPlaybackState(): boolean {
     return this.isAudioPlaying;
   }
@@ -235,6 +309,9 @@ class AudioEngine {
     this.isSleepTimerActive = active;
   }
 
+  /**
+   * Comprueba si el temporizador de apagado está activo
+   */
   public isSleepTimerRunning(): boolean {
     return this.isSleepTimerActive;
   }
@@ -303,4 +380,8 @@ class AudioEngine {
   }
 }
 
+/**
+ * Instancia única exportada del motor de audio (Singleton).
+ */
 export const audioEngine = new AudioEngine();
+

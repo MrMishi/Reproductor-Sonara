@@ -1,25 +1,43 @@
 /**
  * ============================================================================
- * SONARA MUSIC - SERVICIO DE BASE DE DATOS LOCAL (IndexedDB & LocalStorage)
+ * SONARA MUSIC - SERVICIO DE BASE DE DATOS LOCAL (db.ts)
  * ============================================================================
- * Persistencia nativa sin caché:
- * - NO almacena Blobs ni ArrayBuffers en IndexedDB.
- * - Guarda metadatos y la ruta nativa física absoluta ('file://...' o URI).
- * - En plataformas nativas, regenera la URL de reproducción directa con Capacitor.convertFileSrc.
+ * Propósito y función del archivo:
+ * Este archivo gestiona la persistencia de datos local de la aplicación utilizando
+ * dos motores del navegador/dispositivo:
+ * 1. IndexedDB: Almacena la colección de pistas de música (`tracks`), metadatos ID3,
+ *    listas de reproducción (`playlists`) y favoritos (`favorites`).
+ * 2. LocalStorage: Almacena la lista negra de pistas ocultas por el usuario (`ytm_hidden_tracks_list`).
+ *
+ * ¿Cómo funciona?:
+ * - Para evitar saturar la memoria o violar cuotas de almacenamiento del navegador,
+ *   NO se persisten objetos Blob gigantes ni ArrayBuffers en IndexedDB.
+ * - En su lugar, se guardan los metadatos y la ruta física nativa (`nativePath`).
+ * - Al cargar las pistas en Android/Capacitor, `loadTracksFromDB()` convierte
+ *   dinámicamente las rutas nativas en URLs accesibles mediante `Capacitor.convertFileSrc(nativePath)`.
+ *
+ * Guía para futuras actualizaciones:
+ * - Si se añade una nueva propiedad a la interfaz `Track`, incluirla en los mapeos
+ *   de `saveTracksToDB()`, `addSingleTrackToDB()` y `loadTracksFromDB()`.
+ * - Si se altera la estructura de los almacenes (ObjectStores), incrementar `DB_VERSION`.
  */
 
 import { Capacitor } from "@capacitor/core";
 import { Track, HiddenTrackRecord } from "../types";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
-const DB_VERSION = 2; // Incremented for clean native-only schema
+const DB_VERSION = 2; // Incrementar si se añaden nuevos ObjectStores
 const STORE_TRACKS = "tracks";
 const STORE_PLAYLISTS = "playlists";
 const STORE_FAVORITES = "favorites";
 const HIDDEN_TRACKS_STORAGE_KEY = "ytm_hidden_tracks_list";
 
 /**
- * Obtiene la lista de pistas marcadas como ocultas por el usuario
+ * Función: getHiddenTracks
+ * Propósito: Lee y devuelve la lista de pistas que el usuario ha decidido ocultar.
+ * ¿Cómo funciona?:
+ * Consulta `localStorage` bajo la clave `HIDDEN_TRACKS_STORAGE_KEY`.
+ * Si existen registros, los deserializa desde JSON; si falla o no hay nada, devuelve un array vacío.
  */
 export function getHiddenTracks(): HiddenTrackRecord[] {
   try {
@@ -32,7 +50,12 @@ export function getHiddenTracks(): HiddenTrackRecord[] {
 }
 
 /**
- * Agrega una pista a la lista de pistas ocultas (evita duplicados)
+ * Función: addHiddenTrack
+ * Propósito: Agrega una canción a la lista de pistas ocultas para no mostrarla en la biblioteca ni en escaneos.
+ * ¿Cómo funciona?:
+ * 1. Obtiene la lista actual de pistas ocultas.
+ * 2. Comprueba duplicados evaluando: ID, nombre de archivo físico o combinación de título y artista normalizados.
+ * 3. Si no existe, crea un registro `HiddenTrackRecord` con timestamp y lo guarda serializado en `localStorage`.
  */
 export function addHiddenTrack(track: Track): void {
   try {
@@ -65,7 +88,11 @@ export function addHiddenTrack(track: Track): void {
 }
 
 /**
- * Remueve una pista de la lista de pistas ocultas
+ * Función: removeHiddenTrack
+ * Propósito: Desoculta una canción para que vuelva a estar visible en la biblioteca musical.
+ * ¿Cómo funciona?:
+ * Filtra el array de `localStorage` eliminando la coincidencia por ID, título o nombre de archivo,
+ * y reescribe la clave en `localStorage`.
  */
 export function removeHiddenTrack(idOrTitle: string): void {
   try {
@@ -79,7 +106,8 @@ export function removeHiddenTrack(idOrTitle: string): void {
 }
 
 /**
- * Vacía completamente la lista de pistas ocultas
+ * Función: clearAllHiddenTracks
+ * Propósito: Restaura todas las canciones ocultas eliminando por completo la lista negra de LocalStorage.
  */
 export function clearAllHiddenTracks(): void {
   try {
@@ -90,7 +118,10 @@ export function clearAllHiddenTracks(): void {
 }
 
 /**
- * Comprueba si una pista está en la lista de ocultas
+ * Función: isTrackHidden
+ * Propósito: Determina si un objeto Track o una canción específica está en la lista de exclusión.
+ * ¿Cómo funciona?:
+ * Compara por ID único, nombre de archivo o coincidencia estricta de título y artista en minúsculas.
  */
 export function isTrackHidden(trackOrTitle: Track | string, artist?: string, fileName?: string): boolean {
   try {
@@ -133,7 +164,11 @@ export function isTrackHidden(trackOrTitle: Track | string, artist?: string, fil
 }
 
 /**
- * Inicializa y abre la conexión con la base de datos IndexedDB local
+ * Función: openDB
+ * Propósito: Inicializa y abre la conexión asíncrona con la base de datos IndexedDB.
+ * ¿Cómo funciona?:
+ * Lanza `indexedDB.open(DB_NAME, DB_VERSION)`. Si se requiere actualización de esquema
+ * (`onupgradeneeded`), crea los almacenes 'tracks', 'playlists' y 'favorites' si no existen.
  */
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -158,8 +193,10 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Guarda o actualiza un array de pistas en IndexedDB sin almacenar Blobs ni ArrayBuffers
- * Guarda únicamente la ruta nativa absoluta ('file://...' o URI) y los metadatos
+ * Función: saveTracksToDB
+ * Propósito: Persiste una colección completa de pistas en IndexedDB mediante una transacción readwrite.
+ * ¿Cómo funciona?:
+ * Itera el array de pistas, extrae la ruta nativa y almacena un registro ligero sin Blobs de memoria.
  */
 export async function saveTracksToDB(tracks: Track[]): Promise<void> {
   try {
@@ -203,8 +240,10 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
 }
 
 /**
- * Guarda o actualiza una única pista en IndexedDB de forma inmediata
- * Registra la URL directa de Capacitor.convertFileSrc y la ruta nativa sin Blobs
+ * Función: addSingleTrackToDB
+ * Propósito: Guarda o actualiza una sola pista en IndexedDB al instante durante el escaneo en vivo.
+ * ¿Cómo funciona?:
+ * Ejecuta un `store.put(record)` inmediato para que el usuario no pierda el progreso si interrumpe el escaneo.
  */
 export async function addSingleTrackToDB(track: Track): Promise<void> {
   try {
@@ -246,8 +285,13 @@ export async function addSingleTrackToDB(track: Track): Promise<void> {
 }
 
 /**
- * Carga todas las pistas persistidas desde IndexedDB
- * Para rutas nativas de dispositivo, regenera la URL válida con Capacitor.convertFileSrc
+ * Función: loadTracksFromDB
+ * Propósito: Recupera todas las pistas almacenadas previamente en la base de datos IndexedDB.
+ * ¿Cómo funciona?:
+ * 1. Obtiene todos los registros del almacén 'tracks'.
+ * 2. Si se ejecuta en plataforma nativa (Capacitor Android/iOS), toma `nativePath` o la URL `file://`
+ *    y la transforma con `Capacitor.convertFileSrc(...)` para que el elemento `<audio>` pueda reproducirla.
+ * 3. Retorna un array ordenado de objetos `Track`.
  */
 export async function loadTracksFromDB(): Promise<Track[]> {
   try {
@@ -263,7 +307,6 @@ export async function loadTracksFromDB(): Promise<Track[]> {
         const isNative = Capacitor.isNativePlatform();
 
         for (const item of records) {
-          // Limpieza de datos heredados si existieran blobs de versiones anteriores
           if (item.blob) {
             delete item.blob;
           }
@@ -273,7 +316,6 @@ export async function loadTracksFromDB(): Promise<Track[]> {
             item.nativePath ||
             (item.url?.startsWith("file://") || item.url?.startsWith("/storage/") ? item.url : undefined);
 
-          // Si estamos en entorno nativo y tenemos la ruta física o file://, regenerar URL válida con Capacitor.convertFileSrc
           if (isNative && nativePath) {
             finalUrl = Capacitor.convertFileSrc(nativePath);
           } else if (isNative && finalUrl && (finalUrl.startsWith("file://") || finalUrl.startsWith("/storage/"))) {
@@ -316,7 +358,8 @@ export async function loadTracksFromDB(): Promise<Track[]> {
 }
 
 /**
- * Elimina una pista de la base de datos IndexedDB por su ID
+ * Función: removeTrackFromDB
+ * Propósito: Elimina una canción específica de IndexedDB a partir de su ID único.
  */
 export async function removeTrackFromDB(id: string): Promise<void> {
   try {
@@ -329,7 +372,8 @@ export async function removeTrackFromDB(id: string): Promise<void> {
 }
 
 /**
- * Elimina múltiples pistas por sus IDs en una única transacción de IndexedDB
+ * Función: removeMultipleTracksFromDB
+ * Propósito: Elimina un conjunto de canciones de forma masiva en una sola transacción atómica.
  */
 export async function removeMultipleTracksFromDB(ids: string[]): Promise<void> {
   if (!ids || ids.length === 0) return;
@@ -350,7 +394,8 @@ export async function removeMultipleTracksFromDB(ids: string[]): Promise<void> {
 }
 
 /**
- * Limpia y vacía por completo el almacén de pistas de la base de datos
+ * Función: clearTracksDB
+ * Propósito: Vacía por completo la tabla de pistas en IndexedDB (útil para restablecer la biblioteca).
  */
 export async function clearTracksDB(): Promise<void> {
   try {
@@ -363,8 +408,10 @@ export async function clearTracksDB(): Promise<void> {
 }
 
 /**
- * Actualiza las etiquetas o metadatos de una pista existente en IndexedDB
+ * Función: updateTrackInDb
+ * Propósito: Actualiza los datos o etiquetas ID3 modificadas de una pista ya existente.
  */
 export async function updateTrackInDb(track: Track): Promise<void> {
   return saveTracksToDB([track]);
 }
+

@@ -114,24 +114,24 @@ export function isAudioFileName(filename: string): boolean {
 
 /**
  * Filtro de notas de voz y audios cortos:
- * - Descarta automáticamente todo archivo cuyo nombre comience por 'PTT-' (WhatsApp Push-To-Talk).
+ * - Descarta automáticamente todo archivo cuyo nombre comience por 'PTT-' (WhatsApp Push-To-Talk) o 'AUD-' (Grabadora/Audio de mensajería).
  * - IMPORTANTE: NO descarta canciones si el metadato de tiempo aún no se ha terminado de leer (duración es 0, indefinida o NaN).
- * - Solo descarta si la duración fue leída con certeza (> 0) y es menor a 75 segundos.
+ * - Solo descarta si la duración fue leída con certeza (> 0) y es menor a 30 segundos.
  */
 export function isVoiceNoteOrShortAudio(
   fileName: string,
   duration?: number,
-  minDurationSeconds: number = 75
+  minDurationSeconds: number = 30
 ): boolean {
   if (!fileName) return false;
   const baseName = fileName.replace(/^.*[/\\]/, "").trim();
 
-  // Descartar automáticamente si comienza por 'PTT-' (insensible a mayúsculas/minúsculas)
-  if (/^PTT-/i.test(baseName)) {
+  // Descartar automáticamente si comienza por 'PTT-' o 'AUD-' (insensible a mayúsculas/minúsculas)
+  if (/^(PTT-|AUD-)/i.test(baseName)) {
     return true;
   }
 
-  // Descartar SOLO si la duración ya se terminó de leer (> 0) y es menor al mínimo (75s).
+  // Descartar SOLO si la duración ya se terminó de leer (> 0) y es menor al mínimo (30s).
   // Si duration es 0, undefined o NaN (metadato aún no terminado de leer), NO descartar.
   if (
     duration !== undefined &&
@@ -282,13 +282,13 @@ async function scanFolderRecursively(
   try {
     readResult = await Filesystem.readdir({
       path: cleanSubPath,
-      directory: baseDirectory,
+      directory: Directory.ExternalStorage,
     });
   } catch {
     try {
       readResult = await Filesystem.readdir({
         path: `/${cleanSubPath}`,
-        directory: baseDirectory,
+        directory: Directory.ExternalStorage,
       });
     } catch {
       // Si la carpeta no existe, ignorar el error y terminar la rama limpiamente
@@ -305,8 +305,8 @@ async function scanFolderRecursively(
     if (!entryName) continue;
 
     // FILTRO ESTRICTO DE NOTAS DE VOZ:
-    // Descarta automáticamente si el archivo comienza por 'PTT-' (WhatsApp Push-To-Talk)
-    if (/^PTT-/i.test(entryName)) {
+    // Descarta automáticamente si el archivo comienza por 'PTT-' o 'AUD-'
+    if (/^(PTT-|AUD-)/i.test(entryName)) {
       continue;
     }
 
@@ -322,20 +322,20 @@ async function scanFolderRecursively(
     const isDir = typeof entry === "object" && entry && "type" in entry ? entry.type === "directory" : undefined;
     const isFile = typeof entry === "object" && entry && "type" in entry ? entry.type === "file" : undefined;
 
-    // Verificación de extensiones insensible a mayúsculas/minúsculas
+    // Verificación de extensiones insensible a mayúsculas/minúsculas (acepta .mp3, .MP3, .m4a, .M4A, .flac, .wav, .ogg, .opus, .aac)
     if (isAudioFileName(entryName) && isDir !== true) {
       audioFiles.push({
         path: childPath,
         fileName: entryName,
         folderName: cleanSubPath || "Música",
         size: entrySize,
-        directory: baseDirectory,
+        directory: Directory.ExternalStorage,
         uri: entryUri,
       });
     } else if (isFile !== true && !isIgnoredFolder(entryName, childPath)) {
       try {
         await scanFolderRecursively(
-          baseDirectory,
+          Directory.ExternalStorage,
           childPath,
           depth + 1,
           maxDepth,
@@ -352,15 +352,18 @@ async function scanFolderRecursively(
 
 /**
  * Escanea el almacenamiento físico de Android en busca de canciones.
- * 1. RUTA ABSOLUTA Y DIRECTORIOS NATIVOS:
- *    - Consulta el almacenamiento raíz usando 'Directory.ExternalStorage' en Capacitor Filesystem.
- *    - Lee explícitamente los directorios '/Music', '/Download' y '/YMusic'.
- *    - Si una carpeta no existe, ignora el error y continúa con las demás.
+ * 1. RUTA ABSOLUTA Y DIRECTORIOS NATIVOS (Directory.ExternalStorage):
+ *    - Configura 'Filesystem.readdir' usando de forma explícita 'directory: Directory.ExternalStorage'
+ *      para leer la memoria interna física (/storage/emulated/0/).
+ *    - Envuelve la lectura de cada carpeta ('/Music', '/Download', '/YMusic') en bloques try/catch individuales.
+ *    - Si la carpeta '/YMusic' no existe, ignora el error y continúa leyendo '/Music' y '/Download'.
+ *    - Asegura la lectura recursiva de subcarpetas dentro de '/Music' y '/Download'.
  * 2. EXTENSIONES Y FILTRADO:
- *    - Verificación de extensiones insensible a mayúsculas/minúsculas: ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.opus', '.aac'].
- *    - El filtro de duración (75s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer (duration <= 0).
- * 3. AGREGAR A BIBLIOTECA:
- *    - Registra de inmediato en IndexedDB la ruta devuelta 'Capacitor.convertFileSrc(path)'
+ *    - Verificación de extensiones insensible a mayúsculas/minúsculas: ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.opus', '.aac', '.webm', '.wma'].
+ *    - Filtra y omite de forma estricta audios menores a 30 segundos o cuyos nombres comiencen por 'AUD-' o 'PTT-'.
+ *    - Asegura que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer (duration <= 0).
+ * 3. AGREGAR A BIBLIOTECA SIN CACHÉ:
+ *    - Guarda directamente la ruta convertida 'Capacitor.convertFileSrc(nativeUri)' o 'file://...' en la base de datos sin convertir a Blob o ArrayBuffer.
  *    - Notifica a la interfaz mediante onTrackDiscovered para que se reflejen en la lista al instante.
  */
 export async function scanNativeMusicDirectories(
@@ -392,36 +395,77 @@ export async function scanNativeMusicDirectories(
     const visitedPaths = new Set<string>();
     const audioEntries: DiscoveredAudioEntry[] = [];
 
-    // 1. RUTA ABSOLUTA Y DIRECTORIOS NATIVOS:
-    // Lee explícitamente '/Music', '/Download' y '/YMusic' en Directory.ExternalStorage.
-    // Si una carpeta no existe, ignora el error y continúa con las demás.
-    for (const targetDir of ALLOWED_FAST_SCAN_FOLDERS) {
-      onProgress?.(targetDir.name, audioEntries.length, 0, `Inspeccionando /storage/emulated/0/${targetDir.path}...`);
+    // 1. FIX ESCANEO CAPACITOR FILESYSTEM (CARPETAS ESPECÍFICAS):
+    // Bloques try/catch individuales para /Music, /Download y /YMusic en Directory.ExternalStorage (/storage/emulated/0/).
 
-      let readSuccess = false;
-      const candidates = targetDir.fallbackPaths || [targetDir.path, `/${targetDir.path}`];
-
-      for (const dirPath of candidates) {
+    // A. Lectura de /Music con recursión completa en todas sus subcarpetas
+    try {
+      onProgress?.("Music", audioEntries.length, 0, "Inspeccionando /storage/emulated/0/Music y subcarpetas...");
+      for (const dirPath of ["Music", "/Music"]) {
         try {
           await scanFolderRecursively(
             Directory.ExternalStorage,
             dirPath,
             0,
-            4, // Hasta 4 niveles de subdirectorios (ej. Music/Artista/Álbum)
+            6, // Hasta 6 niveles de subdirectorios (ej. Music/Rock/Queen/...)
             visitedPaths,
             audioEntries,
             (folder, count, msg) => onProgress?.(folder, count, 0, msg)
           );
-          readSuccess = true;
-          break; // Lectura exitosa de esta carpeta
+          break; // Lectura exitosa
         } catch {
-          // Si no existe la ruta, ignora el error y continúa con la alternativa o siguiente carpeta
+          // Continuar con fallback
         }
       }
+    } catch (musicErr) {
+      console.warn("[NativeScanner] Error inspeccionando /Music:", musicErr);
+    }
 
-      if (!readSuccess) {
-        console.log(`[NativeScanner] Directorio /${targetDir.name} no presente en almacenamiento. Continuando con las demás carpetas.`);
+    // B. Lectura de /Download con recursión completa en todas sus subcarpetas
+    try {
+      onProgress?.("Download", audioEntries.length, 0, "Inspeccionando /storage/emulated/0/Download y subcarpetas...");
+      for (const dirPath of ["Download", "/Download", "Downloads", "/Downloads"]) {
+        try {
+          await scanFolderRecursively(
+            Directory.ExternalStorage,
+            dirPath,
+            0,
+            6, // Hasta 6 niveles de subdirectorios
+            visitedPaths,
+            audioEntries,
+            (folder, count, msg) => onProgress?.(folder, count, 0, msg)
+          );
+          break; // Lectura exitosa
+        } catch {
+          // Continuar con fallback
+        }
       }
+    } catch (downloadErr) {
+      console.warn("[NativeScanner] Error inspeccionando /Download:", downloadErr);
+    }
+
+    // C. Lectura de /YMusic. Si no existe, se ignora el error y continúa con /Music y /Download
+    try {
+      onProgress?.("YMusic", audioEntries.length, 0, "Inspeccionando /storage/emulated/0/YMusic...");
+      for (const dirPath of ["YMusic", "/YMusic"]) {
+        try {
+          await scanFolderRecursively(
+            Directory.ExternalStorage,
+            dirPath,
+            0,
+            6,
+            visitedPaths,
+            audioEntries,
+            (folder, count, msg) => onProgress?.(folder, count, 0, msg)
+          );
+          break; // Lectura exitosa
+        } catch {
+          // Si no existe, continuar con la siguiente ruta
+        }
+      }
+    } catch (ymusicErr) {
+      // Si la carpeta /YMusic no existe, ignorar el error limpiamente y continuar
+      console.log("[NativeScanner] Carpeta /YMusic no presente en almacenamiento. Continuando con las demás carpetas.");
     }
 
     const totalDiscovered = audioEntries.length;
@@ -430,8 +474,8 @@ export async function scanNativeMusicDirectories(
 
     for (const item of audioEntries) {
       try {
-        // Filtro de notas de voz por nombre: descarta si comienza por 'PTT-'
-        if (isVoiceNoteOrShortAudio(item.fileName)) {
+        // Filtro estricto de notas de voz por nombre: descarta si comienza por 'AUD-' o 'PTT-'
+        if (isVoiceNoteOrShortAudio(item.fileName, undefined, 30)) {
           continue;
         }
 
@@ -451,16 +495,17 @@ export async function scanNativeMusicDirectories(
         }
         seenUris.add(nativeUri);
 
-        // 3. AGREGAR A BIBLIOTECA: Obtener ruta devuelta 'Capacitor.convertFileSrc(path)'
+        // 3. AGREGAR A BIBLIOTECA SIN CACHÉ:
+        // Obtener ruta nativa convertida directamente con 'Capacitor.convertFileSrc(path)'
         const webAudioUrl = Capacitor.convertFileSrc(nativeUri);
 
         // Medir o estimar duración
         const duration = await getAudioDuration(webAudioUrl, item.size);
 
-        // 2. FILTRO DE DURACIÓN (75s):
-        // Asegurarse de que el filtro de duración (75s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
-        // Solo descartar si filterShortAudios está activo, duration > 0 (leída con certeza) y duration < 75.
-        if (filterShortAudios && duration && duration > 0 && duration < 75) {
+        // 2. FILTRO DE DURACIÓN (30s):
+        // Asegurarse de que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
+        // Solo descartar si filterShortAudios está activo, duration > 0 (leída con certeza) y duration < 30.
+        if (filterShortAudios && duration && duration > 0 && duration < 30) {
           continue;
         }
 
@@ -627,12 +672,12 @@ export async function scanSpecificNativeDirectory(
 
     onProgress?.(folderLabel, 0, 0, `Leyendo /${normalizedPath} con Filesystem.readdir()...`);
 
-    // Escanear recursivamente la carpeta indicada hasta 4 niveles
+    // Escanear recursivamente la carpeta indicada hasta 6 niveles de profundidad
     await scanFolderRecursively(
       Directory.ExternalStorage,
       normalizedPath,
       0,
-      4,
+      6,
       visitedPaths,
       audioEntries,
       (folder, count, msg) => onProgress?.(folder, count, 0, msg)
@@ -644,8 +689,8 @@ export async function scanSpecificNativeDirectory(
 
     for (const item of audioEntries) {
       try {
-        // Descartar notas de voz que comiencen por 'PTT-'
-        if (isVoiceNoteOrShortAudio(item.fileName)) {
+        // Descartar notas de voz que comiencen por 'AUD-' o 'PTT-'
+        if (isVoiceNoteOrShortAudio(item.fileName, undefined, 30)) {
           continue;
         }
 
@@ -668,9 +713,9 @@ export async function scanSpecificNativeDirectory(
         // Medir o estimar duración
         const duration = await getAudioDuration(webAudioUrl, item.size);
 
-        // FILTRO DE DURACIÓN (75s):
+        // FILTRO DE DURACIÓN (30s):
         // NO descartar canciones si el metadato de tiempo aún no se ha terminado de leer (duration <= 0).
-        if (filterShortAudios && duration && duration > 0 && duration < 75) {
+        if (filterShortAudios && duration && duration > 0 && duration < 30) {
           continue;
         }
 

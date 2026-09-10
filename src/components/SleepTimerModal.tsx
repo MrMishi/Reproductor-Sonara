@@ -1,3 +1,25 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MODAL DE TEMPORIZADOR DE APAGADO (SleepTimerModal.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente permite programar el apagado automático de la música.
+ * Es ideal para escuchar música antes de dormir sin agotar la batería ni
+ * despertar abruptamente al usuario.
+ *
+ * ¿Cómo funciona?:
+ * 1. Modos disponibles:
+ *    - Por minutos: 15, 30, 45, 60, 90 min o minutos personalizados.
+ *    - Al final de la canción actual: Apaga cuando la pista en curso termine.
+ * 2. Atenuación suave (Fade-out): Durante los últimos segundos, reduce
+ *    progresivamente el volumen para un cese relajante y no traumático.
+ * 3. Añadir tiempo: Permite sumar rápidamente +5 o +15 minutos al contador activo.
+ *
+ * Guía para futuras actualizaciones:
+ * - La lógica del temporizador se ejecuta en el loop de `App.tsx` y el modal
+ *   refleja el conteo restante en segundos a través de `sleepTimer.remainingSeconds`.
+ */
+
 import React, { useState, useEffect } from "react";
 import { X, Clock, Moon, Check, Volume2, Plus, AlertCircle } from "lucide-react";
 import { SleepTimerConfig, Track } from "../types";

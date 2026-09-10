@@ -1,3 +1,27 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MODAL DE ECUALIZADOR PROFESIONAL (EqualizerModal.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente proporciona la interfaz de usuario gráfica para ajustar el motor
+ * de sonido de Web Audio API: ecualizador gráfico de 10 bandas de frecuencia
+ * (31 Hz a 16 kHz), control de preamplificador (-12 dB a +12 dB), Bass Boost
+ * de refuerzo sub-grave y visualizador de espectro interactivo.
+ *
+ * ¿Cómo funciona?:
+ * 1. Lee el estado en tiempo real de `audioEngine.getState()`.
+ * 2. Sliders de 10 Bandas (`handleBandChange`): Modifican los nodos BiquadFilter
+ *    con rango de -12 dB a +12 dB y actualizan instantáneamente el sonido.
+ * 3. Selector de Presets (`handlePresetSelect`): Aplica curvas predefinidas
+ *    (Rock, Pop, Jazz, Electronic, Vocal, Flat, etc.).
+ * 4. Refuerzo de Graves (`handleBassBoostChange`): Controla el filtro LowShelf
+ *    a 80 Hz para proporcionar pegada en auriculares o altavoces.
+ * 5. Preamplificador (`handlePreampChange`): Ajusta la ganancia global del audio.
+ *
+ * Guía para futuras actualizaciones:
+ * - Para añadir nuevos presets, agréguelos en `EQUALIZER_PRESETS` dentro de `audioEngine.ts`.
+ */
+
 import React, { useState } from "react";
 import { X, Sliders, RotateCcw, Volume2, Flame, Power } from "lucide-react";
 import { audioEngine, DEFAULT_BANDS, EQUALIZER_PRESETS } from "../services/audioEngine";

@@ -1,5 +1,32 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MOTOR DE TEMAS Y PERSONALIZACIÓN VISUAL (themeEngine.ts)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este módulo administra el sistema de temas visuales dinámicos de Sonora.
+ * Permite cambiar paletas cromáticas completas (fondos, superficies, acentos,
+ * bordes y brillos) en tiempo de ejecución sin recargar la página.
+ *
+ * ¿Cómo funciona?:
+ * 1. Define una colección de temas predeterminados (`THEME_PRESETS`) diseñados
+ *    para pantallas OLED, modos nocturnos y estilos claros con alto contraste.
+ * 2. Persistencia en `localStorage`: Guarda la elección del usuario bajo la clave
+ *    `sonora_player_theme_config`.
+ * 3. Inyección de variables CSS nativas (`applyThemeToDocument`):
+ *    Inyecta dinámicamente variables en `:root` (`--color-accent`, `--color-bg`, etc.),
+ *    lo que sincroniza instantáneamente Tailwind CSS, botones, bordes y el fondo del `<body>`.
+ *
+ * Guía para futuras actualizaciones:
+ * - Para añadir un nuevo tema, agregue un nuevo objeto `ThemeConfig` a `THEME_PRESETS`.
+ * - Asegúrese de que los contrastes de texto (`textPrimary` / `textSecondary`)
+ *   cumplan las pautas de accesibilidad WCAG AA sobre `bgColor` y `surfaceColor`.
+ */
+
 import { ThemeConfig } from "../types";
 
+/**
+ * Catálogo de temas visuales oficiales de Sonora
+ */
 export const THEME_PRESETS: ThemeConfig[] = [
   {
     id: "sonora-signature",
@@ -147,8 +174,19 @@ export const THEME_PRESETS: ThemeConfig[] = [
   },
 ];
 
+/**
+ * Clave de persistencia en localStorage para el tema visual
+ */
 const THEME_STORAGE_KEY = "sonora_player_theme_config";
 
+/**
+ * Función: loadSavedTheme
+ * Propósito: Carga la configuración del tema visual almacenada por el usuario en localStorage.
+ * ¿Cómo funciona?:
+ * 1. Lee la clave `sonora_player_theme_config`.
+ * 2. Valida que el JSON posea las claves esenciales (`accentColor`, `bgColor`).
+ * 3. Si no existe o se corrompe, devuelve el tema oficial predeterminado (`THEME_PRESETS[0]`).
+ */
 export function loadSavedTheme(): ThemeConfig {
   try {
     const raw = localStorage.getItem(THEME_STORAGE_KEY);
@@ -164,6 +202,10 @@ export function loadSavedTheme(): ThemeConfig {
   return THEME_PRESETS[0];
 }
 
+/**
+ * Función: saveTheme
+ * Propósito: Guarda la configuración de un tema seleccionado o personalizado en localStorage.
+ */
 export function saveTheme(theme: ThemeConfig) {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
@@ -173,7 +215,15 @@ export function saveTheme(theme: ThemeConfig) {
 }
 
 /**
- * Injects CSS variables onto document element so Tailwind and inline styles adapt dynamically
+ * Función: applyThemeToDocument
+ * Propósito: Aplica y propaga las propiedades del tema a todo el DOM de la aplicación.
+ * ¿Cómo funciona?:
+ * 1. Accede a `document.documentElement` (`:root`).
+ * 2. Inyecta variables CSS estándar: `--color-accent`, `--color-bg`, `--color-surface`,
+ *    `--color-surface-elevated`, `--color-player-bg`, `--color-text-primary`, etc.
+ * 3. Mapea el valor de borde redondeado (`borderRadius`) a píxeles en `--theme-radius`.
+ * 4. Calcula la sombra o resplandor de acento (`--theme-accent-glow`).
+ * 5. Asigna `document.body.style.backgroundColor` para evitar destellos blancos al redimensionar.
  */
 export function applyThemeToDocument(theme: ThemeConfig) {
   const root = document.documentElement;

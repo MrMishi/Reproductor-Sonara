@@ -1,3 +1,30 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - SERVIDOR BACKEND EXPRESS Y PROXY DE LETRAS (server.ts)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este archivo constituye el servidor HTTP backend de Sonora Music.
+ * Actúa como middleware de desarrollo con Vite (en local/preview) y servidor
+ * de archivos estáticos (en producción), además de exponer endpoints API para
+ * búsqueda de letras, verificación de salud (`/api/health`) y llamadas seguras
+ * a la API de Gemini sin exponer claves al navegador.
+ *
+ * ¿Cómo funciona?:
+ * 1. Endpoint `/api/health`: Permite comprobar la disponibilidad y estado del servidor.
+ * 2. Endpoint `/api/lyrics/search`:
+ *    - Limpia metadatos ruidosos de cadenas de texto (ej. "(Official Video)", "HD", etc.).
+ *    - Nivel 1: Consulta la API abierta LRCLIB (`https://lrclib.net/api/get` o `/api/search`)
+ *      para obtener letras con timestamps sincronizados (.lrc).
+ *    - Nivel 2: Si falla o no hay datos, consulta Lyrics.ovh como proveedor secundario.
+ *    - Nivel 3: Si no hay letras en bases abiertas, utiliza Google Gemini AI (`fetchGeminiLyrics`)
+ *      para generar y transcribir fielmente los versos (con soporte nativo para kanji y romaji).
+ * 3. Middleware de Vite: En desarrollo monta `createViteServer` en modo `middlewareMode`,
+ *    y en producción sirve la compilación estática desde `/dist`.
+ *
+ * Guía para futuras actualizaciones:
+ * - Toda nueva ruta de API debe registrarse antes de la llamada a `start()`.
+ */
+
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
@@ -10,7 +37,10 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "10mb" }));
 
-// Lazy Gemini client
+/**
+ * Cliente perezoso (lazy-initialization) de Google GenAI SDK.
+ * Garantiza que la app no falle al arrancar si falta la clave en el entorno.
+ */
 let aiClient: GoogleGenAI | null = null;
 function getAI() {
   if (!aiClient && process.env.GEMINI_API_KEY) {
@@ -21,12 +51,20 @@ function getAI() {
   return aiClient;
 }
 
-// Health check
+/**
+ * Ruta de comprobación de salud del servidor
+ */
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Helper function to query Gemini for lyrics with resilient retry and fallback models
+/**
+ * Función: fetchGeminiLyrics
+ * Propósito: Consulta a Gemini AI para transcribir la letra fiel de una canción.
+ * ¿Cómo funciona?:
+ * Envía un prompt estructurado exigiendo preservación Unicode UTF-8 de caracteres
+ * nativos asiáticos y transliteración fonética Romaji, recorriendo modelos candidatos.
+ */
 async function fetchGeminiLyrics(cleanTrack: string, cleanArtist: string): Promise<string | null> {
   const ai = getAI();
   if (!ai) return null;

@@ -1,8 +1,37 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - GENERADOR DE PISTAS DEMO SINTETIZADAS (demoTracks.ts)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este módulo genera música real sintetizada procedimentalmente utilizando la
+ * `OfflineAudioContext` de la Web Audio API. Permite que la aplicación cuente con
+ * pistas de demostración totalmente funcionales (con audio audible, espectrograma,
+ * ecualización y letras sincronizadas) desde el primer segundo de instalación,
+ * sin necesidad de descargar archivos externos ni infringir derechos de autor.
+ *
+ * ¿Cómo funciona?:
+ * 1. `synthesizeSong(...)`: Genera secuencias rítmicas (bombo, caja, hi-hats de ruido blanco),
+ *    armonías polifónicas (pads y acordes menores) y melodías solistas sintéticas.
+ * 2. `bufferToWav(...)`: Convierte los canales Float32 del `AudioBuffer` resultante
+ *    a un archivo binario WAV estándar de 16 bits PCM con cabecera RIFF/WAVE válida.
+ * 3. `getInitialDemoTracks()`: Retorna 3 canciones completas con estilos contrastantes
+ *    (Synthwave, Lo-Fi Chill y Funk Nu-Disco), portadas dinámicas y versos sincronizados (.lrc).
+ *
+ * Guía para futuras actualizaciones:
+ * - Para ajustar la duración o tempo de las canciones demo, modificar los parámetros
+ *   enviados a `synthesizeSong(style, bpm, durationSec)`.
+ */
+
 import { Track } from "../types";
 import { generateCoverArt } from "./metadataParser";
 
 /**
- * Encodes an AudioBuffer into a WAV Blob
+ * Función: bufferToWav
+ * Propósito: Codifica un AudioBuffer de Web Audio API en un Blob binario con formato de archivo WAV (PCM 16-bit).
+ * ¿Cómo funciona?:
+ * 1. Construye una cabecera binaria RIFF/WAVE de 44 bytes con la tasa de muestreo y número de canales.
+ * 2. Cuantiza cada muestra flotante de audio de [-1.0, 1.0] a enteros de 16 bits [-32768, 32767].
+ * 3. Empaqueta los datos en un `ArrayBuffer` y retorna un `Blob` con tipo MIME "audio/wav".
  */
 function bufferToWav(buffer: AudioBuffer): Blob {
   const numOfChan = buffer.numberOfChannels;
@@ -60,7 +89,18 @@ function bufferToWav(buffer: AudioBuffer): Blob {
 }
 
 /**
- * Synthesizes a melodic music piece using OfflineAudioContext
+ * Función: synthesizeSong
+ * Propósito: Compone y renderiza de forma asíncrona una pieza musical instrumental en segundo plano.
+ * ¿Cómo funciona?:
+ * 1. Inicializa un `OfflineAudioContext` estéreo a 44.1 kHz con la duración indicada.
+ * 2. Calcula la duración del pulso (`beatLen`) y el número de compases a partir del BPM.
+ * 3. Genera pistas de percusión programadas:
+ *    - Bombo (Kick): Oscilador con caída exponencial de tono (140 Hz a 38 Hz).
+ *    - Caja / Palmada (Snare): Ráfagas de ruido blanco filtradas con paso alto a 1 kHz.
+ *    - Hi-hats: Ráfagas ultra cortas de ruido blanco con filtro pasa-banda a 7.5 kHz.
+ * 4. Genera progresiones armónicas de sintetizador o teclado según la escala musical elegida.
+ * 5. Conecta arpegios melódicos de acompañamiento solista.
+ * 6. Ejecuta `ctx.startRendering()`, convierte el buffer a WAV con `bufferToWav` y crea un Blob URL.
  */
 async function synthesizeSong(
   style: "lofi" | "synthwave" | "acoustic",
@@ -211,7 +251,14 @@ async function synthesizeSong(
 }
 
 /**
- * Returns initial demo tracks with pre-configured lyrics and metadata
+ * Función: getInitialDemoTracks
+ * Propósito: Proporciona las canciones iniciales de prueba con portadas, audio y letras sincronizadas.
+ * ¿Cómo funciona?:
+ * 1. Lanza en paralelo la síntesis acústica de 3 pistas (Synthwave, Lo-Fi y Nu-Disco Funk).
+ * 2. Asigna identificadores estables (`demo-neon-nights`, `demo-lofi-coffee`, `demo-sunset-groove`).
+ * 3. Genera portadas con gradientes vectoriales distintivos a través de `generateCoverArt`.
+ * 4. Adjunta letras completas en texto plano y versos sincronizados (.lrc) listos para el karaoke.
+ * 5. Retorna el array con las 3 pistas listas para ser consumidas por la biblioteca o el reproductor.
  */
 export async function getInitialDemoTracks(): Promise<Track[]> {
   try {

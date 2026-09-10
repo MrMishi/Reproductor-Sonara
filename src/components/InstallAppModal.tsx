@@ -1,3 +1,24 @@
+/**
+ * ============================================================================
+ * SONARA MUSIC - MODAL DE INSTALACIÓN PWA Y MÓVIL (InstallAppModal.tsx)
+ * ============================================================================
+ * Propósito y función del archivo:
+ * Este componente guía al usuario para instalar Sonora Music como una aplicación
+ * nativa o PWA en Android, Windows, macOS o iOS.
+ *
+ * ¿Cómo funciona?:
+ * 1. Captura el evento `beforeinstallprompt` a través de `deferredPrompt` y permite
+ *    desencadenar la instalación directa con un solo clic (`handleInstallClick`).
+ * 2. Si el navegador no soporta la instalación automática (como Safari en iOS),
+ *    muestra instrucciones paso a paso con gráficos claros.
+ * 3. Explica los beneficios del modo sin conexión: acceso sin internet a la música
+ *    almacenada en IndexedDB y el dispositivo físico.
+ *
+ * Guía para futuras actualizaciones:
+ * - El Service Worker y el manifiesto PWA (`manifest.json`) deben mantenerse
+ *   sincronizados con los iconos y colores aquí presentados.
+ */
+
 import React, { useState, useEffect } from "react";
 import {
   X,
