@@ -347,8 +347,9 @@ export async function parseAudioFile(
   filterShortAudios: boolean = false,
   minDurationSeconds: number = 30
 ): Promise<Track | null> {
-  // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' o 'AUD-' (WhatsApp / Grabadora)
-  if (/^(PTT-|AUD-)/i.test(file.name)) {
+  // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' (WhatsApp Push-To-Talk)
+  // El prefijo 'AUD-' se admite para canciones legítimas
+  if (/^PTT-/i.test(file.name)) {
     return null;
   }
 

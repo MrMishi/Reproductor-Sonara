@@ -39,12 +39,17 @@ export interface AndroidFolderOption {
 }
 
 /**
- * Carpetas permitidas para el escaneo ultrarrápido en Android (/storage/emulated/0/)
+ * Interfaz para representar una carpeta del explorador nativo de Android
+ */
+export interface NativeFolderItem {
+  name: string;
+  path: string;
+  displayPath: string;
+}
+
+/**
+ * Carpetas estándar de música recomendadas para escaneo rápido en Android (/storage/emulated/0/)
  * Consulta el almacenamiento raíz usando 'Directory.ExternalStorage' en Capacitor Filesystem.
- * Lee explícitamente:
- * 1. /Music
- * 2. /Download
- * 3. /YMusic
  */
 export const ALLOWED_FAST_SCAN_FOLDERS: AndroidFolderOption[] = [
   {
@@ -78,7 +83,6 @@ export const ALLOWED_FAST_SCAN_FOLDERS: AndroidFolderOption[] = [
 
 /**
  * Carpetas estándar de Android para selección rápida en el explorador nativo
- * Limitadas estrictamente a las 3 carpetas de música autorizadas
  */
 export const ANDROID_QUICK_FOLDERS: AndroidFolderOption[] = ALLOWED_FAST_SCAN_FOLDERS.map((f) => ({
   id: f.id,
@@ -89,6 +93,57 @@ export const ANDROID_QUICK_FOLDERS: AndroidFolderOption[] = ALLOWED_FAST_SCAN_FO
   description: f.description,
   icon: f.icon,
 }));
+
+/**
+ * Lista dinámicamente las carpetas en una ruta dada del almacenamiento físico de Android (/storage/emulated/0/).
+ * Permite explorar y navegar libremente por cualquier carpeta del dispositivo sin restricciones hardcodeadas.
+ */
+export async function listNativeDirectories(
+  subPath: string = ""
+): Promise<NativeFolderItem[]> {
+  const isNative = Capacitor.isNativePlatform();
+  if (!isNative) return [];
+
+  const cleanPath = subPath.trim().replace(/^\/+|\/+$/g, "");
+
+  try {
+    const res = await Filesystem.readdir({
+      path: cleanPath,
+      directory: Directory.ExternalStorage,
+    });
+
+    const folders: NativeFolderItem[] = [];
+
+    for (const entry of res.files || []) {
+      const entryName = typeof entry === "string" ? entry : entry?.name;
+      if (!entryName) continue;
+
+      const fullChildPath = cleanPath ? `${cleanPath}/${entryName}` : entryName;
+
+      // Omitir carpetas ocultas y sandboxes privados protegidos por Android
+      if (entryName.startsWith(".") || isIgnoredFolder(entryName, fullChildPath)) {
+        continue;
+      }
+
+      const isFile = typeof entry === "object" && entry && "type" in entry ? entry.type === "file" : undefined;
+
+      // Si no es un archivo de audio conocido, considerar como carpeta navegable
+      if (isFile !== true && !isAudioFileName(entryName)) {
+        folders.push({
+          name: entryName,
+          path: fullChildPath,
+          displayPath: `/storage/emulated/0/${fullChildPath}`,
+        });
+      }
+    }
+
+    // Ordenar alfabéticamente
+    return folders.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  } catch (err) {
+    console.warn(`[NativeScanner] No se pudieron listar carpetas en '${subPath}':`, err);
+    return [];
+  }
+}
 
 /**
  * Verificación de extensiones soportadas insensible a mayúsculas y minúsculas:
@@ -114,9 +169,10 @@ export function isAudioFileName(filename: string): boolean {
 
 /**
  * Filtro de notas de voz y audios cortos:
- * - Descarta automáticamente todo archivo cuyo nombre comience por 'PTT-' (WhatsApp Push-To-Talk) o 'AUD-' (Grabadora/Audio de mensajería).
+ * - Descarta automáticamente notas de voz de mensajería identificadas por 'PTT-' (WhatsApp Push-To-Talk).
+ * - IMPORTANTE: NO descarta canciones con prefijo 'AUD-' (removido bloqueo para admitir canciones legítimas).
  * - IMPORTANTE: NO descarta canciones si el metadato de tiempo aún no se ha terminado de leer (duración es 0, indefinida o NaN).
- * - Solo descarta si la duración fue leída con certeza (> 0) y es menor a 30 segundos.
+ * - Solo descarta si la duración fue leída con certeza (> 0) y es menor a 30 segundos (o minDurationSeconds si está activo).
  */
 export function isVoiceNoteOrShortAudio(
   fileName: string,
@@ -126,8 +182,9 @@ export function isVoiceNoteOrShortAudio(
   if (!fileName) return false;
   const baseName = fileName.replace(/^.*[/\\]/, "").trim();
 
-  // Descartar automáticamente si comienza por 'PTT-' o 'AUD-' (insensible a mayúsculas/minúsculas)
-  if (/^(PTT-|AUD-)/i.test(baseName)) {
+  // Descartar automáticamente solo si comienza por 'PTT-' (WhatsApp Push-To-Talk)
+  // El prefijo 'AUD-' NO se bloquea para admitir canciones legítimas
+  if (/^PTT-/i.test(baseName)) {
     return true;
   }
 
@@ -147,29 +204,11 @@ export function isVoiceNoteOrShortAudio(
 }
 
 /**
- * Carpetas pesadas, de mensajería o del sistema IGNORADAS Y BLOQUEADAS de forma explícita:
- * - /Android
- * - /DCIM
- * - /Pictures
- * - /WhatsApp
- * - /Telegram
- * - Archivos temporales, caché y miniaturas
+ * Carpetas del sistema o basura IGNORADAS de forma segura:
+ * - Sandboxes privados restringidos por Android (/Android/data y /Android/obb)
+ * - Archivos temporales, miniaturas (.thumbnails), papeleras y control de versiones
  */
-const BLOCKED_FOLDER_NAMES = new Set([
-  "android",
-  "dcim",
-  "pictures",
-  "whatsapp",
-  "telegram",
-  "movies",
-  "camera",
-  "snapchat",
-  "instagram",
-  "facebook",
-  "cache",
-  "temp",
-  "tmp",
-  "appdata",
+const SYSTEM_IGNORED_FOLDER_NAMES = new Set([
   "lost.dir",
   "system volume information",
   "$recycle.bin",
@@ -184,31 +223,22 @@ const BLOCKED_FOLDER_NAMES = new Set([
 
 export function isIgnoredFolder(folderName: string, fullPath: string): boolean {
   const lowerName = folderName.toLowerCase().trim();
-  const lowerPath = fullPath.toLowerCase().trim();
+  const lowerPath = fullPath.toLowerCase().trim().replace(/^[/\\]+|[/\\]+$/g, "");
 
   // Ignorar carpetas ocultas
   if (lowerName.startsWith(".")) return true;
 
-  // Bloqueo explícito por nombre de carpeta
-  if (BLOCKED_FOLDER_NAMES.has(lowerName)) return true;
+  // Bloqueo de carpetas de basura del sistema
+  if (SYSTEM_IGNORED_FOLDER_NAMES.has(lowerName)) return true;
 
-  // Bloqueo estricto si cualquier segmento de la ruta contiene carpetas prohibidas
-  const blockedSubstrings = [
-    "android",
-    "dcim",
-    "pictures",
-    "whatsapp",
-    "telegram",
-    "temp",
-    "tmp",
-    "cache",
-    ".trash",
-    ".thumbnails",
-  ];
-
-  const segments = lowerPath.split(/[/\\]+/).map((s) => s.trim());
-  for (const block of blockedSubstrings) {
-    if (segments.includes(block)) return true;
+  // Bloqueo específico de sandboxes privados de aplicaciones en Android (Android 11+ restringe /Android/data y /Android/obb)
+  if (
+    lowerPath === "android/data" ||
+    lowerPath.startsWith("android/data/") ||
+    lowerPath === "android/obb" ||
+    lowerPath.startsWith("android/obb/")
+  ) {
+    return true;
   }
 
   return false;
@@ -305,8 +335,9 @@ async function scanFolderRecursively(
     if (!entryName) continue;
 
     // FILTRO ESTRICTO DE NOTAS DE VOZ:
-    // Descarta automáticamente si el archivo comienza por 'PTT-' o 'AUD-'
-    if (/^(PTT-|AUD-)/i.test(entryName)) {
+    // Descarta si el archivo comienza por 'PTT-' (WhatsApp Push-To-Talk).
+    // El prefijo 'AUD-' se admite para canciones legítimas.
+    if (/^PTT-/i.test(entryName)) {
       continue;
     }
 
@@ -360,7 +391,7 @@ async function scanFolderRecursively(
  *    - Asegura la lectura recursiva de subcarpetas dentro de '/Music' y '/Download'.
  * 2. EXTENSIONES Y FILTRADO:
  *    - Verificación de extensiones insensible a mayúsculas/minúsculas: ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.opus', '.aac', '.webm', '.wma'].
- *    - Filtra y omite de forma estricta audios menores a 30 segundos o cuyos nombres comiencen por 'AUD-' o 'PTT-'.
+ *    - Filtra y omite de forma estricta audios menores a 30 segundos o que comiencen por 'PTT-'. Se admiten canciones con prefijo 'AUD-'.
  *    - Asegura que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer (duration <= 0).
  * 3. AGREGAR A BIBLIOTECA SIN CACHÉ:
  *    - Guarda directamente la ruta convertida 'Capacitor.convertFileSrc(nativeUri)' o 'file://...' en la base de datos sin convertir a Blob o ArrayBuffer.
@@ -474,7 +505,7 @@ export async function scanNativeMusicDirectories(
 
     for (const item of audioEntries) {
       try {
-        // Filtro estricto de notas de voz por nombre: descarta si comienza por 'AUD-' o 'PTT-'
+        // Filtro estricto de notas de voz: descarta si comienza por 'PTT-' o por duración < 30s
         if (isVoiceNoteOrShortAudio(item.fileName, undefined, 30)) {
           continue;
         }
@@ -631,12 +662,12 @@ export async function autoScanStartup(
 }
 
 /**
- * Escaneo nativo directo de una carpeta específica de Android seleccionada por el usuario.
- * Reemplaza la 'HTML5 File System Access API' por el uso nativo de Filesystem.readdir().
- * Bloquea la raíz y carpetas del sistema.
+ * Escaneo nativo directo de una carpeta específica de Android o de la RAÍZ física del almacenamiento.
+ * Utiliza Filesystem.readdir() con Directory.ExternalStorage (/storage/emulated/0/).
+ * Permite explorar libremente cualquier carpeta o escanear desde la raíz física del dispositivo.
  */
 export async function scanSpecificNativeDirectory(
-  targetPath: string,
+  targetPath: string = "",
   folderLabel: string = "Carpeta seleccionada",
   onProgress?: ScanProgressCallback,
   filterShortAudios: boolean = true,
@@ -651,15 +682,12 @@ export async function scanSpecificNativeDirectory(
     return { tracks: [], scannedCount: 0, errors };
   }
 
-  // Bloqueo explícito de la raíz de almacenamiento y carpetas del sistema
-  const normalizedPath = targetPath.trim().replace(/^\/+|\/+$/g, "");
-  if (!normalizedPath) {
-    errors.push("El escaneo de la raíz del almacenamiento está bloqueado para garantizar velocidad y proteger archivos del sistema. Selecciona /Music, /Download o /YMusic.");
-    return { tracks: [], scannedCount: 0, errors };
-  }
+  // Normalizar la ruta. Si está vacía o es '.', se escanea desde la RAÍZ física del almacenamiento (/storage/emulated/0/)
+  const normalizedPath = (targetPath || "").trim().replace(/^\/+|\/+$/g, "");
+  const isRootScan = !normalizedPath;
 
-  if (isIgnoredFolder(normalizedPath, normalizedPath)) {
-    errors.push(`La carpeta '${targetPath}' es del sistema o no contiene música permitida.`);
+  if (normalizedPath && isIgnoredFolder(normalizedPath, normalizedPath)) {
+    errors.push(`La carpeta '${targetPath}' es del sistema o no contiene música accesible.`);
     return { tracks: [], scannedCount: 0, errors };
   }
 
@@ -670,14 +698,21 @@ export async function scanSpecificNativeDirectory(
     const visitedPaths = new Set<string>();
     const audioEntries: DiscoveredAudioEntry[] = [];
 
-    onProgress?.(folderLabel, 0, 0, `Leyendo /${normalizedPath} con Filesystem.readdir()...`);
+    onProgress?.(
+      folderLabel,
+      0,
+      0,
+      isRootScan
+        ? "Leyendo almacenamiento completo (/storage/emulated/0/) con Filesystem.readdir()..."
+        : `Leyendo /${normalizedPath} con Filesystem.readdir()...`
+    );
 
-    // Escanear recursivamente la carpeta indicada hasta 6 niveles de profundidad
+    // Escanear recursivamente la carpeta indicada o la raíz completa hasta 8 niveles de profundidad
     await scanFolderRecursively(
       Directory.ExternalStorage,
       normalizedPath,
       0,
-      6,
+      8,
       visitedPaths,
       audioEntries,
       (folder, count, msg) => onProgress?.(folder, count, 0, msg)
@@ -689,7 +724,7 @@ export async function scanSpecificNativeDirectory(
 
     for (const item of audioEntries) {
       try {
-        // Descartar notas de voz que comiencen por 'AUD-' o 'PTT-'
+        // Descartar notas de voz que comiencen por 'PTT-' (se admite prefijo 'AUD-')
         if (isVoiceNoteOrShortAudio(item.fileName, undefined, 30)) {
           continue;
         }

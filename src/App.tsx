@@ -258,12 +258,13 @@ export default function App() {
     initLibrary();
   }, []);
 
-  // Pistas visibles con filtro estricto de notas de voz ('AUD-' y 'PTT-') y audios cortos (< 30s)
+  // Pistas visibles con filtro de notas de voz ('PTT-') y audios cortos (< 30s)
+  // Se admite el prefijo 'AUD-' para no descartar canciones legítimas
   // Asegurarse de que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
   const visibleTracks = useMemo(() => {
     return tracks.filter((t) => {
-      if (t.fileName && /^(PTT-|AUD-)/i.test(t.fileName)) return false;
-      if (t.title && /^(PTT-|AUD-)/i.test(t.title)) return false;
+      if (t.fileName && /^PTT-/i.test(t.fileName)) return false;
+      if (t.title && /^PTT-/i.test(t.title)) return false;
       if (
         filterShortAudios &&
         t.duration !== undefined &&
@@ -1049,8 +1050,8 @@ export default function App() {
             if (realDuration && !isNaN(realDuration) && isFinite(realDuration) && realDuration > 0) {
               setDuration(realDuration);
 
-              // Si la pista resulta ser una nota de voz identificada por 'AUD-' o 'PTT-' menor a 30s, omitir inmediatamente y avanzar
-              if (realDuration < 30 && currentTrack?.fileName && /^(PTT-|AUD-)/i.test(currentTrack.fileName)) {
+              // Si la pista resulta ser una nota de voz identificada por 'PTT-' menor a 30s, omitir inmediatamente y avanzar
+              if (realDuration < 30 && currentTrack?.fileName && /^PTT-/i.test(currentTrack.fileName)) {
                 console.log(`[Sonora] Descartando automáticamente nota de voz (${realDuration.toFixed(1)}s)...`);
                 handleNext();
                 return;

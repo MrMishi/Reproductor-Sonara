@@ -48,6 +48,8 @@ import {
   requestStoragePermissions,
   ANDROID_QUICK_FOLDERS,
   AndroidFolderOption,
+  listNativeDirectories,
+  NativeFolderItem,
 } from "../services/nativeScanner";
 
 interface DeviceScannerModalProps {
@@ -107,6 +109,11 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isNativeFolderPickerOpen, setIsNativeFolderPickerOpen] = useState(false);
 
+  // Estado para la navegación libre de carpetas nativas en Android
+  const [nativeCurrentPath, setNativeCurrentPath] = useState<string>("");
+  const [nativeFoldersList, setNativeFoldersList] = useState<NativeFolderItem[]>([]);
+  const [isLoadingNativeFolders, setIsLoadingNativeFolders] = useState<boolean>(false);
+
   // Audio Duration & Blacklist Filters (Default: 30 seconds minimum to eliminate WhatsApp audio / voice notes)
   const [filterShortAudios, setFilterShortAudios] = useState<boolean>(true);
   const [minDurationSeconds, setMinDurationSeconds] = useState<number>(30);
@@ -126,8 +133,53 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
       setProcessedCount(0);
       setStatusType("info");
       setIsNativeFolderPickerOpen(false);
+      setNativeCurrentPath("");
+      setNativeFoldersList([]);
     }
   }, [isOpen]);
+
+  // Carga dinámica de carpetas al navegar por el almacenamiento nativo de Android
+  useEffect(() => {
+    if (!isNativeFolderPickerOpen) return;
+    let isMounted = true;
+    setIsLoadingNativeFolders(true);
+
+    listNativeDirectories(nativeCurrentPath)
+      .then((items) => {
+        if (isMounted) {
+          setNativeFoldersList(items);
+          setIsLoadingNativeFolders(false);
+        }
+      })
+      .catch((err) => {
+        console.warn("[DeviceScannerModal] Error cargando carpetas nativas:", err);
+        if (isMounted) {
+          setNativeFoldersList([]);
+          setIsLoadingNativeFolders(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isNativeFolderPickerOpen, nativeCurrentPath]);
+
+  const handleNavigateToFolder = (path: string) => {
+    setNativeCurrentPath(path);
+  };
+
+  const handleNavigateUp = () => {
+    const parts = nativeCurrentPath.split("/").filter(Boolean);
+    parts.pop();
+    setNativeCurrentPath(parts.join("/"));
+  };
+
+  const handleOpenSystemSAF = () => {
+    if (folderInputRef.current) {
+      folderInputRef.current.value = "";
+      folderInputRef.current.click();
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -501,20 +553,22 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   };
 
   /**
-   * Escaneo nativo de una carpeta específica de Android con Filesystem.readdir()
+   * Escaneo nativo de una carpeta específica de Android o de la RAÍZ física (/storage/emulated/0/)
+   * con Filesystem.readdir() y registro directo en la base de datos sin pasar por caché ni blobs.
    */
-  const handleScanSpecificFolder = async (folder: AndroidFolderOption) => {
+  const handleScanSpecificFolder = async (folderPath: string, folderName: string = "Carpeta seleccionada") => {
     isCancelledRef.current = false;
     setIsScanning(true);
     setStatusType("info");
-    setProgressStatus(`Solicitando permisos nativos y leyendo ${folder.displayPath}...`);
+    const display = folderPath ? `/storage/emulated/0/${folderPath}` : "/storage/emulated/0/ (Raíz)";
+    setProgressStatus(`Solicitando permisos nativos y leyendo ${display}...`);
     setDiscoveredCount(0);
     setProcessedCount(0);
 
     try {
       const result = await scanSpecificNativeDirectory(
-        folder.path,
-        folder.name,
+        folderPath,
+        folderName,
         (currentFolder, found, processed, msg) => {
           if (isCancelledRef.current) return;
           setProgressStatus(`[${currentFolder}] ${msg}`);
@@ -523,8 +577,9 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
         },
         filterShortAudios,
         (discoveredTrack) => {
-          // 3. AGREGAR A BIBLIOTECA:
-          // Registra de inmediato en IndexedDB/Estado global para que se refleje en la lista al instante.
+          // 3. REGISTRO DIRECTO A BIBLIOTECA COMO EN SELECCIÓN INDIVIDUAL:
+          // Registra de inmediato en IndexedDB/Estado global la ruta devuelta 'Capacitor.convertFileSrc(path)'
+          // sin pasar por caché ni blobs, reflejándose en la lista al instante.
           onTracksImported([discoveredTrack]);
         }
       );
@@ -538,7 +593,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
 
       if (result.tracks.length > 0) {
         setStatusType("success");
-        setProgressStatus(`¡Se importaron ${result.tracks.length} canciones de ${folder.name}!`);
+        setProgressStatus(`¡Se importaron ${result.tracks.length} canciones de ${folderName}!`);
         onTracksImported(result.tracks);
         setIsNativeFolderPickerOpen(false);
         setTimeout(() => {
@@ -549,7 +604,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
         setProgressStatus(
           result.errors.length > 0
             ? `No se detectaron pistas (${result.errors[0]}).`
-            : `No se encontraron pistas de audio en ${folder.displayPath}.`
+            : `No se encontraron pistas de audio en ${display}.`
         );
       }
     } catch (err: unknown) {
@@ -723,47 +778,120 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
             >
               <button
                 id="native-folder-picker-back-btn"
-                onClick={() => setIsNativeFolderPickerOpen(false)}
+                onClick={() => {
+                  if (nativeCurrentPath) {
+                    handleNavigateUp();
+                  } else {
+                    setIsNativeFolderPickerOpen(false);
+                  }
+                }}
                 className="flex items-center gap-1.5 text-xs font-semibold text-neutral-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-all cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Volver a opciones</span>
+                <span>{nativeCurrentPath ? "Subir nivel" : "Volver a opciones"}</span>
               </button>
 
               <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20 font-semibold">
-                Filesystem.readdir() Nativo
+                Memoria Interna Física
               </span>
             </div>
 
-            <div>
-              <h3 className="text-sm font-bold text-white">Explorador de Carpetas Android</h3>
-              <p className="text-xs text-neutral-400 mt-0.5">
-                Selecciona una carpeta para leer directamente con Filesystem.readdir() sin interrupciones del WebView:
-              </p>
+            {/* Ruta actual / Breadcrumbs */}
+            <div
+              className="p-2.5 rounded-xl border flex items-center justify-between gap-2"
+              style={{
+                backgroundColor: "var(--color-surface, #141414)",
+                borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
+              }}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <Folder className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-xs font-mono text-neutral-200 truncate">
+                  /storage/emulated/0{nativeCurrentPath ? `/${nativeCurrentPath}` : ""}
+                </span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {ANDROID_QUICK_FOLDERS.map((folder) => (
-                <button
-                  key={folder.id}
-                  id={`native-folder-${folder.id}-btn`}
-                  disabled={isScanning}
-                  onClick={() => handleScanSpecificFolder(folder)}
-                  className="p-3 rounded-xl border flex items-center justify-between text-left hover:bg-white/5 transition-all disabled:opacity-50 cursor-pointer group hover:border-emerald-500/40"
-                  style={{ borderColor: "var(--color-border-subtle)" }}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="p-2.5 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover:scale-105 transition-transform shrink-0">
-                      <Folder className="w-4 h-4" />
+            {/* Acciones principales: Escanear actual o Escanear raíz completa + Selector del sistema (SAF) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                id="native-scan-current-dir-btn"
+                disabled={isScanning}
+                onClick={() =>
+                  handleScanSpecificFolder(
+                    nativeCurrentPath,
+                    nativeCurrentPath ? nativeCurrentPath.split("/").pop() || nativeCurrentPath : "Almacenamiento Completo"
+                  )
+                }
+                className="p-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer disabled:opacity-50"
+              >
+                <FolderSearch className="w-4 h-4" />
+                <span>
+                  {nativeCurrentPath
+                    ? `Escanear esta carpeta (${nativeCurrentPath.split("/").pop()})`
+                    : "Escanear almacenamiento completo (/)"}
+                </span>
+              </button>
+
+              <button
+                id="native-open-system-saf-btn"
+                disabled={isScanning}
+                onClick={handleOpenSystemSAF}
+                className="p-3 rounded-xl border border-neutral-700 bg-neutral-800/80 hover:bg-neutral-700 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Smartphone className="w-4 h-4 text-cyan-400" />
+                <span>Selector del Sistema (SAF / Picker)</span>
+              </button>
+            </div>
+
+            {/* Listado dinámico de carpetas para explorar libremente */}
+            <div className="flex flex-col gap-1.5 mt-1">
+              <div className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider flex items-center justify-between">
+                <span>Carpetas en {nativeCurrentPath ? `/${nativeCurrentPath}` : "la Raíz"}</span>
+                {isLoadingNativeFolders && <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />}
+              </div>
+
+              <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5 pr-1">
+                {nativeFoldersList.length > 0 ? (
+                  nativeFoldersList.map((item) => (
+                    <div
+                      key={item.path}
+                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2 hover:bg-white/5 transition-all group"
+                      style={{ borderColor: "var(--color-border-subtle)" }}
+                    >
+                      <button
+                        onClick={() => handleNavigateToFolder(item.path)}
+                        disabled={isScanning}
+                        className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
+                        title={`Entrar a /${item.path}`}
+                      >
+                        <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-400 shrink-0">
+                          <Folder className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-xs font-bold block text-white truncate">{item.name}</span>
+                          <span className="text-[10px] text-neutral-400 block truncate">{item.displayPath}</span>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-neutral-500 group-hover:text-white shrink-0" />
+                      </button>
+
+                      <button
+                        onClick={() => handleScanSpecificFolder(item.path, item.name)}
+                        disabled={isScanning}
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-400 text-[11px] font-semibold flex items-center gap-1 shrink-0 transition-all cursor-pointer disabled:opacity-50"
+                        title={`Escanear recursivamente /${item.path}`}
+                      >
+                        <FolderSearch className="w-3.5 h-3.5" />
+                        <span>Escanear</span>
+                      </button>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-xs font-bold block text-white truncate">{folder.name}</span>
-                      <span className="text-[10px] text-neutral-400 block truncate">{folder.displayPath}</span>
-                    </div>
+                  ))
+                ) : !isLoadingNativeFolders ? (
+                  <div className="p-4 text-center text-xs text-neutral-400 bg-white/5 rounded-xl border border-white/5">
+                    No se detectaron más subcarpetas aquí. Pulsa &quot;Escanear esta carpeta&quot; para buscar audios directamente.
                   </div>
-                  <ChevronRight className="w-4 h-4 text-neutral-500 group-hover:text-emerald-400 shrink-0" />
-                </button>
-              ))}
+                ) : null}
+              </div>
             </div>
           </div>
         ) : (
