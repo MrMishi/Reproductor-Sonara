@@ -57,7 +57,11 @@ import {
   Tag,
 } from "lucide-react";
 import { Track, PlaybackMode, SleepTimerConfig } from "../types";
-import { getActiveLyricIndex, hasJapaneseText } from "../services/lyricsService";
+import {
+  getActiveLyricIndex,
+  hasJapaneseText,
+  enrichLyricsWithRomaji,
+} from "../services/lyricsService";
 import { VisualizerCanvas } from "./VisualizerCanvas";
 
 export interface ExpandedPlayerProps {
@@ -86,6 +90,8 @@ export interface ExpandedPlayerProps {
   activeSubTab?: "cover" | "queue" | "lyrics" | "details";
   sleepTimer?: SleepTimerConfig;
   onOpenSleepTimer?: () => void;
+  onLyricsApplied?: (trackId: string, lyrics: Track["lyrics"], album?: string) => void;
+  onLyricsRemoved?: (trackId: string) => void;
 }
 
 function formatTime(seconds: number): string {
@@ -121,6 +127,8 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   activeSubTab = "cover",
   sleepTimer,
   onOpenSleepTimer,
+  onLyricsApplied,
+  onLyricsRemoved,
 }) => {
   const [activeTab, setActiveTab] = useState<"cover" | "queue" | "lyrics" | "details">(
     activeSubTab || "cover"
@@ -130,6 +138,9 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   // Dynamic Lyrics Sheet Expansion: 'full' (fullscreen lyrics) or 'compact' (split with mini cover banner)
   const [lyricsExpansion, setLyricsExpansion] = useState<"full" | "compact">("full");
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Estado para la transcripción automática de Romaji
+  const [isTranscribingRomaji, setIsTranscribingRomaji] = useState<boolean>(false);
 
   // Swipe & Tap Gestures State on Cover
   const [dragOffset, setDragOffset] = useState<number>(0);
@@ -158,7 +169,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   const [japaneseViewMode, setJapaneseViewMode] = useState<"both" | "native" | "romaji">("both");
 
   const hasJapaneseInLyrics = React.useMemo(() => {
-    if (syncedLyrics && syncedLyrics.some((l) => l.hasJapanese || hasJapaneseText(l.text))) {
+    if (syncedLyrics && syncedLyrics.some((l) => l.hasJapanese || hasJapaneseText(l.text) || hasJapaneseText(l.nativeText || ""))) {
       return true;
     }
     if (currentTrack?.lyrics?.plain && hasJapaneseText(currentTrack.lyrics.plain)) {
@@ -166,6 +177,46 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
     }
     return false;
   }, [syncedLyrics, currentTrack?.lyrics?.plain]);
+
+  // Detección y procesamiento automático de Romaji si la canción contiene japonés sin transcribir
+  useEffect(() => {
+    if (!currentTrack?.lyrics) return;
+
+    const lyrics = currentTrack.lyrics;
+    const hasUntranscribedSynced = lyrics.synced?.some(
+      (l) =>
+        (l.hasJapanese || hasJapaneseText(l.text) || hasJapaneseText(l.nativeText || "")) &&
+        (!l.romaji || l.romaji.trim().length === 0)
+    );
+    const hasUntranscribedPlain =
+      lyrics.plain &&
+      hasJapaneseText(lyrics.plain) &&
+      (!lyrics.pairedPlainLines || lyrics.pairedPlainLines.length === 0);
+
+    if (hasUntranscribedSynced || hasUntranscribedPlain) {
+      let isCancelled = false;
+      setIsTranscribingRomaji(true);
+
+      enrichLyricsWithRomaji(lyrics)
+        .then((enriched) => {
+          if (!isCancelled && enriched && onLyricsApplied && currentTrack) {
+            onLyricsApplied(currentTrack.id, enriched, currentTrack.album);
+          }
+        })
+        .catch((err) => {
+          console.warn("[ExpandedPlayer] Error auto-transcribiendo letras a Romaji:", err);
+        })
+        .finally(() => {
+          if (!isCancelled) {
+            setIsTranscribingRomaji(false);
+          }
+        });
+
+      return () => {
+        isCancelled = true;
+      };
+    }
+  }, [currentTrack?.id, currentTrack?.lyrics]);
 
   useEffect(() => {
     if (activeTab === "lyrics" && lyricsContainerRef.current && activeLyricIndex >= 0) {
@@ -176,7 +227,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
         activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
-  }, [activeLyricIndex, activeTab]);
+  }, [activeLyricIndex, activeTab, lyricsExpansion]);
 
   // Reset slide animation when current track changes
   useEffect(() => {
@@ -676,15 +727,40 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                   </div>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs sm:text-sm font-bold truncate">{currentTrack.title}</p>
-                  <p className="text-[11px] opacity-70 truncate">{currentTrack.artist}</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="text-xs sm:text-sm font-bold truncate">{currentTrack.title}</p>
+                    {/* Indicador visual discreto en el encabezado */}
+                    {syncedLyrics && syncedLyrics.length > 0 ? (
+                      <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        [Karaoke Activo]
+                      </span>
+                    ) : currentTrack.lyrics?.plain ? (
+                      <span className="hidden sm:inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/10 text-neutral-300 border border-white/10 shrink-0">
+                        [Texto Estático]
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] opacity-70 truncate">
+                    <p className="truncate">{currentTrack.artist}</p>
+                    {syncedLyrics && syncedLyrics.length > 0 ? (
+                      <span className="sm:hidden inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 shrink-0">
+                        <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                        [Karaoke Activo]
+                      </span>
+                    ) : currentTrack.lyrics?.plain ? (
+                      <span className="sm:hidden text-[9px] text-neutral-400 shrink-0">
+                        [Texto Estático]
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
                 {/* Selector de Vista Multilingüe para Japonés / Romaji */}
                 {hasJapaneseInLyrics && (
-                  <div className="hidden xs:flex items-center bg-black/40 p-0.5 rounded-full border border-white/10 text-[11px]">
+                  <div className="hidden xs:flex items-center gap-1.5 bg-black/40 p-0.5 rounded-full border border-white/10 text-[11px]">
                     <button
                       onClick={() => setJapaneseViewMode("both")}
                       className={`px-2 py-0.5 rounded-full transition-all ${
@@ -718,6 +794,11 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     >
                       Romaji
                     </button>
+                    {isTranscribingRomaji && (
+                      <span className="text-[10px] text-amber-400 animate-pulse px-1.5 font-medium">
+                        Transcribiendo...
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -739,6 +820,23 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     <Maximize2 className="w-4 h-4" />
                   )}
                 </button>
+
+                {/* Botón visible para Eliminar / Limpiar Letra (al lado del icono de búsqueda) */}
+                {Boolean(currentTrack.lyrics?.plain || (currentTrack.lyrics?.synced && currentTrack.lyrics.synced.length > 0)) && (
+                  <button
+                    id="lyrics-remove-btn"
+                    onClick={() => {
+                      if (onLyricsRemoved && currentTrack) {
+                        onLyricsRemoved(currentTrack.id);
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-400 hover:text-red-300 border border-red-500/30 transition-all hover:scale-105 active:scale-95 shadow-sm"
+                    title="Eliminar / Limpiar Letra de esta canción"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span className="inline">Eliminar Letra</span>
+                  </button>
+                )}
 
                 <button
                   id="lyrics-search-online-btn"
@@ -833,17 +931,20 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                 /* Synchronized Real-Time Karaoke Lines with Japanese & Romaji Support */
                 syncedLyrics.map((line, idx) => {
                   const isActive = idx === activeLyricIndex;
-                  const isJap = line.hasJapanese || hasJapaneseText(line.text);
+                  const isJap =
+                    line.hasJapanese ||
+                    hasJapaneseText(line.text) ||
+                    hasJapaneseText(line.nativeText || "");
 
-                  let primaryText = line.nativeText || line.text;
+                  let primaryText = line.original || line.nativeText || line.text;
                   let secondaryText = line.romaji;
 
-                  if (isJap && line.nativeText && line.romaji) {
+                  if (isJap && secondaryText) {
                     if (japaneseViewMode === "native") {
-                      primaryText = line.nativeText;
+                      primaryText = line.original || line.nativeText || line.text;
                       secondaryText = undefined;
                     } else if (japaneseViewMode === "romaji") {
-                      primaryText = line.romaji;
+                      primaryText = secondaryText;
                       secondaryText = undefined;
                     }
                   }
@@ -853,13 +954,13 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                       key={idx}
                       data-lyric-index={idx}
                       onClick={() => onSeek(line.time)}
-                      className={`cursor-pointer transition-all duration-300 py-2.5 px-4 rounded-2xl select-none flex flex-col items-center justify-center gap-1 ${
+                      className={`cursor-pointer transition-all duration-300 py-2.5 px-4 rounded-2xl select-none flex flex-col items-center justify-center gap-1 scroll-mt-24 ${
                         isActive
-                          ? "scale-105"
-                          : "opacity-40 hover:opacity-85"
+                          ? "scale-105 opacity-100 bg-white/5 shadow-lg border border-white/10"
+                          : "opacity-40 hover:opacity-85 scale-100"
                       }`}
                     >
-                      {/* Main Lyric Line (Native CJK or Standard Text) */}
+                      {/* Main Lyric Line (Original Song Text / Native CJK or Standard) */}
                       <p
                         className={`transition-all duration-300 ${
                           isActive
@@ -879,7 +980,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                         {primaryText}
                       </p>
 
-                      {/* Romaji Karaoke Phonetics Line */}
+                      {/* Romaji Secondary Line (Pronunciación fonética con tamaño menor y color atenuado) */}
                       {secondaryText && (
                         <p
                           className={`italic font-medium tracking-wide transition-opacity ${
@@ -895,16 +996,63 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                   );
                 })
               ) : currentTrack.lyrics?.plain ? (
-                /* Plain Lyrics View with Japanese CJK Font Support */
-                <div
-                  className="text-base sm:text-xl leading-loose whitespace-pre-line opacity-85 font-medium max-w-xl mx-auto py-8"
-                  style={{
-                    fontFamily:
-                      '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo", "Noto Sans JP", system-ui, sans-serif',
-                  }}
-                >
-                  {currentTrack.lyrics.plain}
-                </div>
+                /* Plain Lyrics View with Japanese CJK Font Support & Romaji Secondary Line */
+                currentTrack.lyrics.pairedPlainLines &&
+                currentTrack.lyrics.pairedPlainLines.length > 0 ? (
+                  <div className="space-y-4 max-w-xl mx-auto py-8 text-center select-none">
+                    {currentTrack.lyrics.pairedPlainLines.map((pLine, pIdx) => {
+                      if (!pLine.original.trim()) {
+                        return <div key={pIdx} className="h-4" />;
+                      }
+                      const isJap = hasJapaneseText(pLine.original);
+                      let primaryText = pLine.original;
+                      let secondaryText = pLine.romaji;
+
+                      if (isJap && secondaryText) {
+                        if (japaneseViewMode === "native") {
+                          primaryText = pLine.original;
+                          secondaryText = undefined;
+                        } else if (japaneseViewMode === "romaji") {
+                          primaryText = secondaryText;
+                          secondaryText = undefined;
+                        }
+                      }
+
+                      return (
+                        <div key={pIdx} className="flex flex-col items-center justify-center py-1">
+                          {/* Línea principal con el texto original */}
+                          <p
+                            className="text-base sm:text-xl leading-relaxed opacity-90 font-medium"
+                            style={{
+                              fontFamily: isJap
+                                ? '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo", "Noto Sans JP", system-ui, sans-serif'
+                                : undefined,
+                            }}
+                          >
+                            {primaryText}
+                          </p>
+
+                          {/* Línea secundaria con la pronunciación Romaji (tamaño menor / atenuado) */}
+                          {secondaryText && (
+                            <p className="text-xs sm:text-sm md:text-base text-white/60 italic font-medium tracking-wide mt-0.5">
+                              {secondaryText}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div
+                    className="text-base sm:text-xl leading-loose whitespace-pre-line opacity-85 font-medium max-w-xl mx-auto py-8"
+                    style={{
+                      fontFamily:
+                        '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo", "Noto Sans JP", system-ui, sans-serif',
+                    }}
+                  >
+                    {currentTrack.lyrics.plain}
+                  </div>
+                )
               ) : (
                 /* Empty Lyrics State */
                 <div className="h-full flex flex-col items-center justify-center gap-4 text-center my-auto p-6">
@@ -915,10 +1063,9 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     <Globe className="w-8 h-8" />
                   </div>
                   <div>
-                    <h4 className="text-lg font-bold">¿No hay letras para esta canción?</h4>
+                    <h4 className="text-lg font-bold">Sin letra cargada</h4>
                     <p className="text-xs max-w-xs mx-auto opacity-70 mt-1">
-                      Utiliza nuestro buscador web para sincronizar automáticamente las letras
-                      oficiales desde internet.
+                      Esta canción no cuenta con letras sincronizadas ni texto plano en la biblioteca.
                     </p>
                   </div>
                   <button
@@ -928,7 +1075,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     style={{ backgroundColor: "var(--color-accent, #FF0000)" }}
                   >
                     <Search className="w-4 h-4" />
-                    <span>Buscar Letras en Internet</span>
+                    <span>Buscar Manualmente</span>
                   </button>
                 </div>
               )}

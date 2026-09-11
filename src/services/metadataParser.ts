@@ -30,6 +30,28 @@
 import { Track } from "../types";
 
 /**
+ * Extensiones de contenedores de video compatibles para extraer y reproducir su pista de audio local
+ */
+export const SUPPORTED_VIDEO_EXTENSIONS = [".mp4", ".mkv", ".webm", ".3gp"];
+
+/**
+ * Límite máximo de duración para archivos de video permitidos: 480 segundos (8 minutos).
+ * Cualquier video con duración mayor a 480 segundos se descarta automáticamente para evitar
+ * películas o capítulos largos en la biblioteca de música.
+ */
+export const MAX_VIDEO_DURATION_SECONDS = 480;
+
+/**
+ * Función: isVideoFilename
+ * Determina si el nombre de un archivo corresponde a un contenedor de video soportado (.mp4, .mkv, .webm, .3gp).
+ */
+export function isVideoFilename(fileName: string): boolean {
+  if (!fileName || typeof fileName !== "string") return false;
+  const lower = fileName.trim().toLowerCase();
+  return SUPPORTED_VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/**
  * Función: generateCoverArt
  * Propósito: Genera una portada en formato SVG vectorial determinista para pistas sin carátula incrustada.
  * ¿Cómo funciona?:
@@ -369,6 +391,18 @@ export async function parseAudioFile(
 
   const duration = await getAudioDuration(url, file.size);
 
+  // Soporte de contenedores de video ('.mp4', '.mkv', '.webm', '.3gp'):
+  // Descarta automáticamente cualquier video con duración mayor a 480 segundos (8 minutos)
+  // para evitar películas o capítulos largos. Los videos permitidos se vinculan al elemento
+  // de audio para reproducir solo su pista de fondo local.
+  const isVideo = isVideoFilename(file.name) || (file.type && file.type.toLowerCase().startsWith("video/"));
+  if (isVideo && duration > MAX_VIDEO_DURATION_SECONDS) {
+    console.log(
+      `[Parser] Archivo de video descartado por superar los 8 minutos (${Math.round(duration)}s > ${MAX_VIDEO_DURATION_SECONDS}s): ${file.name}`
+    );
+    return null;
+  }
+
   // Filtro de notas de voz / audios cortos:
   // NO descarta canciones si el metadato de tiempo aún no se ha terminado de leer (duration <= 0).
   if (filterShortAudios && duration && duration > 0 && duration < minDurationSeconds) {
@@ -388,17 +422,20 @@ export async function parseAudioFile(
     }
   }
 
+  const extFormat = file.name.split(".").pop()?.toUpperCase() || "AUDIO";
+  const displayFormat = isVideo ? `${extFormat} (Audio)` : (file.type || extFormat);
+
   return {
     id: `track-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
     title: finalTitle,
     artist: finalArtist,
-    album: id3.album || "Álbum del dispositivo",
+    album: id3.album || (isVideo ? "Videos (Audio)" : "Álbum del dispositivo"),
     year: id3.year,
     duration,
     url,
     file,
     coverUrl,
-    format: file.type || file.name.split(".").pop()?.toUpperCase() || "AUDIO",
+    format: displayFormat,
     size: file.size,
     addedAt: Date.now(),
     isFavorite: false,

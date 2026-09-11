@@ -1,7 +1,13 @@
 import { registerPlugin, Capacitor } from "@capacitor/core";
 import { Track } from "../types";
 import { addSingleTrackToDB, isTrackHidden } from "./db";
-import { cleanFilename, generateCoverArt, getAudioDuration } from "./metadataParser";
+import {
+  cleanFilename,
+  generateCoverArt,
+  getAudioDuration,
+  isVideoFilename,
+  MAX_VIDEO_DURATION_SECONDS,
+} from "./metadataParser";
 
 /**
  * Representa un archivo de audio descubierto en el árbol de documentos SAF de Android
@@ -28,12 +34,57 @@ export interface NativeFolderPickResponse {
 
 export interface NativeFolderPickerPlugin {
   pickFolder(): Promise<NativeFolderPickResponse>;
+  openAppSettings(): Promise<{ success: boolean }>;
+  checkStoragePermissions(): Promise<{ granted: boolean }>;
+  requestNotificationPermission(): Promise<{ success: boolean }>;
 }
 
 /**
  * Registro del plugin nativo 'NativeFolderPicker' de Capacitor
  */
 export const NativeFolderPicker = registerPlugin<NativeFolderPickerPlugin>("NativeFolderPicker");
+
+/**
+ * Abre directamente la pantalla de Ajustes de la Aplicación en Android mediante Intent nativo
+ * para permitir al usuario habilitar permisos de almacenamiento / música ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE').
+ */
+export async function openNativeAppSettings(): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await NativeFolderPicker.openAppSettings();
+    } catch (e) {
+      console.warn("[NativeFolderPicker] Error abriendo ajustes nativos:", e);
+    }
+  } else {
+    console.log("[NativeFolderPicker] Ajustes nativos no disponibles en navegador.");
+  }
+}
+
+/**
+ * Comprueba de forma directa y nativa si los permisos de almacenamiento/música están concedidos.
+ */
+export async function checkNativeStoragePermissions(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return true;
+  try {
+    const res = await NativeFolderPicker.checkStoragePermissions();
+    return !!res?.granted;
+  } catch (err) {
+    console.warn("[NativeFolderPicker] Error comprobando permisos nativos:", err);
+    return false;
+  }
+}
+
+/**
+ * Solicita permisos de notificación (POST_NOTIFICATIONS) para el control en la barra de estado en Android 13+
+ */
+export async function requestNativeNotificationPermission(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await NativeFolderPicker.requestNotificationPermission();
+  } catch (err) {
+    console.warn("[NativeFolderPicker] Error solicitando permisos de notificación:", err);
+  }
+}
 
 /**
  * Función que invoca DIRECTAMENTE el Intent oficial de Android ACTION_OPEN_DOCUMENT_TREE (SAF)
@@ -119,6 +170,20 @@ export async function pickAndScanNativeSafFolder(
         // Medir o estimar duración
         const duration = await getAudioDuration(webAudioUrl, fileItem.size);
 
+        // Soporte de contenedores de video ('.mp4', '.mkv', '.webm', '.3gp'):
+        // Descarta automáticamente cualquier video con duración mayor a 480 segundos (8 minutos)
+        // para evitar películas o capítulos largos. Los videos admitidos reproducen solo su audio.
+        const isVideo =
+          isVideoFilename(fileItem.name) ||
+          (fileItem.mimeType && fileItem.mimeType.toLowerCase().startsWith("video/"));
+
+        if (isVideo && duration > MAX_VIDEO_DURATION_SECONDS) {
+          console.log(
+            `[SAF Picker] Archivo de video descartado por superar los 8 minutos (${Math.round(duration)}s > ${MAX_VIDEO_DURATION_SECONDS}s): ${fileItem.name}`
+          );
+          continue;
+        }
+
         // Filtro de duración: descarta audios de WhatsApp / sonidos breves menores a minDurationSeconds
         // Asegurarse de que el filtro NO descarte canciones si el metadato aún no se ha medido (duration <= 0)
         if (filterShortAudios && duration && duration > 0 && duration < minDurationSeconds) {
@@ -128,8 +193,9 @@ export async function pickAndScanNativeSafFolder(
         // Obtener título y artista limpios a partir del nombre del archivo
         const { title, artist } = cleanFilename(fileItem.name);
         const coverUrl = generateCoverArt(title, artist);
-        const format = fileItem.name.split(".").pop()?.toUpperCase() || "AUDIO";
-        const albumName = fileItem.relativePath || folderName;
+        const rawFormat = fileItem.name.split(".").pop()?.toUpperCase() || "AUDIO";
+        const format = isVideo ? `${rawFormat} (Audio)` : rawFormat;
+        const albumName = fileItem.relativePath || (isVideo ? "Videos (Audio)" : folderName);
 
         // Estructura completa de la canción con su URI nativa persistida
         const parsedTrack: Track = {

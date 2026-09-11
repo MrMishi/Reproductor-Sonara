@@ -71,6 +71,12 @@ export interface Track {
     synced?: SyncedLyricLine[];
     source?: string;
     rawLrc?: string;
+    /** Versión completa en texto plano de la transcripción a Romaji */
+    romajiPlain?: string;
+    /** Estrofas o versos planos emparejados con su pronunciación Romaji */
+    pairedPlainLines?: { original: string; romaji?: string }[];
+    /** Bandera booleana que indica si la letra contiene caracteres japoneses */
+    hasJapanese?: boolean;
   };
 }
 
@@ -81,12 +87,15 @@ export type LibrarySection = "songs" | "artists" | "albums" | "folders";
 
 /**
  * Línea o verso individual de una letra sincronizada con formato .LRC
+ * Estructura interlineal: { time: number, original: string, romaji: string }
  */
 export interface SyncedLyricLine {
   /** Marca de tiempo en segundos en que inicia el verso */
   time: number;
   /** Texto del verso a desplegar */
   text: string;
+  /** Línea original del verso (Kanji, Kana, texto nativo para estructura interlineal) */
+  original?: string;
   /** Texto en idioma original (ej. Japonés, Coreano, Chino) */
   nativeText?: string;
   /** Transliteración en alfabeto latino (ej. Romaji) */

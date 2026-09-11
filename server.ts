@@ -58,12 +58,17 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// In-memory cache for server-side lyrics searches
+const serverLyricsCache = new Map<string, any>();
+
 /**
  * Función: fetchGeminiLyrics
  * Propósito: Consulta a Gemini AI para transcribir la letra fiel de una canción.
  * ¿Cómo funciona?:
  * Envía un prompt estructurado exigiendo preservación Unicode UTF-8 de caracteres
  * nativos asiáticos y transliteración fonética Romaji, recorriendo modelos candidatos.
+ * Prioriza 'gemini-3.1-flash-lite' por su alta disponibilidad y velocidad,
+ * con fallback a 'gemini-3.8-flash'.
  */
 async function fetchGeminiLyrics(cleanTrack: string, cleanArtist: string): Promise<string | null> {
   const ai = getAI();
@@ -75,13 +80,13 @@ Artista: "${cleanArtist || "Desconocido"}"
 
 Instrucciones:
 1. PRESERVACIÓN ESTRICTA UTF-8: Si la canción es en japonés, coreano u otro idioma no latino, conserva con total fidelidad los caracteres nativos (Kanji, Hiragana, Katakana, Hangul) en codificación UTF-8 pura.
-2. Para canciones en japonés o asiático: Si es posible, incluye el verso en caracteres nativos (Kanji/Hiragana) y a continuación o debajo su lectura fonética en Romaji para lectura de karaoke.
-3. Organiza los versos claramente con saltos de línea legibles (separando estrofas, coro, etc.).
+2. FORMATO INTERLINEAL ESTRICTO (LÍNEA POR LÍNEA): Si la canción es en japonés, coloca la lectura fonética Romaji LÍNEA POR LÍNEA inmediatamente debajo de cada verso original en caracteres nativos (Kanji/Kana). PROHIBIDO separar la canción en dos bloques o mitades como '**[Kanji / Kana]**' o '**[Romaji]**'. NO uses encabezados ni etiquetas de bloque.
+3. Organiza los versos claramente con saltos de línea legibles entre estrofas.
 4. Si la canción es puramente instrumental, responde únicamente con "[Instrumental]".
 5. NO agregues introducciones conversacionales ni comentarios extras como "Aquí está la letra...". Empieza directamente con los versos.`;
 
-  // Fallback chain for text tasks using supported current Gemini models
-  const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+  // Fallback chain: gemini-3.1-flash-lite (fast, highly available, separate quota) -> gemini-3.8-flash
+  const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash"];
 
   for (const model of candidateModels) {
     try {
@@ -91,7 +96,7 @@ Instrucciones:
       });
 
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Gemini timeout after 7s")), 7000)
+        setTimeout(() => reject(new Error("Gemini timeout after 8s")), 8000)
       );
 
       const geminiResponse: any = await Promise.race([geminiCall, timeoutPromise]);
@@ -101,7 +106,13 @@ Instrucciones:
       }
     } catch (err: any) {
       const errMsg = err?.message || String(err);
-      console.warn(`[Lyrics AI] ${model} unavailable: ${errMsg.slice(0, 100)}`);
+      if (errMsg.includes("503") || errMsg.includes("high demand")) {
+        console.log(`[Lyrics AI] ${model} en alta demanda temporal, pasando al siguiente modelo disponible...`);
+      } else if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+        console.log(`[Lyrics AI] ${model} con límite de cuota alcanzado, usando siguiente modelo...`);
+      } else {
+        console.log(`[Lyrics AI] ${model} no disponible (${errMsg.slice(0, 80)}), continuando...`);
+      }
     }
   }
 
@@ -124,6 +135,20 @@ app.post("/api/lyrics/search", async (req, res) => {
     .replace(/\s*[\(\[](official\s*(music\s*)?video|official\s*audio|video\s*oficial|audio\s*oficial|remastered\s*\d*|lyrics\s*video|letra|4k|hd)[\)\]]/gi, "")
     .trim();
   const cleanArtist = (artist || "").trim();
+  const cacheKey = `${cleanArtist.toLowerCase()}:::${cleanTrack.toLowerCase()}`;
+
+  // Comprobar si ya existe en la caché en memoria del servidor
+  if (serverLyricsCache.has(cacheKey)) {
+    res.json(serverLyricsCache.get(cacheKey));
+    return;
+  }
+
+  const reply = (payload: any) => {
+    if (payload.plainLyrics || payload.syncedLyrics) {
+      serverLyricsCache.set(cacheKey, payload);
+    }
+    res.json(payload);
+  };
 
   // 1. Try LRCLib API (Open source lyrics database with synced timestamps)
   try {
@@ -133,27 +158,30 @@ app.post("/api/lyrics/search", async (req, res) => {
     if (album) queryParams.set("album_name", album);
     if (duration && Number(duration) > 0) queryParams.set("duration", Math.round(Number(duration)).toString());
 
-    // First try exact get
+    // PRIORIZAR LETRAS SINCRONIZADAS (SYNCED LYRICS)
+    // 1. Primer intento: consulta exacta por metadatos en LRCLIB
+    let exactData: any = null;
     let lrcResponse = await fetch(`https://lrclib.net/api/get?${queryParams.toString()}`, {
       headers: { "User-Agent": "YouTubeMusicWebPlayer/1.0" },
     });
 
     if (lrcResponse.ok) {
-      const data = await lrcResponse.json();
-      if (data && (data.syncedLyrics || data.plainLyrics)) {
-        res.json({
+      exactData = await lrcResponse.json();
+      // Si la consulta exacta ya contiene letras sincronizadas con marcas de tiempo, devolverla de inmediato
+      if (exactData && exactData.syncedLyrics) {
+        reply({
           source: "lrclib",
-          track: data.trackName || cleanTrack,
-          artist: data.artistName || cleanArtist,
-          plainLyrics: data.plainLyrics || "",
-          syncedLyrics: data.syncedLyrics || null,
-          instrumental: Boolean(data.instrumental),
+          track: exactData.trackName || cleanTrack,
+          artist: exactData.artistName || cleanArtist,
+          plainLyrics: exactData.plainLyrics || "",
+          syncedLyrics: exactData.syncedLyrics,
+          instrumental: Boolean(exactData.instrumental),
         });
         return;
       }
     }
 
-    // Fallback: LRCLib search query
+    // 2. Segundo intento: búsqueda amplia en LRCLIB priorizando estrictamente cualquier resultado sincronizado
     const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanArtist} ${cleanTrack}`.trim())}`;
     const searchResponse = await fetch(searchUrl, {
       headers: { "User-Agent": "YouTubeMusicWebPlayer/1.0" },
@@ -162,20 +190,62 @@ app.post("/api/lyrics/search", async (req, res) => {
     if (searchResponse.ok) {
       const list = await searchResponse.json();
       if (Array.isArray(list) && list.length > 0) {
-        const best = list.find((item: any) => item.syncedLyrics || item.plainLyrics) || list[0];
-        if (best && (best.syncedLyrics || best.plainLyrics)) {
-          res.json({
+        // Priorizar estrictamente canciones con syncedLyrics
+        const syncedItem = list.find((item: any) => item.syncedLyrics && item.syncedLyrics.trim().length > 0);
+        if (syncedItem) {
+          reply({
             source: "lrclib-search",
-            track: best.trackName || cleanTrack,
-            artist: best.artistName || cleanArtist,
-            album: best.albumName || undefined,
-            plainLyrics: best.plainLyrics || "",
-            syncedLyrics: best.syncedLyrics || null,
-            instrumental: Boolean(best.instrumental),
+            track: syncedItem.trackName || cleanTrack,
+            artist: syncedItem.artistName || cleanArtist,
+            album: syncedItem.albumName || undefined,
+            plainLyrics: syncedItem.plainLyrics || "",
+            syncedLyrics: syncedItem.syncedLyrics,
+            instrumental: Boolean(syncedItem.instrumental),
+          });
+          return;
+        }
+
+        // Si no hay versión sincronizada pero la consulta exacta tenía texto plano, usar la exacta
+        if (exactData && exactData.plainLyrics) {
+          reply({
+            source: "lrclib",
+            track: exactData.trackName || cleanTrack,
+            artist: exactData.artistName || cleanArtist,
+            plainLyrics: exactData.plainLyrics,
+            syncedLyrics: null,
+            instrumental: Boolean(exactData.instrumental),
+          });
+          return;
+        }
+
+        // Fallback a texto plano del listado de búsqueda
+        const plainItem = list.find((item: any) => item.plainLyrics && item.plainLyrics.trim().length > 0);
+        if (plainItem) {
+          reply({
+            source: "lrclib-search",
+            track: plainItem.trackName || cleanTrack,
+            artist: plainItem.artistName || cleanArtist,
+            album: plainItem.albumName || undefined,
+            plainLyrics: plainItem.plainLyrics,
+            syncedLyrics: null,
+            instrumental: Boolean(plainItem.instrumental),
           });
           return;
         }
       }
+    }
+
+    // Si la búsqueda no arrojó resultados pero exactData tenía texto plano
+    if (exactData && exactData.plainLyrics) {
+      reply({
+        source: "lrclib",
+        track: exactData.trackName || cleanTrack,
+        artist: exactData.artistName || cleanArtist,
+        plainLyrics: exactData.plainLyrics,
+        syncedLyrics: null,
+        instrumental: Boolean(exactData.instrumental),
+      });
+      return;
     }
   } catch (err) {
     console.warn("LrcLib lookup failed, falling back to alternatives:", err);
@@ -190,7 +260,7 @@ app.post("/api/lyrics/search", async (req, res) => {
       if (ovhRes.ok) {
         const ovhData = await ovhRes.json();
         if (ovhData && ovhData.lyrics) {
-          res.json({
+          reply({
             source: "lyrics.ovh",
             track: cleanTrack,
             artist: cleanArtist,
@@ -209,7 +279,7 @@ app.post("/api/lyrics/search", async (req, res) => {
   // 3. Resilient Gemini AI Lookup with auto-retries and model failover
   const geminiLyrics = await fetchGeminiLyrics(cleanTrack, cleanArtist);
   if (geminiLyrics) {
-    res.json({
+    reply({
       source: "gemini",
       track: cleanTrack,
       artist: cleanArtist,

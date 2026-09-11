@@ -36,14 +36,20 @@ import {
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { Track } from "../types";
-import { parseAudioFile } from "../services/metadataParser";
+import {
+  parseAudioFile,
+  isVideoFilename,
+  MAX_VIDEO_DURATION_SECONDS,
+} from "../services/metadataParser";
 import { getInitialDemoTracks } from "../services/demoTracks";
 import { isTrackHidden, getHiddenTracks } from "../services/db";
 import {
   scanNativeMusicDirectories,
   requestStoragePermissions,
+  checkStoragePermissions,
 } from "../services/nativeScanner";
 import { pickAndScanNativeSafFolder } from "../services/nativeFolderPicker";
+import { PermissionRequiredModal } from "./PermissionRequiredModal";
 
 interface DeviceScannerModalProps {
   isOpen: boolean;
@@ -51,6 +57,7 @@ interface DeviceScannerModalProps {
   onTracksImported: (newTracks: Track[]) => void;
 }
 
+// Extensiones de audio y contenedores de video compatibles (para extraer y reproducir la pista de audio con HTML5 Audio)
 const AUDIO_EXTENSIONS = [
   ".mp3",
   ".m4a",
@@ -61,6 +68,9 @@ const AUDIO_EXTENSIONS = [
   ".aac",
   ".webm",
   ".wma",
+  ".mp4",
+  ".mkv",
+  ".3gp",
 ];
 
 const IGNORED_DIRECTORIES = new Set([
@@ -105,10 +115,32 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   const [filterShortAudios, setFilterShortAudios] = useState<boolean>(true);
   const [minDurationSeconds, setMinDurationSeconds] = useState<number>(30);
   const [filterHiddenTracks, setFilterHiddenTracks] = useState<boolean>(true);
+  const [showPermissionDialog, setShowPermissionDialog] = useState<boolean>(false);
 
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const filesInputRef = useRef<HTMLInputElement | null>(null);
   const isCancelledRef = useRef<boolean>(false);
+
+  /**
+   * Comprobación directa de permisos de almacenamiento/música ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE'):
+   * Si el permiso está denegado, muestra el diálogo flotante:
+   * "Se requiere acceso a tus archivos de audio para importar música" junto con el botón "Permitir"
+   * que abre directamente la pantalla de Ajustes de la Aplicación en Android sin mensajes con suposiciones ni errores genéricos.
+   */
+  const ensureStoragePermissions = async (): Promise<boolean> => {
+    if (!Capacitor.isNativePlatform()) return true;
+
+    const granted = await checkStoragePermissions();
+    if (granted) return true;
+
+    // Intentar solicitar permiso directamente
+    const requested = await requestStoragePermissions();
+    if (requested) return true;
+
+    // Si sigue denegado, mostrar diálogo flotante con botón "Permitir"
+    setShowPermissionDialog(true);
+    return false;
+  };
 
   // Reset cancellation flag whenever modal opens
   useEffect(() => {
@@ -157,6 +189,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
     const BATCH_SIZE = 5; // Concurrently process 5 tracks at a time for high speed
     let skippedShortCount = 0;
     let skippedHiddenCount = 0;
+    let skippedLongVideoCount = 0;
 
     try {
       for (let i = 0; i < files.length; i += BATCH_SIZE) {
@@ -179,8 +212,14 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
             }
 
             try {
+              const isVideo = isVideoFilename(file.name) || (file.type && file.type.toLowerCase().startsWith("video/"));
               const track = await parseAudioFile(file, filterShortAudios, minDurationSeconds);
-              if (!track) return null;
+              if (!track) {
+                if (isVideo) {
+                  skippedLongVideoCount++;
+                }
+                return null;
+              }
 
               // Check if track is marked as hidden by title or artist
               if (filterHiddenTracks && isTrackHidden(track.title, track.artist, file.name)) {
@@ -242,6 +281,9 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
         if (skippedShortCount > 0) {
           detailsList.push(`se omitieron ${skippedShortCount} audios cortos < 1:15`);
         }
+        if (skippedLongVideoCount > 0) {
+          detailsList.push(`se omitieron ${skippedLongVideoCount} videos > 8 min`);
+        }
         if (skippedHiddenCount > 0) {
           detailsList.push(`se omitieron ${skippedHiddenCount} archivos ocultos`);
         }
@@ -289,6 +331,9 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
 
     // 1. Entorno Android nativo: Ejecutar Intent oficial ACTION_OPEN_DOCUMENT_TREE (SAF)
     if (Capacitor.isNativePlatform()) {
+      const hasPerm = await ensureStoragePermissions();
+      if (!hasPerm) return;
+
       setIsScanning(true);
       setProgressStatus("Abriendo selector oficial de carpetas del sistema Android (SAF)...");
       setDiscoveredCount(0);
@@ -556,7 +601,11 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   /**
    * Disparo limpio del selector nativo de archivos de audio
    */
-  const handleSelectFilesClick = () => {
+  const handleSelectFilesClick = async () => {
+    if (Capacitor.isNativePlatform()) {
+      const hasPerm = await ensureStoragePermissions();
+      if (!hasPerm) return;
+    }
     if (filesInputRef.current) {
       filesInputRef.current.value = "";
       filesInputRef.current.click();
@@ -570,14 +619,11 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
    */
   const handleScanNativeAndroidFolders = async () => {
     isCancelledRef.current = false;
-    setIsScanning(true);
-    setStatusType("info");
-    setProgressStatus("Solicitando permisos nativos ('READ_MEDIA_AUDIO' y 'READ_EXTERNAL_STORAGE')...");
-    setDiscoveredCount(0);
-    setProcessedCount(0);
-
     const isNative = Capacitor.isNativePlatform();
+
     if (!isNative) {
+      setIsScanning(true);
+      setStatusType("info");
       setProgressStatus("El escaneo nativo directo se ejecuta en Android con Capacitor. Abriendo selector de carpetas...");
       setTimeout(() => {
         handleScanDeviceDirectory();
@@ -585,11 +631,16 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
       return;
     }
 
-    try {
-      console.log("[DeviceScanner] Solicitando permisos explícitos...");
-      await requestStoragePermissions();
-      setProgressStatus("Permisos comprobados. Escaneo ultrarrápido en /Music, /Download y /YMusic...");
+    const hasPerm = await ensureStoragePermissions();
+    if (!hasPerm) return;
 
+    setIsScanning(true);
+    setStatusType("info");
+    setProgressStatus("Permisos comprobados. Escaneo ultrarrápido en /Music, /Download y /YMusic...");
+    setDiscoveredCount(0);
+    setProcessedCount(0);
+
+    try {
       const result = await scanNativeMusicDirectories(
         (folder, found, processed, msg) => {
           if (isCancelledRef.current) return;
@@ -701,7 +752,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           ref={filesInputRef}
           type="file"
           multiple
-          accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.webm,.wma"
+          accept="audio/*,video/mp4,video/x-matroska,video/webm,video/3gpp,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus,.webm,.wma,.mp4,.mkv,.3gp"
           className="hidden"
           onChange={handleFilesInputSelected}
         />
@@ -945,6 +996,12 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           💡 <span className="font-semibold">Privacidad total:</span> Las canciones se leen y reproducen directamente en tu dispositivo local mediante la API de archivos del navegador web. Puedes detener el escaneo en cualquier momento si la carpeta es muy grande.
         </div>
       </div>
+
+      {/* Diálogo flotante de permisos si están denegados */}
+      <PermissionRequiredModal
+        isOpen={showPermissionDialog}
+        onClose={() => setShowPermissionDialog(false)}
+      />
     </div>
   );
 };

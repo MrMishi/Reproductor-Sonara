@@ -21,8 +21,15 @@
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Capacitor } from "@capacitor/core";
 import { Track } from "../types";
-import { cleanFilename, generateCoverArt, getAudioDuration } from "./metadataParser";
+import {
+  cleanFilename,
+  generateCoverArt,
+  getAudioDuration,
+  isVideoFilename,
+  MAX_VIDEO_DURATION_SECONDS,
+} from "./metadataParser";
 import { isTrackHidden, addSingleTrackToDB } from "./db";
+import { checkNativeStoragePermissions, openNativeAppSettings } from "./nativeFolderPicker";
 
 export interface ScanProgressCallback {
   (currentFolder: string, foundFilesCount: number, processedCount: number, message: string): void;
@@ -147,7 +154,8 @@ export async function listNativeDirectories(
 
 /**
  * Verificación de extensiones soportadas insensible a mayúsculas y minúsculas:
- * ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.opus', '.aac', '.webm', '.wma']
+ * Audio: ['.mp3', '.m4a', '.flac', '.wav', '.ogg', '.opus', '.aac', '.webm', '.wma']
+ * Video (Audio Track): ['.mp4', '.mkv', '.3gp']
  */
 export const SUPPORTED_AUDIO_EXTENSIONS = [
   ".mp3",
@@ -159,6 +167,9 @@ export const SUPPORTED_AUDIO_EXTENSIONS = [
   ".aac",
   ".webm",
   ".wma",
+  ".mp4",
+  ".mkv",
+  ".3gp",
 ];
 
 export function isAudioFileName(filename: string): boolean {
@@ -245,13 +256,35 @@ export function isIgnoredFolder(folderName: string, fullPath: string): boolean {
 }
 
 /**
+ * Comprueba de forma no invasiva si los permisos de lectura de archivos de audio/almacenamiento
+ * están concedidos ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE').
+ * Retorna true si están concedidos, o false si están denegados.
+ */
+export async function checkStoragePermissions(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return true;
+  try {
+    const nativeGranted = await checkNativeStoragePermissions();
+    if (nativeGranted) return true;
+
+    const checkState = await Filesystem.checkPermissions();
+    return checkState?.publicStorage === "granted";
+  } catch (err) {
+    console.warn("[NativeScanner] Error comprobando permisos:", err);
+    return false;
+  }
+}
+
+/**
  * Solicita explícitamente permisos de almacenamiento en Android ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE')
- * llamando directamente a Filesystem.requestPermissions()
+ * llamando a las APIs nativas y a Filesystem.requestPermissions().
  */
 export async function requestStoragePermissions(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return true;
   try {
     console.log("[NativeScanner] Comprobando permisos de almacenamiento nativos...");
+    const nativeCheck = await checkNativeStoragePermissions();
+    if (nativeCheck) return true;
+
     const checkState = await Filesystem.checkPermissions();
     console.log("[NativeScanner] Estado previo de permisos:", checkState);
 
@@ -268,7 +301,9 @@ export async function requestStoragePermissions(): Promise<boolean> {
     }
 
     const recheck = await Filesystem.checkPermissions();
-    return recheck?.publicStorage === "granted";
+    if (recheck?.publicStorage === "granted") return true;
+
+    return await checkNativeStoragePermissions();
   } catch (permErr) {
     console.warn("[NativeScanner] Error al solicitar permisos de almacenamiento:", permErr);
     try {
@@ -533,6 +568,17 @@ export async function scanNativeMusicDirectories(
         // Medir o estimar duración
         const duration = await getAudioDuration(webAudioUrl, item.size);
 
+        // Soporte de contenedores de video ('.mp4', '.mkv', '.webm', '.3gp'):
+        // Descarta automáticamente cualquier video con duración mayor a 480 segundos (8 minutos)
+        // para evitar películas o capítulos largos. Los videos permitidos reproducen solo su audio.
+        const isVideo = isVideoFilename(item.fileName);
+        if (isVideo && duration > MAX_VIDEO_DURATION_SECONDS) {
+          console.log(
+            `[NativeScanner] Video descartado por superar los 8 minutos (${Math.round(duration)}s > ${MAX_VIDEO_DURATION_SECONDS}s): ${item.fileName}`
+          );
+          continue;
+        }
+
         // 2. FILTRO DE DURACIÓN (30s):
         // Asegurarse de que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
         // Solo descartar si filterShortAudios está activo, duration > 0 (leída con certeza) y duration < 30.
@@ -543,13 +589,14 @@ export async function scanNativeMusicDirectories(
         // Obtener título y artista limpios a partir del nombre del archivo
         const { title, artist } = cleanFilename(item.fileName);
         const coverUrl = generateCoverArt(title, artist);
-        const format = item.fileName.split(".").pop()?.toUpperCase() || "AUDIO";
+        const rawFormat = item.fileName.split(".").pop()?.toUpperCase() || "AUDIO";
+        const format = isVideo ? `${rawFormat} (Audio)` : rawFormat;
 
         const parsedTrack: Track = {
           id: `native_${encodeURIComponent(nativeUri)}`,
           title,
           artist,
-          album: item.folderName || "Música Local",
+          album: item.folderName || (isVideo ? "Videos (Audio)" : "Música Local"),
           duration,
           url: webAudioUrl,
           nativePath: nativeUri,
@@ -748,6 +795,16 @@ export async function scanSpecificNativeDirectory(
         // Medir o estimar duración
         const duration = await getAudioDuration(webAudioUrl, item.size);
 
+        // Soporte de contenedores de video ('.mp4', '.mkv', '.webm', '.3gp'):
+        // Descarta automáticamente cualquier video con duración mayor a 480 segundos (8 minutos)
+        const isVideo = isVideoFilename(item.fileName);
+        if (isVideo && duration > MAX_VIDEO_DURATION_SECONDS) {
+          console.log(
+            `[NativeScanner] Video descartado por superar los 8 minutos (${Math.round(duration)}s > ${MAX_VIDEO_DURATION_SECONDS}s): ${item.fileName}`
+          );
+          continue;
+        }
+
         // FILTRO DE DURACIÓN (30s):
         // NO descartar canciones si el metadato de tiempo aún no se ha terminado de leer (duration <= 0).
         if (filterShortAudios && duration && duration > 0 && duration < 30) {
@@ -756,13 +813,14 @@ export async function scanSpecificNativeDirectory(
 
         const { title, artist } = cleanFilename(item.fileName);
         const coverUrl = generateCoverArt(title, artist);
-        const format = item.fileName.split(".").pop()?.toUpperCase() || "AUDIO";
+        const rawFormat = item.fileName.split(".").pop()?.toUpperCase() || "AUDIO";
+        const format = isVideo ? `${rawFormat} (Audio)` : rawFormat;
 
         const parsedTrack: Track = {
           id: `native_${encodeURIComponent(nativeUri)}`,
           title,
           artist,
-          album: item.folderName || folderLabel,
+          album: item.folderName || (isVideo ? "Videos (Audio)" : folderLabel),
           duration,
           url: webAudioUrl,
           nativePath: nativeUri,

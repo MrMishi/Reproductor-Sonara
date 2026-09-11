@@ -58,8 +58,17 @@ import { HiddenTracksModal } from "./components/HiddenTracksModal";
 import { SleepTimerModal } from "./components/SleepTimerModal";
 import { Capacitor } from "@capacitor/core";
 import { autoScanStartup, requestStoragePermissions } from "./services/nativeScanner";
+import {
+  requestNativeNotificationPermission,
+  checkNativeStoragePermissions,
+} from "./services/nativeFolderPicker";
+import { PermissionRequiredModal } from "./components/PermissionRequiredModal";
 import { ID3EditorModal } from "./components/ID3EditorModal";
-import { parseAudioFile } from "./services/metadataParser";
+import {
+  parseAudioFile,
+  isVideoFilename,
+  MAX_VIDEO_DURATION_SECONDS,
+} from "./services/metadataParser";
 import { AlertCircle } from "lucide-react";
 import {
   loadTracksFromDB,
@@ -139,6 +148,31 @@ export default function App() {
     }
   });
 
+  // Diálogo flotante de permisos si el acceso al almacenamiento está denegado
+  const [showPermissionDialog, setShowPermissionDialog] = useState<boolean>(false);
+
+  /**
+   * Gestión directa de permisos de almacenamiento ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE'):
+   * Al intentar escanear o importar música/videos, verifica los permisos.
+   * Si están denegados, muestra un diálogo claro:
+   * "Se requiere acceso a tus archivos de audio para importar música"
+   * con un botón que abre directamente los Ajustes de la App en Android.
+   */
+  const handleEnsureStoragePermissions = async (): Promise<boolean> => {
+    if (!Capacitor.isNativePlatform()) return true;
+
+    const granted = await checkNativeStoragePermissions();
+    if (granted) return true;
+
+    // Intentar solicitar permiso nativo directamente
+    const requested = await requestStoragePermissions();
+    if (requested) return true;
+
+    // Si sigue denegado, mostrar diálogo flotante con botón directo a Ajustes
+    setShowPermissionDialog(true);
+    return false;
+  };
+
   const handleToggleFilterShortAudios = (enabled: boolean) => {
     setFilterShortAudios(enabled);
     try {
@@ -212,10 +246,12 @@ export default function App() {
 
       // ESCANEO AUTOMÁTICO PREDETERMINADO EN ANDROID:
       // Al iniciar la app, solicita permisos de almacenamiento ('READ_MEDIA_AUDIO' y 'READ_EXTERNAL_STORAGE')
+      // y permisos de notificación ('POST_NOTIFICATIONS') para la barra de estado y pantalla de bloqueo,
       // y escanea automáticamente la carpeta '/Music', '/Download' y '/YMusic' guardando rutas nativas y actualizando la lista al instante.
       if (Capacitor.isNativePlatform()) {
         try {
-          console.log("[App] Solicitando permisos nativos de almacenamiento en inicio de app...");
+          console.log("[App] Solicitando permisos nativos de almacenamiento y notificación en inicio de app...");
+          requestNativeNotificationPermission().catch(console.warn);
           await requestStoragePermissions();
           const newDiscovered = await autoScanStartup(
             currentList,
@@ -708,7 +744,20 @@ export default function App() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const audioExts = [".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg", ".opus", ".webm"];
+    const audioExts = [
+      ".mp3",
+      ".m4a",
+      ".flac",
+      ".wav",
+      ".aac",
+      ".ogg",
+      ".opus",
+      ".webm",
+      ".wma",
+      ".mp4",
+      ".mkv",
+      ".3gp",
+    ];
     const audioFiles: File[] = [];
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
@@ -756,6 +805,22 @@ export default function App() {
     });
     setTracks(updated);
     saveTracksToDB(updated);
+  };
+
+  // Eliminar o desvincular letras de una canción
+  const handleLyricsRemoved = (trackId: string) => {
+    const updated = tracks.map((t) => {
+      if (t.id === trackId) {
+        return {
+          ...t,
+          lyrics: undefined,
+        };
+      }
+      return t;
+    });
+    setTracks(updated);
+    saveTracksToDB(updated);
+    setToastMessage("Letra eliminada de la canción");
   };
 
   // Ocultar canción (omitir permanentemente de la biblioteca y de futuros escaneos)
@@ -1050,6 +1115,17 @@ export default function App() {
             if (realDuration && !isNaN(realDuration) && isFinite(realDuration) && realDuration > 0) {
               setDuration(realDuration);
 
+              // Si la pista es un contenedor de video y su duración supera los 480 segundos (8 minutos), omitir inmediatamente
+              const isVideo = currentTrack?.fileName
+                ? isVideoFilename(currentTrack.fileName)
+                : (currentTrack?.format && currentTrack.format.includes("Audio") && !currentTrack.format.startsWith("audio/"));
+              if (isVideo && realDuration > MAX_VIDEO_DURATION_SECONDS) {
+                console.log(`[Sonora] Descartando video mayor a 8 minutos (${realDuration.toFixed(1)}s)...`);
+                setToastMessage("Se omitió video que excede los 8 minutos permitidos (480s)");
+                handleNext();
+                return;
+              }
+
               // Si la pista resulta ser una nota de voz identificada por 'PTT-' menor a 30s, omitir inmediatamente y avanzar
               if (realDuration < 30 && currentTrack?.fileName && /^PTT-/i.test(currentTrack.fileName)) {
                 console.log(`[Sonora] Descartando automáticamente nota de voz (${realDuration.toFixed(1)}s)...`);
@@ -1110,9 +1186,24 @@ export default function App() {
         }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        onOpenAddFiles={() => localFilesInputRef.current?.click()}
-        onOpenAddFolder={() => setIsScannerOpen(true)}
-        onOpenScanner={() => setIsScannerOpen(true)}
+        onOpenAddFiles={async () => {
+          const hasPerm = await handleEnsureStoragePermissions();
+          if (hasPerm) {
+            localFilesInputRef.current?.click();
+          }
+        }}
+        onOpenAddFolder={async () => {
+          const hasPerm = await handleEnsureStoragePermissions();
+          if (hasPerm) {
+            setIsScannerOpen(true);
+          }
+        }}
+        onOpenScanner={async () => {
+          const hasPerm = await handleEnsureStoragePermissions();
+          if (hasPerm) {
+            setIsScannerOpen(true);
+          }
+        }}
         onOpenEqualizer={() => setIsEqualizerOpen(true)}
         onOpenTheme={() => setIsThemeOpen(true)}
         onOpenHiddenTracks={() => setIsHiddenTracksOpen(true)}
@@ -1229,6 +1320,8 @@ export default function App() {
         onOpenID3Editor={(track) => setEditingTrack(track)}
         sleepTimer={sleepTimer}
         onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
+        onLyricsApplied={handleLyricsApplied}
+        onLyricsRemoved={handleLyricsRemoved}
       />
 
       {/* Floating Action Toast Notification */}
@@ -1269,6 +1362,7 @@ export default function App() {
         onClose={() => setLyricsSearchTrack(null)}
         track={lyricsSearchTrack}
         onLyricsApplied={handleLyricsApplied}
+        onLyricsRemoved={handleLyricsRemoved}
       />
 
       {/* Hidden Tracks & Blacklist Management Modal */}
@@ -1285,7 +1379,7 @@ export default function App() {
         ref={localFilesInputRef}
         type="file"
         multiple
-        accept="audio/*,.mp3,.flac,.wav,.m4a,.aac,.ogg,.opus,.webm"
+        accept="audio/*,video/mp4,video/x-matroska,video/webm,video/3gpp,.mp3,.flac,.wav,.m4a,.aac,.ogg,.opus,.webm,.wma,.mp4,.mkv,.3gp"
         className="hidden"
         onChange={handleLocalFilesSelected}
       />
@@ -1328,6 +1422,12 @@ export default function App() {
         onCancelTimer={handleCancelSleepTimer}
         onAddMinutes={handleAddSleepTimerMinutes}
         onToggleFadeOut={handleToggleFadeOut}
+      />
+
+      {/* Modal de Permiso de Almacenamiento Requerido */}
+      <PermissionRequiredModal
+        isOpen={showPermissionDialog}
+        onClose={() => setShowPermissionDialog(false)}
       />
     </div>
   );

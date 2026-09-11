@@ -1,11 +1,16 @@
 package com.sonora.musicplayer;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
 import android.util.Log;
 
 import androidx.activity.result.ActivityResult;
+import androidx.core.content.ContextCompat;
 import androidx.documentfile.provider.DocumentFile;
 
 import com.getcapacitor.JSArray;
@@ -24,20 +29,23 @@ import java.util.Set;
 
 /**
  * Plugin nativo de Capacitor para invocar DIRECTAMENTE el selector oficial de carpetas de Android
- * mediante el Intent nativo 'Intent.ACTION_OPEN_DOCUMENT_TREE' (Storage Access Framework - SAF).
+ * mediante el Intent nativo 'Intent.ACTION_OPEN_DOCUMENT_TREE' (Storage Access Framework - SAF),
+ * comprobar permisos de almacenamiento/música y abrir los Ajustes de la Aplicación en el sistema.
  *
  * Al presionar "Seleccionar Carpeta", abre la ventana oficial del sistema Android (pantalla nativa del teléfono)
  * para que el usuario elija cualquier carpeta (almacenamiento interno o tarjeta SD) y presione "Usar esta carpeta".
- * Una vez concedido el permiso persistente, lee de forma recursiva los archivos de audio y devuelve sus URIs
- * nativas para que la aplicación las registre directamente sin pasar por cachés ni blobs.
+ * Una vez concedido el permiso persistente, lee de forma recursiva los archivos de audio y video
+ * y devuelve sus URIs nativas para que la aplicación las registre directamente sin pasar por cachés ni blobs.
  */
 @CapacitorPlugin(name = "NativeFolderPicker")
 public class NativeFolderPickerPlugin extends Plugin {
 
     private static final String TAG = "NativeFolderPicker";
 
-    // Extensiones de audio compatibles admitidas
+    // Extensiones de audio y contenedores de video compatibles admitidos
+    // Los archivos de video se vinculan al reproductor HTML5 Audio para extraer y reproducir su pista sonora de fondo
     private static final Set<String> SUPPORTED_AUDIO_EXTENSIONS = new HashSet<String>() {{
+        // Formatos de audio estándar
         add(".mp3");
         add(".m4a");
         add(".flac");
@@ -45,8 +53,12 @@ public class NativeFolderPickerPlugin extends Plugin {
         add(".ogg");
         add(".opus");
         add(".aac");
-        add(".webm");
         add(".wma");
+        // Contenedores de video para reproducción de su pista de audio
+        add(".mp4");
+        add(".mkv");
+        add(".webm");
+        add(".3gp");
     }};
 
     /**
@@ -67,6 +79,95 @@ public class NativeFolderPickerPlugin extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "Error al lanzar Intent.ACTION_OPEN_DOCUMENT_TREE", e);
             call.reject("Error al abrir el selector de carpetas del sistema: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Abre directamente la pantalla de Ajustes de la Aplicación en Android mediante Intent
+     * (android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+     * para que el usuario pueda otorgar los permisos de almacenamiento/música.
+     */
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            Uri uri = Uri.fromParts("package", getContext().getPackageName(), null);
+            intent.setData(uri);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+
+            JSObject res = new JSObject();
+            res.put("success", true);
+            call.resolve(res);
+        } catch (Exception e) {
+            Log.e(TAG, "Error al abrir la pantalla de Ajustes de la Aplicación", e);
+            call.reject("No se pudo abrir los ajustes de la aplicación: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Comprueba directamente si la aplicación tiene concedidos los permisos de lectura de almacenamiento / música:
+     * - En Android 13+ (API 33+): READ_MEDIA_AUDIO y/o READ_MEDIA_VIDEO
+     * - En Android 12 o inferior: READ_EXTERNAL_STORAGE
+     */
+    @PluginMethod
+    public void checkStoragePermissions(PluginCall call) {
+        try {
+            boolean granted = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                int audioCheck = ContextCompat.checkSelfPermission(
+                    getContext(),
+                    Manifest.permission.READ_MEDIA_AUDIO
+                );
+                int videoCheck = ContextCompat.checkSelfPermission(
+                    getContext(),
+                    Manifest.permission.READ_MEDIA_VIDEO
+                );
+                granted = (audioCheck == PackageManager.PERMISSION_GRANTED || videoCheck == PackageManager.PERMISSION_GRANTED);
+            } else {
+                int storageCheck = ContextCompat.checkSelfPermission(
+                    getContext(),
+                    Manifest.permission.READ_EXTERNAL_STORAGE
+                );
+                granted = (storageCheck == PackageManager.PERMISSION_GRANTED);
+            }
+
+            JSObject res = new JSObject();
+            res.put("granted", granted);
+            call.resolve(res);
+        } catch (Exception e) {
+            Log.e(TAG, "Error comprobando permisos de almacenamiento", e);
+            call.reject("Error comprobando permisos: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Solicita permisos de notificación nativa (POST_NOTIFICATIONS) en Android 13+ (API 33+)
+     * para asegurar que el control de reproducción en la barra de estado y pantalla de bloqueo sea visible.
+     */
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                int check = ContextCompat.checkSelfPermission(
+                    getContext(),
+                    Manifest.permission.POST_NOTIFICATIONS
+                );
+                if (check != PackageManager.PERMISSION_GRANTED && getActivity() != null) {
+                    getActivity().requestPermissions(
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        1002
+                    );
+                }
+            }
+            JSObject res = new JSObject();
+            res.put("success", true);
+            call.resolve(res);
+        } catch (Exception e) {
+            Log.w(TAG, "Aviso solicitando permisos de notificación: " + e.getMessage());
+            JSObject res = new JSObject();
+            res.put("success", false);
+            call.resolve(res);
         }
     }
 
@@ -188,11 +289,14 @@ public class NativeFolderPickerPlugin extends Plugin {
     }
 
     /**
-     * Valida si un archivo es audio basándose en su tipo MIME o extensión de archivo
+     * Valida si un archivo es audio o video compatible basándose en su tipo MIME o extensión de archivo
      */
     private boolean isAudioFile(String name, String mimeType) {
-        if (mimeType != null && mimeType.toLowerCase(Locale.ROOT).startsWith("audio/")) {
-            return true;
+        if (mimeType != null) {
+            String lowerMime = mimeType.toLowerCase(Locale.ROOT);
+            if (lowerMime.startsWith("audio/") || lowerMime.startsWith("video/")) {
+                return true;
+            }
         }
         String lowerName = name.toLowerCase(Locale.ROOT);
         for (String ext : SUPPORTED_AUDIO_EXTENSIONS) {

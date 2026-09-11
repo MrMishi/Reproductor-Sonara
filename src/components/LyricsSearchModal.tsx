@@ -20,7 +20,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { X, Search, FileText, Check, Loader2, Globe, Sparkles } from "lucide-react";
+import { X, Search, FileText, Check, Loader2, Globe, Sparkles, Trash2 } from "lucide-react";
 import { Track } from "../types";
 import { searchLyricsOnline, LyricsResult } from "../services/lyricsService";
 
@@ -29,6 +29,7 @@ interface LyricsSearchModalProps {
   onClose: () => void;
   track: Track | null;
   onLyricsApplied: (trackId: string, lyrics: Track["lyrics"], detectedAlbum?: string) => void;
+  onLyricsRemoved?: (trackId: string) => void;
 }
 
 export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
@@ -36,6 +37,7 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
   onClose,
   track,
   onLyricsApplied,
+  onLyricsRemoved,
 }) => {
   const [songTitle, setSongTitle] = useState("");
   const [songArtist, setSongArtist] = useState("");
@@ -95,6 +97,9 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
         {
           plain: result.plainLyrics,
           synced: result.syncedLyrics || undefined,
+          romajiPlain: result.romajiPlain,
+          pairedPlainLines: result.pairedPlainLines,
+          hasJapanese: result.hasJapanese,
           source:
             result.source === "lrclib" || result.source === "lrclib-search" || result.source === "lrclib-direct"
               ? "LRCLib (Sincronizada)"
@@ -303,27 +308,49 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
         )}
 
         {/* Footer */}
-        <div className="flex justify-end gap-3 pt-2 border-t" style={{ borderColor: "var(--color-border-subtle)" }}>
-          <button
-            id="lyrics-cancel-btn"
-            onClick={onClose}
-            className="px-4 py-2 rounded-full text-xs font-medium hover:bg-white/10 transition-colors"
-            style={{ color: "var(--color-text-secondary)" }}
-          >
-            Cancelar
-          </button>
+        <div className="flex items-center justify-between gap-3 pt-2 border-t" style={{ borderColor: "var(--color-border-subtle)" }}>
+          <div>
+            {Boolean(track.lyrics?.plain || (track.lyrics?.synced && track.lyrics.synced.length > 0)) && onLyricsRemoved && (
+              <button
+                id="lyrics-modal-delete-btn"
+                type="button"
+                onClick={() => {
+                  onLyricsRemoved(track.id);
+                  onClose();
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 transition-all active:scale-95"
+                title="Eliminar la letra actual de esta canción"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Borrar Letra</span>
+              </button>
+            )}
+          </div>
 
-          {(result || customText) && (
+          <div className="flex items-center gap-3">
             <button
-              id="lyrics-apply-btn"
-              onClick={handleApply}
-              className="flex items-center gap-1.5 px-6 py-2.5 rounded-full font-bold text-xs text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
-              style={{ backgroundColor: "var(--color-accent)" }}
+              id="lyrics-cancel-btn"
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-full text-xs font-medium hover:bg-white/10 transition-colors"
+              style={{ color: "var(--color-text-secondary)" }}
             >
-              <Check className="w-4 h-4" />
-              <span>Aplicar y Guardar Letra</span>
+              Cancelar
             </button>
-          )}
+
+            {(result || customText) && (
+              <button
+                id="lyrics-apply-btn"
+                type="button"
+                onClick={handleApply}
+                className="flex items-center gap-1.5 px-6 py-2.5 rounded-full font-bold text-xs text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
+                style={{ backgroundColor: "var(--color-accent)" }}
+              >
+                <Check className="w-4 h-4" />
+                <span>Aplicar y Guardar Letra</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
