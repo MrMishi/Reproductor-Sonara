@@ -500,7 +500,13 @@ export default function App() {
     };
   }, []);
 
-  // Integración completa con MediaSession API para notificaciones, pantalla de bloqueo y Centro de Control (MIUI/HyperOS)
+  // =========================================================================
+  // IMPLEMENTACIÓN DE MEDIASESSION API (CONTROLES EN BARRA DE NOTIFICACIONES)
+  // REGLAS DEL SISTEMA:
+  // 1. Integrar nativamente 'navigator.mediaSession' al cargar o cambiar una canción.
+  // 2. Registrar controladores de acción (play, pause, previoustrack, nexttrack, seekto).
+  // 3. Sincronización estricta de estado (playbackState = 'playing' | 'paused').
+  // =========================================================================
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
 
@@ -508,39 +514,36 @@ export default function App() {
       try {
         const origin = window.location.origin;
         const defaultPng = `${origin}/pwa-512x512.png`;
-        const coverSrc =
+        const urlPortadaCancion =
           currentTrack.coverUrl && !currentTrack.coverUrl.includes("svg")
             ? currentTrack.coverUrl
             : defaultPng;
 
-        // Lista completa de resoluciones en PNG para asegurar compatibilidad con Android,
-        // la pantalla de bloqueo y el Centro de Control de MIUI / HyperOS
-        const artworkList = [
-          { src: coverSrc, sizes: "96x96", type: "image/png" },
-          { src: coverSrc, sizes: "128x128", type: "image/png" },
-          { src: coverSrc, sizes: "192x192", type: "image/png" },
-          { src: coverSrc, sizes: "256x256", type: "image/png" },
-          { src: coverSrc, sizes: "384x384", type: "image/png" },
-          { src: coverSrc, sizes: "512x512", type: "image/png" },
-          // Respaldo de alta resolución para el Centro de Control de MIUI / HyperOS y Android Lock Screen
-          { src: `${origin}/pwa-192x192.png`, sizes: "192x192", type: "image/png" },
-          { src: `${origin}/pwa-512x512.png`, sizes: "512x512", type: "image/png" },
-          { src: `${origin}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" },
-        ];
-
+        // 1. Actualizar metadatos de la sesión multimedia
         navigator.mediaSession.metadata = new MediaMetadata({
           title: currentTrack.title || "Sonora Music",
           artist: currentTrack.artist || "Artista Desconocido",
           album: currentTrack.album || "Sonora Player",
-          artwork: artworkList,
+          artwork: [
+            { src: urlPortadaCancion, sizes: "96x96", type: "image/png" },
+            { src: urlPortadaCancion, sizes: "128x128", type: "image/png" },
+            { src: urlPortadaCancion, sizes: "192x192", type: "image/png" },
+            { src: urlPortadaCancion, sizes: "256x256", type: "image/png" },
+            { src: urlPortadaCancion, sizes: "384x384", type: "image/png" },
+            { src: urlPortadaCancion, sizes: "512x512", type: "image/png" },
+            // Respaldo de alta resolución para centros de control y bloqueo de pantalla
+            { src: `${origin}/pwa-192x192.png`, sizes: "192x192", type: "image/png" },
+            { src: `${origin}/pwa-512x512.png`, sizes: "512x512", type: "image/png" },
+          ],
         });
       } catch (e) {
         console.warn("Error setting MediaSession metadata:", e);
       }
     }
 
-    // Configurar acciones estándar de Media Session requeridas por Android y MIUI/HyperOS
+    // 2. Registrar controladores de acción (Action Handlers) vinculados con las funciones del reproductor
     try {
+      // Acción 'play': Ejecuta la función de reproducir
       navigator.mediaSession.setActionHandler("play", () => {
         audioEngine.resumeContext();
         if (audioRef.current && audioRef.current.paused) {
@@ -556,6 +559,7 @@ export default function App() {
         }
       });
 
+      // Acción 'pause': Ejecuta la función de pausar
       navigator.mediaSession.setActionHandler("pause", () => {
         if (audioRef.current && !audioRef.current.paused) {
           audioRef.current.pause();
@@ -566,14 +570,17 @@ export default function App() {
         }
       });
 
+      // Acción 'previoustrack': Ejecuta la función de canción anterior
       navigator.mediaSession.setActionHandler("previoustrack", () => {
         handlePrevRef.current();
       });
 
+      // Acción 'nexttrack': Ejecuta la función de siguiente canción
       navigator.mediaSession.setActionHandler("nexttrack", () => {
         handleNextRef.current();
       });
 
+      // Acción 'seekto': Permite adelantar o retrasar desde la barra de progreso de la notificación
       navigator.mediaSession.setActionHandler("seekto", (details) => {
         if (details.seekTime !== undefined && details.seekTime !== null) {
           handleSeekRef.current(details.seekTime);
@@ -589,6 +596,7 @@ export default function App() {
         }
       });
 
+      // Acciones adicionales de rebobinado y avance rápido compatibles con mandos y auriculares
       navigator.mediaSession.setActionHandler("seekbackward", (details) => {
         const offset = details.seekOffset || 10;
         const cur = audioRef.current?.currentTime || 0;
@@ -608,18 +616,19 @@ export default function App() {
           audioRef.current.currentTime = 0;
         }
         setIsPlaying(false);
-        if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "none";
+        if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
       });
     } catch (err) {
       console.warn("Error setting MediaSession action handlers:", err);
     }
-  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.coverUrl, duration]);
+  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.album, currentTrack?.coverUrl, duration]);
 
-  // Sincronizar estado de reproducción y barra de progreso en MediaSession
+  // 3. Sincronización de estado (playbackState) y posición de la barra en MediaSession
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
 
     try {
+      // Cuando el audio empiece a sonar -> 'playing'; en pausa o detenido -> 'paused'
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
 
       if ("setPositionState" in navigator.mediaSession && duration > 0 && !isNaN(duration) && isFinite(duration)) {
