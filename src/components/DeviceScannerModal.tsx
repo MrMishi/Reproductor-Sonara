@@ -42,7 +42,7 @@ import {
   MAX_VIDEO_DURATION_SECONDS,
 } from "../services/metadataParser";
 import { getInitialDemoTracks } from "../services/demoTracks";
-import { isTrackHidden, getHiddenTracks } from "../services/db";
+import { isTrackHidden, getHiddenTracks, saveTracksInChunks } from "../services/db";
 import {
   scanNativeMusicDirectories,
   requestStoragePermissions,
@@ -200,7 +200,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
         const currentBatch = files.slice(i, i + BATCH_SIZE);
         const displayName = currentBatch[0]?.name || "canción";
         setProgressStatus(
-          `Extrayendo metadatos: ${displayName} (${Math.min(i + 1, files.length)} de ${files.length})...`
+          `Extrayendo metadatos de texto: ${displayName} (${Math.min(i + 1, files.length)} de ${files.length})...`
         );
 
         const parsedResults = await Promise.all(
@@ -213,7 +213,10 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
 
             try {
               const isVideo = isVideoFilename(file.name) || (file.type && file.type.toLowerCase().startsWith("video/"));
-              const track = await parseAudioFile(file, filterShortAudios, minDurationSeconds);
+              // 1. OPTIMIZACIÓN DE ESCANEO DE MÚSICA LOCAL (CARGA RÁPIDA):
+              // Al importar archivos locales, NO extraigas ni proceses las portadas de todas las canciones durante el escaneo inicial.
+              // Lee únicamente la metadata básica en texto (extractCover: false).
+              const track = await parseAudioFile(file, filterShortAudios, minDurationSeconds, false);
               if (!track) {
                 if (isVideo) {
                   skippedLongVideoCount++;
@@ -249,10 +252,17 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           })
         );
 
+        const newValidBatch: Track[] = [];
         for (const track of parsedResults) {
           if (track) {
             imported.push(track);
+            newValidBatch.push(track);
           }
+        }
+
+        // Guarda los datos procesados en lotes (chunks) en IndexedDB periódicamente para alta velocidad
+        if (newValidBatch.length > 0) {
+          await saveTracksInChunks(newValidBatch, 10);
         }
 
         const countNow = Math.min(i + currentBatch.length, files.length);
@@ -265,6 +275,8 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
 
       if (isCancelledRef.current) {
         if (imported.length > 0) {
+          // Persiste en chunks en IndexedDB
+          await saveTracksInChunks(imported, 25);
           onTracksImported(imported);
           setStatusType("success");
           const details = skippedShortCount > 0 ? ` (se ignoraron ${skippedShortCount} audios cortos < 1:15)` : "";
@@ -276,6 +288,8 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           setProgressStatus("Escaneo cancelado. No se añadieron canciones.");
         }
       } else if (imported.length > 0) {
+        // Asegurar persistencia completa en chunks en IndexedDB
+        await saveTracksInChunks(imported, 25);
         setStatusType("success");
         const detailsList = [];
         if (skippedShortCount > 0) {

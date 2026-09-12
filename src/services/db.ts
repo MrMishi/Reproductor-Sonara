@@ -240,6 +240,68 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
 }
 
 /**
+ * Función: saveTracksInChunks
+ * Propósito: Guarda datos procesados en lotes (chunks) en IndexedDB para completar el escaneo de cientos de canciones en pocos segundos.
+ * ¿Cómo funciona?:
+ * Divide la lista de canciones en lotes de tamaño configurable (por defecto 25 o 50) y procesa cada lote
+ * en una transacción atómica separada con un breve respiro para el hilo principal, garantizando alta velocidad
+ * y sin congelar la interfaz de usuario.
+ */
+export async function saveTracksInChunks(
+  tracks: Track[],
+  chunkSize: number = 25,
+  onProgress?: (savedCount: number, total: number) => void
+): Promise<void> {
+  if (!tracks || tracks.length === 0) return;
+
+  for (let i = 0; i < tracks.length; i += chunkSize) {
+    const chunk = tracks.slice(i, i + chunkSize);
+    try {
+      const db = await openDB();
+      const tx = db.transaction(STORE_TRACKS, "readwrite");
+      const store = tx.objectStore(STORE_TRACKS);
+
+      for (const track of chunk) {
+        const nativePath = track.nativePath || (track.url?.startsWith("file://") ? track.url : undefined);
+        const record: any = {
+          id: track.id,
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          duration: track.duration || 0,
+          coverUrl: track.coverUrl,
+          year: track.year,
+          genre: track.genre,
+          format: track.format,
+          size: track.size || 0,
+          addedAt: track.addedAt || Date.now(),
+          isFavorite: track.isFavorite || false,
+          folderPath: track.folderPath,
+          fileName: track.fileName || track.file?.name,
+          lyrics: track.lyrics,
+          nativePath: nativePath || track.nativePath,
+          url: track.url,
+        };
+        store.put(record);
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+
+      const currentCount = Math.min(i + chunk.length, tracks.length);
+      onProgress?.(currentCount, tracks.length);
+
+      // Breve respiro para no saturar el event loop en escaneos masivos
+      await new Promise((r) => setTimeout(r, 0));
+    } catch (chunkErr) {
+      console.warn(`[IndexedDB] Error guardando lote en chunks (${i} a ${i + chunk.length}):`, chunkErr);
+    }
+  }
+}
+
+/**
  * Función: addSingleTrackToDB
  * Propósito: Guarda o actualiza una sola pista en IndexedDB al instante durante el escaneo en vivo.
  * ¿Cómo funciona?:

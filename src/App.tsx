@@ -68,6 +68,7 @@ import {
   parseAudioFile,
   isVideoFilename,
   MAX_VIDEO_DURATION_SECONDS,
+  extractCoverArtFromFile,
 } from "./services/metadataParser";
 import { AlertCircle } from "lucide-react";
 import {
@@ -336,7 +337,7 @@ export default function App() {
     }
   }, []);
 
-  // Update audio source when currentTrack changes
+  // Update audio source and lazy-load embedded cover art when currentTrack changes
   useEffect(() => {
     if (!audioRef.current || !currentTrack) return;
 
@@ -348,6 +349,17 @@ export default function App() {
       audioRef.current
         .play()
         .catch((err) => console.warn("Audio play prevented:", err?.message || "playback blocked"));
+    }
+
+    // Lazy loading de portada incrustada si la canción actual tiene su archivo en memoria o disponible
+    if (currentTrack.file && (!currentTrack.coverUrl || currentTrack.coverUrl.includes("data:image/svg+xml"))) {
+      extractCoverArtFromFile(currentTrack.file).then((extractedCover) => {
+        if (extractedCover) {
+          setTracks((prev) =>
+            prev.map((t) => (t.id === currentTrack.id ? { ...t, coverUrl: extractedCover } : t))
+          );
+        }
+      });
     }
   }, [currentTrack?.id]);
 
@@ -410,8 +422,15 @@ export default function App() {
           }
         })
         .catch((e) => {
+          // Si el audio ya empezó a sonar o fue una interrupción inocua (ej. abort/pause rápido), ignorar
+          if (audioRef.current && !audioRef.current.paused) {
+            setIsPlaying(true);
+            return;
+          }
+          if (e?.name === "AbortError") {
+            return;
+          }
           console.warn("Error playing audio:", e?.message || "playback failed");
-          setToastMessage("No se pudo iniciar la reproducción del archivo.");
           setIsPlaying(false);
         });
     }
@@ -690,8 +709,15 @@ export default function App() {
           audioRef.current.currentTime = 0;
           audioRef.current.src = track.url;
           audioRef.current.play().catch((err) => {
+            // Si el audio está sonando o fue una interrupción transitoria/abort, no mostrar toast falso
+            if (audioRef.current && !audioRef.current.paused) {
+              setIsPlaying(true);
+              return;
+            }
+            if (err?.name === "AbortError") {
+              return;
+            }
             console.warn("Playback error:", err);
-            setToastMessage("No se pudo iniciar la reproducción del archivo.");
             setIsPlaying(false);
           });
         }
@@ -734,7 +760,8 @@ export default function App() {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
-        const track = await parseAudioFile(file);
+        // Escaneo inicial rápido: solo metadata básica en texto, portadas en lazy loading
+        const track = await parseAudioFile(file, false, 30, false);
         if (track) imported.push(track);
       } catch (err) {
         console.warn("Error parsing file:", file.name, err);
@@ -778,7 +805,8 @@ export default function App() {
     const imported: Track[] = [];
     for (const f of audioFiles) {
       try {
-        const track = await parseAudioFile(f);
+        // Escaneo inicial rápido: solo metadata básica en texto, portadas en lazy loading
+        const track = await parseAudioFile(f, false, 30, false);
         if (track) imported.push(track);
       } catch (err) {
         console.warn("Error parsing folder file:", f.name, err);

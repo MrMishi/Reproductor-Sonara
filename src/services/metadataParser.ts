@@ -108,7 +108,10 @@ export function generateCoverArt(title: string, artist: string): string {
  *    - APIC: Carátula incrustada (extrae el tipo MIME y genera un Blob URL con los bytes de imagen).
  * 4. Soporta decodificación de texto en UTF-8, UTF-16LE, UTF-16BE e ISO-8859-1.
  */
-function parseID3v2(buffer: ArrayBuffer): {
+function parseID3v2(
+  buffer: ArrayBuffer,
+  extractCover: boolean = true
+): {
   title?: string;
   artist?: string;
   album?: string;
@@ -209,8 +212,8 @@ function parseID3v2(buffer: ArrayBuffer): {
       result.album = decodeText(frameData);
     } else if ((frameId === "TYER" || frameId === "TDRC") && !result.year) {
       result.year = decodeText(frameData);
-    } else if (frameId === "APIC" && !result.coverUrl) {
-      // Extract picture
+    } else if (frameId === "APIC" && extractCover && !result.coverUrl) {
+      // Extract picture only if extractCover is true
       try {
         let p = 1;
         // Skip mime type
@@ -358,7 +361,7 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
  * ¿Cómo funciona?:
  * 1. Filtro estricto: Descarta notas de voz de WhatsApp si el nombre inicia con 'PTT-'.
  * 2. Genera una URL en memoria (`URL.createObjectURL(file)`).
- * 3. Lee los primeros 128 KB para extraer etiquetas ID3v2 (título, artista, año, carátula incrustada).
+ * 3. Lee los primeros 128 KB para extraer etiquetas ID3v2 (título, artista, año y opcionalmente carátula incrustada).
  * 4. Obtiene la duración en segundos con `getAudioDuration()`.
  * 5. Si no posee carátula en ID3, genera una vectorial personalizada mediante `generateCoverArt()`.
  * 6. Extrae la jerarquía de carpetas relativas si el usuario subió una carpeta completa (`webkitRelativePath`).
@@ -367,7 +370,8 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
 export async function parseAudioFile(
   file: File,
   filterShortAudios: boolean = false,
-  minDurationSeconds: number = 30
+  minDurationSeconds: number = 30,
+  extractCover: boolean = true
 ): Promise<Track | null> {
   // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' (WhatsApp Push-To-Talk)
   // El prefijo 'AUD-' se admite para canciones legítimas
@@ -384,7 +388,7 @@ export async function parseAudioFile(
     // Read first 128KB for ID3v2 tags
     const slice = file.slice(0, 131072);
     const buffer = await slice.arrayBuffer();
-    id3 = parseID3v2(buffer);
+    id3 = parseID3v2(buffer, extractCover);
   } catch (err) {
     console.warn("Failed reading ID3 tags:", err);
   }
@@ -441,4 +445,21 @@ export async function parseAudioFile(
     isFavorite: false,
     folderPath,
   };
+}
+
+/**
+ * Función: extractCoverArtFromFile
+ * Propósito: Extrae bajo demanda (Lazy Loading) la carátula ID3 incrustada de un archivo File o Blob de audio.
+ * Si el archivo no tiene carátula física o falla, devuelve undefined.
+ */
+export async function extractCoverArtFromFile(file: File | Blob): Promise<string | undefined> {
+  try {
+    const slice = file.slice(0, 131072);
+    const buffer = await slice.arrayBuffer();
+    const parsed = parseID3v2(buffer, true);
+    return parsed.coverUrl;
+  } catch (err) {
+    console.warn("Failed lazy extracting cover art from file:", err);
+    return undefined;
+  }
 }
