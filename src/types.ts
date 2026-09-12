@@ -73,8 +73,10 @@ export interface Track {
     rawLrc?: string;
     /** Versión completa en texto plano de la transcripción a Romaji */
     romajiPlain?: string;
-    /** Estrofas o versos planos emparejados con su pronunciación Romaji */
-    pairedPlainLines?: { original: string; romaji?: string }[];
+    /** Versión completa en texto plano traducida al español */
+    spanishPlain?: string;
+    /** Estrofas o versos planos emparejados con su pronunciación Romaji o traducción al español */
+    pairedPlainLines?: { original: string; romaji?: string; spanish?: string }[];
     /** Bandera booleana que indica si la letra contiene caracteres japoneses */
     hasJapanese?: boolean;
   };
@@ -87,7 +89,7 @@ export type LibrarySection = "songs" | "artists" | "albums" | "folders";
 
 /**
  * Línea o verso individual de una letra sincronizada con formato .LRC
- * Estructura interlineal: { time: number, original: string, romaji: string }
+ * Estructura interlineal: { time: number, original: string, romaji?: string, spanish?: string }
  */
 export interface SyncedLyricLine {
   /** Marca de tiempo en segundos en que inicia el verso */
@@ -102,6 +104,8 @@ export interface SyncedLyricLine {
   romaji?: string;
   /** Traducción al español u otro idioma (si está disponible) */
   translation?: string;
+  /** Traducción al español específica para mostrar interlinealmente bajo demanda */
+  spanish?: string;
   /** Bandera booleana que indica si contiene caracteres orientales */
   hasJapanese?: boolean;
 }

@@ -48,19 +48,18 @@ import {
   EyeOff,
   Trash2,
   ChevronUp,
-  Maximize2,
-  Minimize2,
   FileText,
   Volume2,
-  Languages,
   Sparkles,
   Tag,
+  Loader2,
 } from "lucide-react";
 import { Track, PlaybackMode, SleepTimerConfig } from "../types";
 import {
   getActiveLyricIndex,
   hasJapaneseText,
   enrichLyricsWithRomaji,
+  enrichLyricsWithSpanish,
 } from "../services/lyricsService";
 import { VisualizerCanvas } from "./VisualizerCanvas";
 
@@ -135,12 +134,13 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   );
   const [visualMode, setVisualMode] = useState<"cover" | "bars" | "wave" | "circle">("cover");
 
-  // Dynamic Lyrics Sheet Expansion: 'full' (fullscreen lyrics) or 'compact' (split with mini cover banner)
-  const [lyricsExpansion, setLyricsExpansion] = useState<"full" | "compact">("full");
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Estado para la transcripción automática de Romaji
   const [isTranscribingRomaji, setIsTranscribingRomaji] = useState<boolean>(false);
+
+  // Estado para la traducción a Español bajo demanda
+  const [isTranslatingSpanish, setIsTranslatingSpanish] = useState<boolean>(false);
 
   // Swipe & Tap Gestures State on Cover
   const [dragOffset, setDragOffset] = useState<number>(0);
@@ -165,58 +165,134 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   const syncedLyrics = currentTrack?.lyrics?.synced;
   const activeLyricIndex = getActiveLyricIndex(syncedLyrics, currentTime);
 
-  // Soporte Multilingüe de Letras (Japonés / Hiragana / Kanji / Katakana / Romaji)
-  const [japaneseViewMode, setJapaneseViewMode] = useState<"both" | "native" | "romaji">("both");
+  // Estado para la traducción a Romaji bajo demanda (Modo Botón con toggle ON/OFF)
+  const [showRomaji, setShowRomaji] = useState<boolean>(false);
 
+  // Estado para la traducción al Español bajo demanda (Modo Botón con toggle ON/OFF)
+  const [showSpanish, setShowSpanish] = useState<boolean>(false);
+
+  // Al cambiar de pista, las traducciones inician desactivadas por defecto (bajo demanda)
+  useEffect(() => {
+    setShowRomaji(false);
+    setIsTranscribingRomaji(false);
+    setShowSpanish(false);
+    setIsTranslatingSpanish(false);
+  }, [currentTrack?.id]);
+
+  // Detectar si la letra contiene caracteres japoneses para habilitar el botón de Romaji
   const hasJapaneseInLyrics = React.useMemo(() => {
-    if (syncedLyrics && syncedLyrics.some((l) => l.hasJapanese || hasJapaneseText(l.text) || hasJapaneseText(l.nativeText || ""))) {
+    if (
+      syncedLyrics &&
+      syncedLyrics.some(
+        (l) =>
+          l.hasJapanese ||
+          hasJapaneseText(l.text) ||
+          hasJapaneseText(l.nativeText || "") ||
+          hasJapaneseText(l.original || "")
+      )
+    ) {
       return true;
     }
     if (currentTrack?.lyrics?.plain && hasJapaneseText(currentTrack.lyrics.plain)) {
       return true;
     }
+    if (currentTrack?.lyrics?.hasJapanese) {
+      return true;
+    }
     return false;
-  }, [syncedLyrics, currentTrack?.lyrics?.plain]);
+  }, [syncedLyrics, currentTrack?.lyrics?.plain, currentTrack?.lyrics?.hasJapanese]);
 
-  // Detección y procesamiento automático de Romaji si la canción contiene japonés sin transcribir
-  useEffect(() => {
+  /**
+   * Función: handleToggleRomaji
+   * Propósito: Traducción a Romaji bajo demanda al pulsar el botón.
+   * REGLAS DEL SISTEMA:
+   * - Si ya está activo, permite desactivar la traducción (toggle ON/OFF).
+   * - Al activar:
+   *   a) Mantiene las marcas de tiempo '[mm:ss.xx]' completamente intactas.
+   *   b) Extrae solo el texto de cada verso y lo envía a 'https://sonara-backend-zpjn.onrender.com/api/transcribe'.
+   *   c) Asigna la respuesta en Romaji como una propiedad secundaria de la línea ({ time, original, romaji }).
+   *   d) Actualiza la vista para mostrar el Romaji debajo del texto original.
+   */
+  const handleToggleRomaji = async () => {
     if (!currentTrack?.lyrics) return;
 
-    const lyrics = currentTrack.lyrics;
-    const hasUntranscribedSynced = lyrics.synced?.some(
-      (l) =>
-        (l.hasJapanese || hasJapaneseText(l.text) || hasJapaneseText(l.nativeText || "")) &&
-        (!l.romaji || l.romaji.trim().length === 0)
-    );
-    const hasUntranscribedPlain =
-      lyrics.plain &&
-      hasJapaneseText(lyrics.plain) &&
-      (!lyrics.pairedPlainLines || lyrics.pairedPlainLines.length === 0);
-
-    if (hasUntranscribedSynced || hasUntranscribedPlain) {
-      let isCancelled = false;
-      setIsTranscribingRomaji(true);
-
-      enrichLyricsWithRomaji(lyrics)
-        .then((enriched) => {
-          if (!isCancelled && enriched && onLyricsApplied && currentTrack) {
-            onLyricsApplied(currentTrack.id, enriched, currentTrack.album);
-          }
-        })
-        .catch((err) => {
-          console.warn("[ExpandedPlayer] Error auto-transcribiendo letras a Romaji:", err);
-        })
-        .finally(() => {
-          if (!isCancelled) {
-            setIsTranscribingRomaji(false);
-          }
-        });
-
-      return () => {
-        isCancelled = true;
-      };
+    // Si ya está activo, toggle a desactivado
+    if (showRomaji) {
+      setShowRomaji(false);
+      return;
     }
-  }, [currentTrack?.id, currentTrack?.lyrics]);
+
+    const lyrics = currentTrack.lyrics;
+    const hasRomajiAlready =
+      (lyrics.synced && lyrics.synced.some((l) => Boolean(l.romaji && l.romaji.trim().length > 0))) ||
+      (lyrics.pairedPlainLines && lyrics.pairedPlainLines.some((p) => Boolean(p.romaji && p.romaji.trim().length > 0)));
+
+    // Si ya contamos con las líneas en Romaji calculadas previamente, activar inmediatamente la vista
+    if (hasRomajiAlready) {
+      setShowRomaji(true);
+      return;
+    }
+
+    // Si aún no están calculadas, transcribir bajo demanda preservando marcas de tiempo
+    try {
+      setIsTranscribingRomaji(true);
+      const enriched = await enrichLyricsWithRomaji(lyrics);
+      if (enriched && onLyricsApplied && currentTrack) {
+        onLyricsApplied(currentTrack.id, enriched, currentTrack.album);
+      }
+      setShowRomaji(true);
+    } catch (err) {
+      console.warn("[ExpandedPlayer] Error al traducir letras a Romaji bajo demanda:", err);
+    } finally {
+      setIsTranscribingRomaji(false);
+    }
+  };
+
+  /**
+   * Función: handleToggleSpanish
+   * Propósito: Traducción a Español bajo demanda al presionar el botón "Español".
+   * REGLAS DEL SISTEMA:
+   * - Si ya está activo, permite desactivar la traducción (toggle ON/OFF).
+   * - Al activar:
+   *   a) Mantiene las marcas de tiempo '[mm:ss.xx]' completamente intactas.
+   *   b) Extrae el texto de cada verso y lo envía al servicio de traducción (/api/lyrics/translate).
+   *   c) Asigna la respuesta en Español como una propiedad secundaria de la línea ({ time, original, spanish }).
+   *   d) Actualiza la vista para mostrar el significado en español debajo del verso original o traducido.
+   */
+  const handleToggleSpanish = async () => {
+    if (!currentTrack?.lyrics) return;
+
+    // Si ya está activo, toggle a desactivado
+    if (showSpanish) {
+      setShowSpanish(false);
+      return;
+    }
+
+    const lyrics = currentTrack.lyrics;
+    const hasSpanishAlready =
+      (lyrics.synced && lyrics.synced.some((l) => Boolean(l.spanish && l.spanish.trim().length > 0))) ||
+      (lyrics.pairedPlainLines && lyrics.pairedPlainLines.some((p) => Boolean(p.spanish && p.spanish.trim().length > 0)));
+
+    // Si ya contamos con las líneas en español traducidas previamente, activar inmediatamente la vista
+    if (hasSpanishAlready) {
+      setShowSpanish(true);
+      return;
+    }
+
+    // Si aún no están traducidas, enviar al servicio de traducción preservando marcas de tiempo
+    try {
+      setIsTranslatingSpanish(true);
+      const enriched = await enrichLyricsWithSpanish(lyrics);
+      if (enriched && onLyricsApplied && currentTrack) {
+        onLyricsApplied(currentTrack.id, enriched, currentTrack.album);
+      }
+      setShowSpanish(true);
+    } catch (err) {
+      console.warn("[ExpandedPlayer] Error al traducir letras a Español bajo demanda:", err);
+    } finally {
+      setIsTranslatingSpanish(false);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === "lyrics" && lyricsContainerRef.current && activeLyricIndex >= 0) {
@@ -227,7 +303,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
         activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
-  }, [activeLyricIndex, activeTab, lyricsExpansion]);
+  }, [activeLyricIndex, activeTab]);
 
   // Reset slide animation when current track changes
   useEffect(() => {
@@ -701,18 +777,18 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
         {/* VIEW 2: REDISEÑO DEL VISOR DE LETRAS (ESTILO YOUTUBE MUSIC)*/}
         {/* ========================================================= */}
         {activeTab === "lyrics" && (
-          <div className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full px-4 sm:px-8 py-2 relative">
-            {/* Top Minimized Track Banner (Oculta/minimiza la carátula grande) */}
+          <div className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full px-3 sm:px-6 py-2 relative">
+            {/* Top Minimized Track Banner con botones minimalistas alineados en una sola fila */}
             <div
-              className="flex items-center justify-between py-2 px-3 rounded-2xl border bg-neutral-900/60 backdrop-blur-md mb-2 shrink-0"
+              className="flex items-center justify-between py-2 px-2.5 sm:px-3 rounded-2xl border bg-neutral-900/60 backdrop-blur-md mb-2 shrink-0 gap-2"
               style={{ borderColor: "var(--color-border-subtle)" }}
             >
               <div
-                className="flex items-center gap-3 min-w-0 cursor-pointer"
+                className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 cursor-pointer"
                 onClick={onTogglePlay}
                 title="Toca para pausar/reproducir"
               >
-                <div className="relative w-11 h-11 rounded-xl overflow-hidden shadow shrink-0 border border-white/10 group">
+                <div className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-xl overflow-hidden shadow shrink-0 border border-white/10 group">
                   <img
                     src={currentTrack.coverUrl}
                     alt={currentTrack.title}
@@ -726,228 +802,141 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     )}
                   </div>
                 </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <p className="text-xs sm:text-sm font-bold truncate">{currentTrack.title}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <p className="text-xs sm:text-sm font-bold truncate text-white">{currentTrack.title}</p>
                     {/* Indicador visual discreto en el encabezado */}
                     {syncedLyrics && syncedLyrics.length > 0 ? (
-                      <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
+                      <span className="hidden md:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                         [Karaoke Activo]
                       </span>
                     ) : currentTrack.lyrics?.plain ? (
-                      <span className="hidden sm:inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/10 text-neutral-300 border border-white/10 shrink-0">
+                      <span className="hidden md:inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/10 text-neutral-300 border border-white/10 shrink-0">
                         [Texto Estático]
                       </span>
                     ) : null}
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] opacity-70 truncate">
+                  <div className="flex items-center gap-1.5 text-[11px] opacity-70 truncate">
                     <p className="truncate">{currentTrack.artist}</p>
                     {syncedLyrics && syncedLyrics.length > 0 ? (
-                      <span className="sm:hidden inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 shrink-0">
+                      <span className="md:hidden inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 shrink-0">
                         <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
-                        [Karaoke Activo]
-                      </span>
-                    ) : currentTrack.lyrics?.plain ? (
-                      <span className="sm:hidden text-[9px] text-neutral-400 shrink-0">
-                        [Texto Estático]
+                        [Karaoke]
                       </span>
                     ) : null}
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 shrink-0">
-                {/* Selector de Vista Multilingüe para Japonés / Romaji */}
-                {hasJapaneseInLyrics && (
-                  <div className="hidden xs:flex items-center gap-1.5 bg-black/40 p-0.5 rounded-full border border-white/10 text-[11px]">
-                    <button
-                      onClick={() => setJapaneseViewMode("both")}
-                      className={`px-2 py-0.5 rounded-full transition-all ${
-                        japaneseViewMode === "both"
-                          ? "bg-white text-black font-bold shadow-sm"
-                          : "text-neutral-400 hover:text-white"
-                      }`}
-                      title="Mostrar caracteres nativos (Kanji/Kana) y pronunciación Romaji"
-                    >
-                      Kanji + Romaji
-                    </button>
-                    <button
-                      onClick={() => setJapaneseViewMode("native")}
-                      className={`px-2 py-0.5 rounded-full transition-all ${
-                        japaneseViewMode === "native"
-                          ? "bg-white text-black font-bold shadow-sm"
-                          : "text-neutral-400 hover:text-white"
-                      }`}
-                      title="Mostrar solo caracteres nativos japoneses"
-                    >
-                      Solo Nativo
-                    </button>
-                    <button
-                      onClick={() => setJapaneseViewMode("romaji")}
-                      className={`px-2 py-0.5 rounded-full transition-all ${
-                        japaneseViewMode === "romaji"
-                          ? "bg-white text-black font-bold shadow-sm"
-                          : "text-neutral-400 hover:text-white"
-                      }`}
-                      title="Mostrar solo fonética Romaji"
-                    >
-                      Romaji
-                    </button>
-                    {isTranscribingRomaji && (
-                      <span className="text-[10px] text-amber-400 animate-pulse px-1.5 font-medium">
-                        Transcribiendo...
-                      </span>
+              {/* Botones de acción organizados en una sola fila limpia y sin recortes: [文] [🌐] [🗑️] [🔍] */}
+              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                {/* 1. Icono Romaji '文' */}
+                {Boolean(currentTrack.lyrics?.plain || (currentTrack.lyrics?.synced && currentTrack.lyrics.synced.length > 0)) && (
+                  <button
+                    id="lyrics-toggle-romaji-btn"
+                    onClick={handleToggleRomaji}
+                    disabled={isTranscribingRomaji}
+                    className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center transition-all hover:scale-105 active:scale-95 border ${
+                      showRomaji
+                        ? "bg-emerald-500/25 text-emerald-300 border-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.45)] ring-1 ring-emerald-400/60 font-bold scale-105"
+                        : "bg-white/5 hover:bg-white/10 text-neutral-300 border-white/10 hover:text-white"
+                    }`}
+                    title={
+                      showRomaji
+                        ? "Desactivar transcripción a Romaji"
+                        : "Traducir versos a Romaji (fonética)"
+                    }
+                    aria-label="Romaji"
+                  >
+                    {isTranscribingRomaji ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                    ) : (
+                      <span className="text-sm font-bold leading-none select-none font-sans">文</span>
                     )}
-                  </div>
+                  </button>
                 )}
 
-                <button
-                  id="lyrics-toggle-expand-btn"
-                  onClick={() =>
-                    setLyricsExpansion(lyricsExpansion === "full" ? "compact" : "full")
-                  }
-                  className="p-2 rounded-full hover:bg-white/10 text-neutral-300 hover:text-white transition-colors"
-                  title={
-                    lyricsExpansion === "full"
-                      ? "Modo Dividido"
-                      : "Modo Inmersivo (Pantalla Completa)"
-                  }
-                >
-                  {lyricsExpansion === "full" ? (
-                    <Minimize2 className="w-4 h-4" />
-                  ) : (
-                    <Maximize2 className="w-4 h-4" />
-                  )}
-                </button>
+                {/* 2. Icono Español '🌐' */}
+                {Boolean(currentTrack.lyrics?.plain || (currentTrack.lyrics?.synced && currentTrack.lyrics.synced.length > 0)) && (
+                  <button
+                    id="lyrics-toggle-spanish-btn"
+                    onClick={handleToggleSpanish}
+                    disabled={isTranslatingSpanish}
+                    className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center transition-all hover:scale-105 active:scale-95 border ${
+                      showSpanish
+                        ? "bg-amber-500/25 text-amber-300 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.45)] ring-1 ring-amber-400/60 scale-105"
+                        : "bg-white/5 hover:bg-white/10 text-neutral-300 border-white/10 hover:text-white"
+                    }`}
+                    title={
+                      showSpanish
+                        ? "Desactivar traducción a Español"
+                        : "Traducir versos al Español (interlineal)"
+                    }
+                    aria-label="Español"
+                  >
+                    <Globe className={`w-4 h-4 ${isTranslatingSpanish ? "animate-spin text-amber-400" : ""}`} />
+                  </button>
+                )}
 
-                {/* Botón visible para Eliminar / Limpiar Letra (al lado del icono de búsqueda) */}
+                {/* 3. Icono Papelera '🗑️' */}
                 {Boolean(currentTrack.lyrics?.plain || (currentTrack.lyrics?.synced && currentTrack.lyrics.synced.length > 0)) && (
                   <button
                     id="lyrics-remove-btn"
                     onClick={() => {
                       if (onLyricsRemoved && currentTrack) {
                         onLyricsRemoved(currentTrack.id);
+                        setShowRomaji(false);
+                        setShowSpanish(false);
                       }
                     }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-400 hover:text-red-300 border border-red-500/30 transition-all hover:scale-105 active:scale-95 shadow-sm"
+                    className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center bg-red-500/15 hover:bg-red-500/25 text-red-400 hover:text-red-300 border border-red-500/30 transition-all hover:scale-105 active:scale-95 shadow-sm"
                     title="Eliminar / Limpiar Letra de esta canción"
+                    aria-label="Eliminar Letra"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span className="inline">Eliminar Letra</span>
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 )}
 
+                {/* 4. Icono Lupa '🔍' */}
                 <button
                   id="lyrics-search-online-btn"
                   onClick={onOpenLyricsSearch}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white shadow transition-all hover:scale-105 active:scale-95"
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white shadow transition-all hover:scale-105 active:scale-95 border border-white/10"
                   style={{ backgroundColor: "var(--color-accent, #FF0000)" }}
                   title="Buscar letras oficiales en internet"
+                  aria-label="Buscar Letras en Internet"
                 >
-                  <Search className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Buscar en Internet</span>
+                  <Search className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {/* Mobile Japanese View Switcher */}
-            {hasJapaneseInLyrics && (
-              <div className="xs:hidden flex items-center justify-between py-1 px-2.5 rounded-xl border bg-neutral-900/40 mb-1.5 text-xs shrink-0"
-                style={{ borderColor: "var(--color-border-subtle)" }}
-              >
-                <span className="text-[11px] opacity-70 flex items-center gap-1 font-semibold">
-                  <Languages className="w-3 h-3 text-red-400" /> Japonés:
-                </span>
-                <div className="flex items-center gap-1 bg-black/40 p-0.5 rounded-lg border border-white/10 text-[10px]">
-                  <button
-                    onClick={() => setJapaneseViewMode("both")}
-                    className={`px-1.5 py-0.5 rounded ${
-                      japaneseViewMode === "both" ? "bg-white text-black font-bold" : "text-neutral-400"
-                    }`}
-                  >
-                    Kanji+Romaji
-                  </button>
-                  <button
-                    onClick={() => setJapaneseViewMode("native")}
-                    className={`px-1.5 py-0.5 rounded ${
-                      japaneseViewMode === "native" ? "bg-white text-black font-bold" : "text-neutral-400"
-                    }`}
-                  >
-                    Nativo
-                  </button>
-                  <button
-                    onClick={() => setJapaneseViewMode("romaji")}
-                    className={`px-1.5 py-0.5 rounded ${
-                      japaneseViewMode === "romaji" ? "bg-white text-black font-bold" : "text-neutral-400"
-                    }`}
-                  >
-                    Romaji
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Draggable Slide Handle Bar */}
-            <div
-              className="w-full flex flex-col items-center justify-center py-2 cursor-pointer group shrink-0"
-              onClick={() =>
-                setLyricsExpansion(lyricsExpansion === "full" ? "compact" : "full")
-              }
-              title="Ajustar vista de letras"
-            >
-              <div className="w-12 h-1.5 rounded-full bg-white/20 group-hover:bg-white/40 transition-colors" />
-            </div>
-
-            {/* Compact Mode Artwork Preview (if lyricsExpansion === 'compact') */}
-            {lyricsExpansion === "compact" && (
-              <div className="h-28 sm:h-36 shrink-0 my-2 rounded-2xl overflow-hidden relative border flex items-center justify-center group"
-                style={{ borderColor: "var(--color-border-subtle)" }}
-              >
-                <img
-                  src={currentTrack.coverUrl}
-                  alt={currentTrack.title}
-                  className="w-full h-full object-cover filter blur-sm brightness-50"
-                />
-                <div className="absolute inset-0 flex items-center justify-center gap-4">
-                  <VisualizerCanvas className="w-48 h-16" type="bars" isPlaying={isPlaying} />
-                </div>
-              </div>
-            )}
-
-            {/* Karaoke Lyrics Scrollable Viewport (Ocupa el protagonismo de la pantalla) */}
+            {/* Karaoke Lyrics Scrollable Viewport (Ocupa todo el protagonismo y espacio vertical de la pantalla) */}
             <div
               ref={lyricsContainerRef}
               id="expanded-lyrics-container"
-              className="flex-1 overflow-y-auto space-y-6 py-12 px-2 scroll-smooth text-center relative select-none"
+              className="flex-1 overflow-y-auto space-y-6 py-6 sm:py-10 px-2 scroll-smooth text-center relative select-none"
               style={{
                 maskImage:
-                  "linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%)",
+                  "linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%)",
                 WebkitMaskImage:
-                  "linear-gradient(to bottom, transparent 0%, black 10%, black 90%, transparent 100%)",
+                  "linear-gradient(to bottom, transparent 0%, black 8%, black 92%, transparent 100%)",
               }}
             >
               {syncedLyrics && syncedLyrics.length > 0 ? (
-                /* Synchronized Real-Time Karaoke Lines with Japanese & Romaji Support */
+                /* Synchronized Real-Time Karaoke Lines with Japanese, Romaji & Spanish Support */
                 syncedLyrics.map((line, idx) => {
                   const isActive = idx === activeLyricIndex;
                   const isJap =
                     line.hasJapanese ||
                     hasJapaneseText(line.text) ||
-                    hasJapaneseText(line.nativeText || "");
+                    hasJapaneseText(line.nativeText || "") ||
+                    hasJapaneseText(line.original || "");
 
-                  let primaryText = line.original || line.nativeText || line.text;
-                  let secondaryText = line.romaji;
-
-                  if (isJap && secondaryText) {
-                    if (japaneseViewMode === "native") {
-                      primaryText = line.original || line.nativeText || line.text;
-                      secondaryText = undefined;
-                    } else if (japaneseViewMode === "romaji") {
-                      primaryText = secondaryText;
-                      secondaryText = undefined;
-                    }
-                  }
+                  const primaryText = line.original || line.nativeText || line.text;
+                  const secondaryRomajiText = showRomaji ? line.romaji : undefined;
+                  const secondarySpanishText = showSpanish ? (line.spanish || line.translation) : undefined;
 
                   return (
                     <div
@@ -980,8 +969,8 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                         {primaryText}
                       </p>
 
-                      {/* Romaji Secondary Line (Pronunciación fonética con tamaño menor y color atenuado) */}
-                      {secondaryText && (
+                      {/* Romaji Secondary Line (Pronunciación fonética debajo del texto original cuando está activada) */}
+                      {secondaryRomajiText && (
                         <p
                           className={`italic font-medium tracking-wide transition-opacity ${
                             isActive
@@ -989,14 +978,28 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                               : "text-xs sm:text-sm text-white/60"
                           }`}
                         >
-                          {secondaryText}
+                          {secondaryRomajiText}
+                        </p>
+                      )}
+
+                      {/* Spanish Secondary Line (Significado en español debajo del verso original o traducido) */}
+                      {secondarySpanishText && (
+                        <p
+                          className={`font-normal tracking-wide transition-opacity ${
+                            isActive
+                              ? "text-sm sm:text-base text-amber-200/95 font-medium"
+                              : "text-xs sm:text-sm text-amber-200/60"
+                          }`}
+                        >
+                          {secondarySpanishText}
                         </p>
                       )}
                     </div>
                   );
                 })
               ) : currentTrack.lyrics?.plain ? (
-                /* Plain Lyrics View with Japanese CJK Font Support & Romaji Secondary Line */
+                /* Plain Lyrics View with Japanese CJK Font Support, Romaji & Spanish Secondary Line */
+                (showRomaji || showSpanish) &&
                 currentTrack.lyrics.pairedPlainLines &&
                 currentTrack.lyrics.pairedPlainLines.length > 0 ? (
                   <div className="space-y-4 max-w-xl mx-auto py-8 text-center select-none">
@@ -1005,18 +1008,9 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                         return <div key={pIdx} className="h-4" />;
                       }
                       const isJap = hasJapaneseText(pLine.original);
-                      let primaryText = pLine.original;
-                      let secondaryText = pLine.romaji;
-
-                      if (isJap && secondaryText) {
-                        if (japaneseViewMode === "native") {
-                          primaryText = pLine.original;
-                          secondaryText = undefined;
-                        } else if (japaneseViewMode === "romaji") {
-                          primaryText = secondaryText;
-                          secondaryText = undefined;
-                        }
-                      }
+                      const primaryText = pLine.original;
+                      const secondaryRomaji = showRomaji ? pLine.romaji : undefined;
+                      const secondarySpanish = showSpanish ? (pLine.spanish || (pLine as any).translation) : undefined;
 
                       return (
                         <div key={pIdx} className="flex flex-col items-center justify-center py-1">
@@ -1032,10 +1026,17 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                             {primaryText}
                           </p>
 
-                          {/* Línea secundaria con la pronunciación Romaji (tamaño menor / atenuado) */}
-                          {secondaryText && (
+                          {/* Línea secundaria con la pronunciación Romaji debajo del texto original */}
+                          {secondaryRomaji && (
                             <p className="text-xs sm:text-sm md:text-base text-white/60 italic font-medium tracking-wide mt-0.5">
-                              {secondaryText}
+                              {secondaryRomaji}
+                            </p>
+                          )}
+
+                          {/* Línea secundaria con el significado en español debajo del verso */}
+                          {secondarySpanish && (
+                            <p className="text-xs sm:text-sm md:text-base text-amber-200/70 font-normal tracking-wide mt-0.5">
+                              {secondarySpanish}
                             </p>
                           )}
                         </div>
@@ -1050,7 +1051,9 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                         '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Meiryo", "Noto Sans JP", system-ui, sans-serif',
                     }}
                   >
-                    {currentTrack.lyrics.plain}
+                    {showSpanish && currentTrack.lyrics.spanishPlain
+                      ? currentTrack.lyrics.spanishPlain
+                      : currentTrack.lyrics.plain}
                   </div>
                 )
               ) : (

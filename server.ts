@@ -302,6 +302,122 @@ app.post("/api/lyrics/search", async (req, res) => {
   });
 });
 
+/**
+ * ============================================================================
+ * ENDPOINT: /api/lyrics/translate
+ * ============================================================================
+ * Propósito:
+ * Recibe un conjunto de líneas o versos de canciones y devuelve su significado
+ * traducido al español, preservando estrictamente la correspondencia línea a línea.
+ * 
+ * ¿Cómo funciona?:
+ * 1. Comprueba si hay cliente Gemini configurado (`getAI()`) y prueba con
+ *    'gemini-3.1-flash-lite' y failover a 'gemini-3.8-flash'.
+ * 2. Exige correspondencia 1:1 de líneas para no alterar la estructura de estrofas.
+ * 3. En caso de timeout o cuota excedida de IA, utiliza un fallback con MyMemory API
+ *    para garantizar que el usuario siempre reciba su traducción sin interrupciones.
+ */
+app.post("/api/lyrics/translate", async (req, res) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  const { lines, text } = req.body;
+
+  let inputLines: string[] = [];
+  if (Array.isArray(lines)) {
+    inputLines = lines.map((l) => (typeof l === "string" ? l : ""));
+  } else if (typeof text === "string") {
+    inputLines = text.split(/\r?\n/);
+  }
+
+  if (inputLines.length === 0) {
+    res.json({ translations: [] });
+    return;
+  }
+
+  // 1. Intentar traducción con Gemini AI
+  const ai = getAI();
+  if (ai) {
+    const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash"];
+    const prompt = `Traduce las siguientes líneas de versos musicales al español de manera natural, poética y fiel al significado de la canción.
+REGLAS ESTRICTAS:
+1. Devuelve EXACTAMENTE una línea traducida por cada línea de entrada (mismo número de líneas).
+2. Si una línea de entrada está vacía, devuelve una línea vacía.
+3. NO añadas introducciones conversacionales, notas, números de verso ni explicaciones adicionales.
+4. Responde ÚNICAMENTE con los versos traducidos, línea por línea.
+
+Líneas a traducir:
+${inputLines.join("\n")}`;
+
+    for (const model of candidateModels) {
+      try {
+        const geminiCall = ai.models.generateContent({
+          model,
+          contents: prompt,
+        });
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Gemini translation timeout")), 12000)
+        );
+
+        const response: any = await Promise.race([geminiCall, timeoutPromise]);
+        const outputText = response?.text || "";
+        if (outputText && outputText.trim().length > 0) {
+          const rawTranslatedLines = outputText.split(/\r?\n/);
+          if (rawTranslatedLines.length >= inputLines.length) {
+            const translations = inputLines.map((orig, i) => {
+              if (!orig.trim()) return "";
+              return (rawTranslatedLines[i] || "").trim();
+            });
+            res.json({ translations });
+            return;
+          } else {
+            const translations = inputLines.map((orig, i) => {
+              if (!orig.trim()) return "";
+              return (rawTranslatedLines[i] || "").trim() || orig;
+            });
+            res.json({ translations });
+            return;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[Lyrics Translation] Advertencia con modelo ${model}:`, err?.message || err);
+      }
+    }
+  }
+
+  // 2. Fallback de traducción resiliente en caso de indisponibilidad de IA
+  try {
+    const translations: string[] = [];
+    for (const line of inputLines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        translations.push("");
+        continue;
+      }
+      try {
+        const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=auto|es`;
+        const fbRes = await fetch(fallbackUrl);
+        if (fbRes.ok) {
+          const fbData = await fbRes.json();
+          if (fbData?.responseData?.translatedText) {
+            translations.push(fbData.responseData.translatedText);
+            continue;
+          }
+        }
+      } catch {
+        // Fallback por línea individual
+      }
+      translations.push(trimmed);
+    }
+    res.json({ translations });
+    return;
+  } catch (fbErr) {
+    console.warn("[Lyrics Translation] Fallback translation error:", fbErr);
+  }
+
+  // 3. Si todo lo demás falla, responder con las líneas originales
+  res.json({ translations: inputLines });
+});
+
 // Start server with Vite or static
 async function start() {
   if (process.env.NODE_ENV !== "production") {

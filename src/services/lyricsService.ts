@@ -69,8 +69,10 @@ export interface LyricsResult {
   rawLrc?: string | null;
   /** Transcripción completa en texto plano de las letras a Romaji */
   romajiPlain?: string;
-  /** Líneas de texto plano emparejadas con su fonética Romaji */
-  pairedPlainLines?: { original: string; romaji?: string }[];
+  /** Versión completa en texto plano traducida al español */
+  spanishPlain?: string;
+  /** Líneas de texto plano emparejadas con su fonética Romaji o traducción al español */
+  pairedPlainLines?: { original: string; romaji?: string; spanish?: string }[];
   /** Bandera booleana que indica si contiene caracteres japoneses */
   hasJapanese?: boolean;
   instrumental?: boolean;
@@ -87,9 +89,14 @@ export interface LyricsResult {
 export const JAPANESE_CHAR_REGEX = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\u3400-\u4DBF\uFF66-\uFF9F]/;
 
 /**
- * Caché en memoria para evitar peticiones duplicadas de transcripción para la misma línea o verso.
+ * Caché en memoria para evitar peticiones duplicadas de transcripción para la misma línea o verso (Romaji).
  */
 const romajiMemoryCache = new Map<string, string>();
+
+/**
+ * Caché en memoria para evitar peticiones duplicadas de traducción al español para la misma línea o verso.
+ */
+const spanishMemoryCache = new Map<string, string>();
 
 /**
  * Expresión regular para detectar encabezados de bloques comunes que dividen canciones en dos mitades:
@@ -402,10 +409,188 @@ export async function transcribePlainLyrics(
 
 /**
  * Función: clearLyricsMemoryCache
- * Propósito: Limpia la memoria caché interna de transliteraciones Romaji.
+ * Propósito: Limpia la memoria caché interna de transliteraciones Romaji y traducciones al español.
  */
 export function clearLyricsMemoryCache(): void {
   romajiMemoryCache.clear();
+  spanishMemoryCache.clear();
+}
+
+/**
+ * Función: translateTextLinesToSpanish
+ * Propósito: Traduce un conjunto de versos o líneas de letra al español de forma fiel y poética,
+ * manteniendo estrictamente el orden 1:1 de cada línea.
+ * 
+ * ¿Cómo funciona?:
+ * 1. Consulta la caché en memoria `spanishMemoryCache` para reusar traducciones previas.
+ * 2. Si faltan líneas, envía las líneas requeridas al backend '/api/lyrics/translate'.
+ * 3. Si el backend experimenta dificultades o cuotas, aplica un fallback con la API MyMemory.
+ * 4. Almacena las traducciones en memoria y retorna el arreglo ordenado de traducciones al español.
+ */
+export async function translateTextLinesToSpanish(lines: string[]): Promise<string[]> {
+  if (!lines || lines.length === 0) return [];
+
+  const results: string[] = new Array(lines.length).fill("");
+  const indicesToFetch: number[] = [];
+  const textsToFetch: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = (lines[i] || "").trim();
+    if (!trimmed) {
+      results[i] = "";
+      continue;
+    }
+    if (spanishMemoryCache.has(trimmed)) {
+      results[i] = spanishMemoryCache.get(trimmed)!;
+    } else {
+      indicesToFetch.push(i);
+      textsToFetch.push(trimmed);
+    }
+  }
+
+  if (textsToFetch.length > 0) {
+    try {
+      const response = await fetch("/api/lyrics/translate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ lines: textsToFetch }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data && Array.isArray(data.translations)) {
+          for (let k = 0; k < textsToFetch.length; k++) {
+            const originalText = textsToFetch[k];
+            const translatedText = data.translations[k] || originalText;
+            const targetIndex = indicesToFetch[k];
+            results[targetIndex] = translatedText;
+            spanishMemoryCache.set(originalText, translatedText);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[translateTextLinesToSpanish] Error conectando con /api/lyrics/translate:", err);
+    }
+
+    // Fallback individual para cualquier línea que aún no haya obtenido traducción
+    for (let k = 0; k < textsToFetch.length; k++) {
+      const targetIndex = indicesToFetch[k];
+      if (!results[targetIndex]) {
+        const originalText = textsToFetch[k];
+        try {
+          const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(originalText)}&langpair=auto|es`;
+          const fbRes = await fetch(fallbackUrl);
+          if (fbRes.ok) {
+            const fbData = await fbRes.json();
+            if (fbData?.responseData?.translatedText) {
+              const resText = fbData.responseData.translatedText;
+              results[targetIndex] = resText;
+              spanishMemoryCache.set(originalText, resText);
+              continue;
+            }
+          }
+        } catch {
+          // Ignorar fallback error
+        }
+        results[targetIndex] = originalText;
+        spanishMemoryCache.set(originalText, originalText);
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Función: translateSyncedLyricLinesToSpanish
+ * Propósito: Traduce las líneas sincronizadas (.lrc) al español bajo demanda.
+ * 
+ * PRESERVACIÓN RIGUROSA DE MARCAS DE TIEMPO [mm:ss.xx]:
+ * 1. Mantiene el valor exacto de `line.time` (segundos del timestamp [mm:ss.xx]) completamente intacto.
+ * 2. Extrae solo el texto limpio de cada verso (`line.original || line.nativeText || line.text`)
+ *    omitiendo cualquier marca temporal para la traducción.
+ * 3. Asigna la traducción devuelta en la propiedad secundaria `spanish` y `translation` de la línea:
+ *    { time: 12.34, original: "...", romaji: "...", spanish: "..." }
+ * 4. La sincronización del Karaoke en vivo continúa operando con exactitud matemática sobre `line.time`.
+ */
+export async function translateSyncedLyricLinesToSpanish(
+  lines: SyncedLyricLine[]
+): Promise<SyncedLyricLine[]> {
+  if (!lines || lines.length === 0) return [];
+
+  const timestampRegex = /^(\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]\s*)+/;
+  const cleanTexts: string[] = lines.map((l) => {
+    const raw = (l.original || l.nativeText || l.text || "").trim();
+    return raw.replace(timestampRegex, "").trim();
+  });
+
+  const translations = await translateTextLinesToSpanish(cleanTexts);
+
+  return lines.map((line, idx) => {
+    const cleanText = cleanTexts[idx];
+    const spanishTranslation = translations[idx] || cleanText;
+
+    return {
+      ...line,
+      time: line.time, // Marca de tiempo [mm:ss.xx] 100% intacta
+      spanish: spanishTranslation,
+      translation: spanishTranslation,
+    };
+  });
+}
+
+/**
+ * Función: enrichLyricsWithSpanish
+ * Propósito: Toma el objeto de letras de la canción actual y lo enriquece bajo demanda
+ * con traducciones al español, tanto para versos sincronizados (.lrc) como para texto plano.
+ */
+export async function enrichLyricsWithSpanish(
+  lyrics: Track["lyrics"]
+): Promise<Track["lyrics"]> {
+  if (!lyrics) return lyrics;
+
+  let updatedSynced = lyrics.synced;
+  let updatedPlain = lyrics.plain;
+  let updatedPairedLines = lyrics.pairedPlainLines;
+  let spanishPlain = lyrics.spanishPlain;
+
+  // 1. Traducir versos sincronizados manteniendo timestamps intactos
+  if (updatedSynced && updatedSynced.length > 0) {
+    updatedSynced = await translateSyncedLyricLinesToSpanish(updatedSynced);
+  }
+
+  // 2. Traducir letras en texto plano si no cuentan con versos sincronizados o si se desea texto plano
+  if (updatedPlain) {
+    const rawLines = updatedPlain.split(/\r?\n/);
+    const nonBlank = rawLines.map((l) => l.trim());
+    const translations = await translateTextLinesToSpanish(nonBlank);
+
+    spanishPlain = translations.join("\n");
+
+    // Si ya existían pairedPlainLines (por ejemplo con Romaji), incorporar la propiedad spanish
+    if (updatedPairedLines && updatedPairedLines.length > 0) {
+      updatedPairedLines = updatedPairedLines.map((pair, pIdx) => ({
+        ...pair,
+        spanish: translations[pIdx] || pair.original,
+      }));
+    } else {
+      updatedPairedLines = rawLines.map((l, pIdx) => ({
+        original: l,
+        spanish: translations[pIdx] || l,
+      }));
+    }
+  }
+
+  return {
+    ...lyrics,
+    synced: updatedSynced,
+    plain: updatedPlain,
+    pairedPlainLines: updatedPairedLines,
+    spanishPlain,
+  };
 }
 
 /**
@@ -621,46 +806,34 @@ export function getActiveLyricIndex(syncedLyrics: SyncedLyricLine[] | null | und
 
 /**
  * Función auxiliar: postProcessLyricsResult
- * Propósito: Detecta automáticamente si las letras obtenidas contienen caracteres japoneses (Kanji/Kana)
- * y realiza la transcripción fonética a Romaji mediante el endpoint '/api/transcribe'.
+ * Propósito: Detecta si las letras obtenidas contienen caracteres japoneses (Kanji/Kana)
+ * para habilitar bajo demanda el botón de traducción a Romaji en la interfaz.
+ * REGLA: NO traduce automáticamente las letras al cargar la canción.
  */
 async function postProcessLyricsResult(result: LyricsResult): Promise<LyricsResult> {
   try {
     let hasJap = false;
-    let synced = result.syncedLyrics;
-    let romajiPlain = result.romajiPlain;
-    let pairedPlainLines = result.pairedPlainLines;
+    const synced = result.syncedLyrics;
 
-    // 1. Detectar y transcribir automáticamente versos sincronizados
+    // 1. Detectar si los versos sincronizados contienen caracteres japoneses
     if (synced && synced.length > 0) {
-      const anyJap = synced.some(
-        (l) => l.hasJapanese || hasJapaneseText(l.text) || hasJapaneseText(l.nativeText || "")
+      hasJap = synced.some(
+        (l) => l.hasJapanese || hasJapaneseText(l.text) || hasJapaneseText(l.nativeText || "") || hasJapaneseText(l.original || "")
       );
-      if (anyJap) {
-        hasJap = true;
-        synced = await transcribeSyncedLyricLines(synced);
-      }
     }
 
-    // 2. Detectar y transcribir automáticamente texto plano
-    if (result.plainLyrics && hasJapaneseText(result.plainLyrics)) {
+    // 2. Detectar si el texto plano contiene caracteres japoneses
+    if (!hasJap && result.plainLyrics && hasJapaneseText(result.plainLyrics)) {
       hasJap = true;
-      if (!pairedPlainLines || pairedPlainLines.length === 0) {
-        const plainResult = await transcribePlainLyrics(result.plainLyrics);
-        romajiPlain = plainResult.romajiPlain;
-        pairedPlainLines = plainResult.pairedLines;
-      }
     }
 
     return {
       ...result,
       syncedLyrics: synced,
-      romajiPlain,
-      pairedPlainLines,
       hasJapanese: hasJap,
     };
   } catch (err) {
-    console.warn("Aviso: Error procesando transcripción automática a Romaji:", err);
+    console.warn("Aviso: Error procesando detección de caracteres en letras:", err);
     return result;
   }
 }
