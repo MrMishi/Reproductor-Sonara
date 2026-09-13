@@ -24,6 +24,7 @@
 
 import { Capacitor } from "@capacitor/core";
 import { Track, HiddenTrackRecord } from "../types";
+import { generateCoverArt } from "./metadataParser";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
 const DB_VERSION = 2; // Incrementar si se añaden nuevos ObjectStores
@@ -198,6 +199,22 @@ function openDB(): Promise<IDBDatabase> {
  * ¿Cómo funciona?:
  * Itera el array de pistas, extrae la ruta nativa y almacena un registro ligero sin Blobs de memoria.
  */
+/**
+ * REGLA ESTRICTA DE OPTIMIZACIÓN Y PESO MÍNIMO (INDEXEDDB):
+ * NO guardes las imágenes de las portadas (cover art) en Base64 en IndexedDB.
+ * Guardar Base64 eleva el peso de la base de datos a +15MB.
+ * Guarda solo metadata en texto (Título, Artista, Álbum, Ruta) y usa Carga Diferida (Lazy Loading)
+ * para obtener las portadas solo de la canción que está sonando.
+ */
+function sanitizeCoverUrlForStorage(coverUrl?: string): string | undefined {
+  if (!coverUrl) return undefined;
+  // Si es una imagen en Base64 pesada (data:image/...;base64,...), se descarta de IndexedDB
+  if (coverUrl.startsWith("data:image/") || (coverUrl.startsWith("data:") && coverUrl.length > 500)) {
+    return undefined;
+  }
+  return coverUrl;
+}
+
 export async function saveTracksToDB(tracks: Track[]): Promise<void> {
   try {
     const db = await openDB();
@@ -213,7 +230,7 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
         artist: track.artist,
         album: track.album,
         duration: track.duration || 0,
-        coverUrl: track.coverUrl,
+        coverUrl: sanitizeCoverUrlForStorage(track.coverUrl),
         year: track.year,
         genre: track.genre,
         format: track.format,
@@ -269,7 +286,7 @@ export async function saveTracksInChunks(
           artist: track.artist,
           album: track.album,
           duration: track.duration || 0,
-          coverUrl: track.coverUrl,
+          coverUrl: sanitizeCoverUrlForStorage(track.coverUrl),
           year: track.year,
           genre: track.genre,
           format: track.format,
@@ -321,7 +338,7 @@ export async function addSingleTrackToDB(track: Track): Promise<void> {
       artist: track.artist,
       album: track.album,
       duration: track.duration || 0,
-      coverUrl: track.coverUrl,
+      coverUrl: sanitizeCoverUrlForStorage(track.coverUrl),
       year: track.year,
       genre: track.genre,
       format: track.format,
@@ -385,6 +402,12 @@ export async function loadTracksFromDB(): Promise<Track[]> {
           }
 
           if (finalUrl) {
+            // Carga diferida / portada vectorial ultraligera si no hay carátula o si era base64 pesado
+            const safeCoverUrl =
+              item.coverUrl && !item.coverUrl.startsWith("data:image/") && !item.coverUrl.startsWith("data:")
+                ? item.coverUrl
+                : generateCoverArt(item.title || "Sin título", item.artist || "Artista desconocido");
+
             const trackObj: Track = {
               id: item.id,
               title: item.title || "Sin título",
@@ -393,7 +416,7 @@ export async function loadTracksFromDB(): Promise<Track[]> {
               duration: item.duration || 0,
               url: finalUrl,
               nativePath: nativePath || item.nativePath,
-              coverUrl: item.coverUrl,
+              coverUrl: safeCoverUrl,
               year: item.year,
               genre: item.genre,
               format: item.format,

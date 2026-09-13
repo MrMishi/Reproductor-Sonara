@@ -538,14 +538,26 @@ export async function scanNativeMusicDirectories(
     let totalProcessed = 0;
     const seenUris = new Set<string>();
 
-    for (const item of audioEntries) {
+    for (let i = 0; i < audioEntries.length; i++) {
+      const item = audioEntries[i];
+      const currentStep = i + 1;
+
+      // Actualizar el progreso en tiempo real contando de 1 en 1 sin congelarse
+      onProgress?.(
+        item.folderName,
+        totalDiscovered,
+        currentStep,
+        `Procesando (${currentStep}/${totalDiscovered}): ${item.fileName}`
+      );
+
+      // Ceder el control brevemente al event loop para que React y Android actualicen la UI
+      await new Promise((r) => setTimeout(r, 0));
+
       try {
         // Filtro estricto de notas de voz: descarta si comienza por 'PTT-' o por duración < 30s
         if (isVoiceNoteOrShortAudio(item.fileName, undefined, 30)) {
           continue;
         }
-
-        onProgress?.(item.folderName, totalDiscovered, totalProcessed, `Procesando: ${item.fileName}`);
 
         let nativeUri = item.uri;
         if (!nativeUri) {
@@ -769,14 +781,26 @@ export async function scanSpecificNativeDirectory(
     let totalProcessed = 0;
     const seenUris = new Set<string>();
 
-    for (const item of audioEntries) {
+    for (let i = 0; i < audioEntries.length; i++) {
+      const item = audioEntries[i];
+      const currentStep = i + 1;
+
+      // Actualizar el progreso en tiempo real contando de 1 en 1 sin congelarse
+      onProgress?.(
+        item.folderName,
+        totalDiscovered,
+        currentStep,
+        `Procesando (${currentStep}/${totalDiscovered}): ${item.fileName}`
+      );
+
+      // Ceder el control brevemente al event loop para que React y Android actualicen la UI
+      await new Promise((r) => setTimeout(r, 0));
+
       try {
         // Descartar notas de voz que comiencen por 'PTT-' (se admite prefijo 'AUD-')
         if (isVoiceNoteOrShortAudio(item.fileName, undefined, 30)) {
           continue;
         }
-
-        onProgress?.(item.folderName, totalDiscovered, totalProcessed, `Procesando: ${item.fileName}`);
 
         let nativeUri = item.uri;
         if (!nativeUri) {

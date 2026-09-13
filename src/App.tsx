@@ -71,6 +71,7 @@ import {
   isVideoFilename,
   MAX_VIDEO_DURATION_SECONDS,
   extractCoverArtFromFile,
+  extractCoverArtFromTrack,
 } from "./services/metadataParser";
 import { AlertCircle } from "lucide-react";
 import {
@@ -503,6 +504,33 @@ export function SonoraApp() {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
+  /**
+   * 1. CONFIGURACIÓN DE NOTIFICACIÓN MULTIMEDIA NATIVA EN CAPACITOR:
+   * Vincula la sesión directamente al evento de reproducción del elemento HTMLAudioElement activo.
+   * Fuerza la actualización de navigator.mediaSession.setPositionState y
+   * navigator.mediaSession.playbackState = 'playing' | 'paused' inmediatamente tras cambiar el estado
+   * del elemento <audio>, garantizando que Android mantenga visible y reactiva la tarjeta de control.
+   */
+  const syncMediaSessionPlaybackState = (state: "playing" | "paused") => {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = state;
+      if (state === "playing" && audioRef.current) {
+        const dur = audioRef.current.duration || duration || 0;
+        const cur = audioRef.current.currentTime || 0;
+        if (dur > 0 && !isNaN(dur) && isFinite(dur) && "setPositionState" in navigator.mediaSession) {
+          navigator.mediaSession.setPositionState({
+            duration: Math.max(0, dur),
+            playbackRate: audioRef.current.playbackRate || 1,
+            position: Math.min(Math.max(0, cur), dur),
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("[MediaSession] Error sincronizando estado con Android:", err);
+    }
+  };
+
   // Initialize AudioEngine when audio element is ready
   useEffect(() => {
     if (audioRef.current) {
@@ -522,13 +550,17 @@ export function SonoraApp() {
       audioEngine.resumeContext();
       audioRef.current
         .play()
+        .then(() => {
+          syncMediaSessionPlaybackState("playing");
+        })
         .catch((err) => console.warn("Audio play prevented:", err?.message || "playback blocked"));
     }
 
-    // Lazy loading de portada incrustada si la canción actual tiene su archivo en memoria o disponible
-    if (currentTrack.file && (!currentTrack.coverUrl || currentTrack.coverUrl.includes("data:image/svg+xml"))) {
-      extractCoverArtFromFile(currentTrack.file).then((extractedCover) => {
+    // Lazy loading de portada incrustada bajo demanda solo para la canción activa
+    if (currentTrack && (!currentTrack.coverUrl || currentTrack.coverUrl.includes("data:image/svg+xml"))) {
+      extractCoverArtFromTrack(currentTrack).then((extractedCover) => {
         if (extractedCover) {
+          // Solo se actualiza en memoria para la sesión activa; no se persiste Base64 en IndexedDB
           setTracks((prev) =>
             prev.map((t) => (t.id === currentTrack.id ? { ...t, coverUrl: extractedCover } : t))
           );
@@ -583,22 +615,19 @@ export function SonoraApp() {
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
-      if ("mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "paused";
-      }
+      syncMediaSessionPlaybackState("paused");
     } else {
       audioRef.current
         .play()
         .then(() => {
           setIsPlaying(true);
-          if ("mediaSession" in navigator) {
-            navigator.mediaSession.playbackState = "playing";
-          }
+          syncMediaSessionPlaybackState("playing");
         })
         .catch((e) => {
           // Si el audio ya empezó a sonar o fue una interrupción inocua (ej. abort/pause rápido), ignorar
           if (audioRef.current && !audioRef.current.paused) {
             setIsPlaying(true);
+            syncMediaSessionPlaybackState("playing");
             return;
           }
           if (e?.name === "AbortError") {
@@ -606,6 +635,7 @@ export function SonoraApp() {
           }
           console.warn("Error playing audio:", e?.message || "playback failed");
           setIsPlaying(false);
+          syncMediaSessionPlaybackState("paused");
         });
     }
   };
@@ -882,18 +912,26 @@ export function SonoraApp() {
         if (audioRef.current) {
           audioRef.current.currentTime = 0;
           audioRef.current.src = track.url;
-          audioRef.current.play().catch((err) => {
-            // Si el audio está sonando o fue una interrupción transitoria/abort, no mostrar toast falso
-            if (audioRef.current && !audioRef.current.paused) {
+          audioRef.current
+            .play()
+            .then(() => {
               setIsPlaying(true);
-              return;
-            }
-            if (err?.name === "AbortError") {
-              return;
-            }
-            console.warn("Playback error:", err);
-            setIsPlaying(false);
-          });
+              syncMediaSessionPlaybackState("playing");
+            })
+            .catch((err) => {
+              // Si el audio está sonando o fue una interrupción transitoria/abort, no mostrar toast falso
+              if (audioRef.current && !audioRef.current.paused) {
+                setIsPlaying(true);
+                syncMediaSessionPlaybackState("playing");
+                return;
+              }
+              if (err?.name === "AbortError") {
+                return;
+              }
+              console.warn("Playback error:", err);
+              setIsPlaying(false);
+              syncMediaSessionPlaybackState("paused");
+            });
         }
       }
     }
@@ -1367,6 +1405,9 @@ export function SonoraApp() {
           }
         }}
         onEnded={() => {
+          setIsPlaying(false);
+          audioEngine.setPlaybackState(false);
+          syncMediaSessionPlaybackState("paused");
           if (sleepTimer.isActive && sleepTimer.mode === "end-of-song") {
             handleExecuteSleepTimer();
           } else {
@@ -1376,16 +1417,12 @@ export function SonoraApp() {
         onPlay={() => {
           setIsPlaying(true);
           audioEngine.setPlaybackState(true);
-          if ("mediaSession" in navigator) {
-            navigator.mediaSession.playbackState = "playing";
-          }
+          syncMediaSessionPlaybackState("playing");
         }}
         onPause={() => {
           setIsPlaying(false);
           audioEngine.setPlaybackState(false);
-          if ("mediaSession" in navigator) {
-            navigator.mediaSession.playbackState = "paused";
-          }
+          syncMediaSessionPlaybackState("paused");
         }}
         onError={() => {
           const mediaErr = audioRef.current?.error;

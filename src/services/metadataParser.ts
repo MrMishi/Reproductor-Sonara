@@ -465,3 +465,27 @@ export async function extractCoverArtFromFile(file: File | Blob): Promise<string
     return undefined;
   }
 }
+
+/**
+ * Función: extractCoverArtFromTrack
+ * Propósito: Extrae bajo demanda (Lazy Loading) la portada real de una pista activa (desde `file` o desde su URL nativa)
+ * solo cuando se reproduce, manteniendo la base de datos IndexedDB ligera y sin cadenas Base64.
+ */
+export async function extractCoverArtFromTrack(track: { file?: File | Blob; url?: string }): Promise<string | undefined> {
+  if (track.file) {
+    return extractCoverArtFromFile(track.file);
+  }
+  if (track.url) {
+    try {
+      const res = await fetch(track.url, {
+        headers: { Range: "bytes=0-131071" },
+      });
+      const blob = await res.blob();
+      return extractCoverArtFromFile(blob);
+    } catch {
+      // Fallback limpio y silencioso sin interrumpir la reproducción
+      return undefined;
+    }
+  }
+  return undefined;
+}

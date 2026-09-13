@@ -145,23 +145,28 @@ export async function pickAndScanNativeSafFolder(
     onProgress?.(folderName, totalFiles, 0, `Se detectaron ${totalFiles} archivos de audio en ${folderName}. Procesando...`);
 
     // 3. Procesamiento nativo de las canciones encontradas en el DocumentTree
-    for (const fileItem of result.files) {
+    for (let i = 0; i < result.files.length; i++) {
       if (isCancelled?.()) {
         break;
       }
 
-      // Descartar notas de voz Push-To-Talk ('PTT-')
-      if (/^PTT-/i.test(fileItem.name)) {
-        continue;
-      }
+      const fileItem = result.files[i];
+      const currentStep = i + 1;
 
-      const currentStep = processedCount + 1;
       onProgress?.(
         folderName,
         totalFiles,
         currentStep,
         `Registrando (${currentStep}/${totalFiles}): ${fileItem.name}`
       );
+
+      // Ceder el hilo principal para actualizar en tiempo real el contador en pantalla
+      await new Promise((r) => setTimeout(r, 0));
+
+      // Descartar notas de voz Push-To-Talk ('PTT-')
+      if (/^PTT-/i.test(fileItem.name)) {
+        continue;
+      }
 
       try {
         // Generar URL para reproducción directa en <audio> mediante el puente nativo de Capacitor

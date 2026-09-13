@@ -204,10 +204,11 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
         );
 
         const parsedResults = await Promise.all(
-          currentBatch.map(async (file) => {
+          currentBatch.map(async (file, idx) => {
             // Fast check if file is marked as hidden
             if (filterHiddenTracks && isTrackHidden("", "", file.name)) {
               skippedHiddenCount++;
+              setProcessedCount((prev) => Math.min(prev + 1, files.length));
               return null;
             }
 
@@ -217,6 +218,8 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
               // Al importar archivos locales, NO extraigas ni proceses las portadas de todas las canciones durante el escaneo inicial.
               // Lee únicamente la metadata básica en texto (extractCover: false).
               const track = await parseAudioFile(file, filterShortAudios, minDurationSeconds, false);
+              setProcessedCount((prev) => Math.min(prev + 1, files.length));
+
               if (!track) {
                 if (isVideo) {
                   skippedLongVideoCount++;
@@ -246,6 +249,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
 
               return track;
             } catch (err) {
+              setProcessedCount((prev) => Math.min(prev + 1, files.length));
               console.warn("Error parsing audio file:", file.name, err);
               return null;
             }
@@ -265,8 +269,8 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
           await saveTracksInChunks(newValidBatch, 10);
         }
 
-        const countNow = Math.min(i + currentBatch.length, files.length);
-        setProcessedCount(countNow);
+        // Ceder el turno para actualizar la UI sin congelarse
+        await new Promise((r) => setTimeout(r, 0));
       }
     } catch (err) {
       console.error("Error in processFilesBatch:", err);
