@@ -33,6 +33,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { App } from "@capacitor/app";
 import {
   Track,
   PlaybackMode,
@@ -40,6 +41,7 @@ import {
   ThemeConfig,
   HiddenTrackRecord,
   SleepTimerConfig,
+  LibrarySection,
 } from "./types";
 import { audioEngine } from "./services/audioEngine";
 import { getInitialDemoTracks } from "./services/demoTracks";
@@ -83,7 +85,7 @@ import {
   updateTrackInDb,
 } from "./services/db";
 
-export default function App() {
+export function SonoraApp() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -94,6 +96,12 @@ export default function App() {
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("repeat-all");
   const [activeTab, setActiveTab] = useState<ActiveTab>("library");
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Estados para la navegación por sección y drill-down en Biblioteca (Canciones, Artistas, Álbumes, Carpetas)
+  const [librarySection, setLibrarySection] = useState<LibrarySection>("songs");
+  const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
+  const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
 
   // Modo Mini (Floating Gadget)
   const [isMiniMode, setIsMiniMode] = useState<boolean>(() => {
@@ -223,7 +231,173 @@ export default function App() {
     return saved;
   });
 
+  // Referencia sincronizada con el estado actual para el listener del Botón de Retroceso (Back Stack)
+  const backStackStateRef = useRef({
+    isExpandedPlayerOpen,
+    expandedSubTab,
+    lyricsSearchTrack,
+    editingTrack,
+    isEqualizerOpen,
+    isThemeOpen,
+    isScannerOpen,
+    isSleepTimerOpen,
+    isHiddenTracksOpen,
+    isInstallModalOpen,
+    showPermissionDialog,
+    searchQuery,
+    selectedArtist,
+    selectedAlbum,
+    selectedFolder,
+    librarySection,
+    activeTab,
+  });
+
+  useEffect(() => {
+    backStackStateRef.current = {
+      isExpandedPlayerOpen,
+      expandedSubTab,
+      lyricsSearchTrack,
+      editingTrack,
+      isEqualizerOpen,
+      isThemeOpen,
+      isScannerOpen,
+      isSleepTimerOpen,
+      isHiddenTracksOpen,
+      isInstallModalOpen,
+      showPermissionDialog,
+      searchQuery,
+      selectedArtist,
+      selectedAlbum,
+      selectedFolder,
+      librarySection,
+      activeTab,
+    };
+  });
+
+  /**
+   * ==========================================================================
+   * MANEJO DEL BOTÓN DE RETROCESO (BACK BUTTON) EN ANDROID CON CAPACITOR:
+   * ==========================================================================
+   * 1. INTERCEPTAR EVENTO DE ATRÁS DE CAPACITOR:
+   *    - Usa 'App' de '@capacitor/app' para escuchar el evento 'backButton'.
+   *    - Listener: App.addListener('backButton', ({ canGoBack }) => { ... });
+   *
+   * 2. LÓGICA DE NAVEGACIÓN POR PILA (BACK STACK):
+   *    - Si la vista extendida de Letras (o reproductor expandido) está abierta:
+   *      -> Ciérrala y regresa a la pantalla principal o reproductor mini.
+   *    - Si hay modales flotantes abiertos (ecualizador, escáner, tags, etc.):
+   *      -> Ciérralos manteniendo el contexto.
+   *    - Si la barra/modal de Búsqueda está activa:
+   *      -> Ciérrala y mantén al usuario en la pantalla actual.
+   *    - Si estás en la vista de un Álbum, Artista o Carpeta:
+   *      -> Regresa a la pestaña principal de la Biblioteca ('Canciones').
+   *    - Si estás en una pestaña secundaria (ej. Favoritos):
+   *      -> Regresa a la pestaña principal de la Biblioteca ('Canciones').
+   *    - Si el usuario YA se encuentra en la pantalla principal (Home/Biblioteca) y no hay paneles abiertos:
+   *      -> Permite que la app se minimice o se ponga en segundo plano sin detener la música (App.minimizeApp()).
+   */
+  useEffect(() => {
+    const backListenerPromise = App.addListener("backButton", ({ canGoBack }) => {
+      const state = backStackStateRef.current;
+
+      // 1. Si la vista extendida de Letras (o reproductor expandido) está abierta -> Ciérrala y regresa a la pantalla principal o reproductor mini
+      if (state.isExpandedPlayerOpen) {
+        setIsExpandedPlayerOpen(false);
+        return;
+      }
+
+      // 2. Si hay modales o paneles secundarios abiertos -> Cerrarlos
+      if (state.lyricsSearchTrack) {
+        setLyricsSearchTrack(null);
+        return;
+      }
+      if (state.editingTrack) {
+        setEditingTrack(null);
+        return;
+      }
+      if (state.isEqualizerOpen) {
+        setIsEqualizerOpen(false);
+        return;
+      }
+      if (state.isThemeOpen) {
+        setIsThemeOpen(false);
+        return;
+      }
+      if (state.isScannerOpen) {
+        setIsScannerOpen(false);
+        return;
+      }
+      if (state.isSleepTimerOpen) {
+        setIsSleepTimerOpen(false);
+        return;
+      }
+      if (state.isHiddenTracksOpen) {
+        setIsHiddenTracksOpen(false);
+        return;
+      }
+      if (state.isInstallModalOpen) {
+        setIsInstallModalOpen(false);
+        return;
+      }
+      if (state.showPermissionDialog) {
+        setShowPermissionDialog(false);
+        return;
+      }
+
+      // 3. Si la barra/modal de Búsqueda está activa -> Ciérrala y mantén al usuario en la pantalla actual
+      const activeEl = document.activeElement;
+      const isSearchActive =
+        (activeEl &&
+          (activeEl.id === "navbar-search-input" ||
+            activeEl.tagName === "INPUT" ||
+            activeEl.tagName === "TEXTAREA")) ||
+        state.searchQuery.trim().length > 0;
+
+      if (isSearchActive) {
+        setSearchQuery("");
+        if (activeEl instanceof HTMLElement) {
+          activeEl.blur();
+        }
+        return;
+      }
+
+      // 4. Si estás en la vista de un Álbum, Artista o Carpeta -> Regresa a la pestaña principal de la Biblioteca ('Canciones')
+      if (state.selectedArtist || state.selectedAlbum || state.selectedFolder) {
+        setSelectedArtist(null);
+        setSelectedAlbum(null);
+        setSelectedFolder(null);
+        setLibrarySection("songs");
+        return;
+      }
+
+      if (state.librarySection !== "songs") {
+        setLibrarySection("songs");
+        return;
+      }
+
+      // 5. Si estás en una pestaña secundaria como Favoritos -> Regresa a la Biblioteca ('Canciones')
+      if (state.activeTab !== "library") {
+        setActiveTab("library");
+        setLibrarySection("songs");
+        return;
+      }
+
+      // 6. Si el usuario YA se encuentra en la pantalla principal (Home/Biblioteca) y no hay paneles abiertos:
+      // Permite que la app se minimice o se ponga en segundo plano sin detener la música
+      App.minimizeApp().catch((err) => {
+        console.warn("No se pudo minimizar la app vía Capacitor:", err);
+      });
+    });
+
+    return () => {
+      backListenerPromise.then((handle) => handle.remove()).catch(() => {});
+    };
+  }, []);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Referencias para throttle de progreso y mediaSession para evitar re-renders innecesarios y saturación de CPU
+  const lastProgressUpdateRef = useRef<number>(0);
+  const lastMediaSessionUpdateRef = useRef<number>(0);
 
   // Initialize theme and load initial tracks from DB or synthesized demos
   useEffect(() => {
@@ -651,7 +825,7 @@ export default function App() {
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
 
       if ("setPositionState" in navigator.mediaSession && duration > 0 && !isNaN(duration) && isFinite(duration)) {
-        const cur = Math.min(Math.max(0, audioRef.current?.currentTime || currentTime), duration);
+        const cur = Math.min(Math.max(0, audioRef.current?.currentTime || 0), duration);
         navigator.mediaSession.setPositionState({
           duration: Math.max(0, duration),
           playbackRate: audioRef.current?.playbackRate || 1,
@@ -661,7 +835,7 @@ export default function App() {
     } catch (e) {
       // Ignorar advertencias menores en navegadores que limitan frecuencia de actualización
     }
-  }, [isPlaying, currentTime, duration]);
+  }, [isPlaying, duration, currentTrack?.id]);
 
   // Volume
   const handleVolumeChange = (vol: number) => {
@@ -1129,19 +1303,28 @@ export default function App() {
         onTimeUpdate={() => {
           if (audioRef.current) {
             const curTime = audioRef.current.currentTime;
-            setCurrentTime(curTime);
+            const now = performance.now();
 
-            // Sincronización en tiempo real con la barra de progreso de Android / MIUI / HyperOS
-            if ("mediaSession" in navigator && "setPositionState" in navigator.mediaSession) {
-              const dur = audioRef.current.duration;
-              if (dur && !isNaN(dur) && isFinite(dur) && dur > 0) {
-                try {
-                  navigator.mediaSession.setPositionState({
-                    duration: dur,
-                    playbackRate: audioRef.current.playbackRate || 1,
-                    position: Math.min(Math.max(0, curTime), dur),
-                  });
-                } catch {}
+            // 1. Throttle de setCurrentTime (~250ms) para evitar re-renders excesivos en React
+            if (now - lastProgressUpdateRef.current >= 250 || Math.abs(curTime - currentTime) > 0.5) {
+              lastProgressUpdateRef.current = now;
+              setCurrentTime(curTime);
+            }
+
+            // 2. Throttle de mediaSession.setPositionState (máximo una vez por segundo) para no saturar el puente IPC nativo de Android
+            if (now - lastMediaSessionUpdateRef.current >= 1000) {
+              lastMediaSessionUpdateRef.current = now;
+              if ("mediaSession" in navigator && "setPositionState" in navigator.mediaSession) {
+                const dur = audioRef.current.duration;
+                if (dur && !isNaN(dur) && isFinite(dur) && dur > 0) {
+                  try {
+                    navigator.mediaSession.setPositionState({
+                      duration: dur,
+                      playbackRate: audioRef.current.playbackRate || 1,
+                      position: Math.min(Math.max(0, curTime), dur),
+                    });
+                  } catch {}
+                }
               }
             }
           }
@@ -1219,6 +1402,12 @@ export default function App() {
         activeTab={activeTab}
         onSelectTab={(tab) => {
           setActiveTab(tab);
+          if (tab === "library") {
+            setSelectedArtist(null);
+            setSelectedAlbum(null);
+            setSelectedFolder(null);
+            setLibrarySection("songs");
+          }
           window.scrollTo({ top: 0, behavior: "smooth" });
         }}
         searchQuery={searchQuery}
@@ -1271,6 +1460,14 @@ export default function App() {
           searchQuery={searchQuery}
           isFavoritesView={activeTab === "favorites"}
           onOpenID3Editor={(track) => setEditingTrack(track)}
+          activeSection={librarySection}
+          onSectionChange={setLibrarySection}
+          selectedArtist={selectedArtist}
+          onSelectArtist={setSelectedArtist}
+          selectedAlbum={selectedAlbum}
+          onSelectAlbum={setSelectedAlbum}
+          selectedFolder={selectedFolder}
+          onSelectFolder={setSelectedFolder}
         />
       </main>
 
@@ -1469,3 +1666,5 @@ export default function App() {
     </div>
   );
 }
+
+export default SonoraApp;

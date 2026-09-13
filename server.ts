@@ -384,37 +384,34 @@ ${inputLines.join("\n")}`;
     }
   }
 
-  // 2. Fallback de traducción resiliente en caso de indisponibilidad de IA
+  // 2. Fallback de traducción agrupada en un solo bloque con pares de idioma explícitos
   try {
-    const translations: string[] = [];
-    for (const line of inputLines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        translations.push("");
-        continue;
-      }
-      try {
-        const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=auto|es`;
-        const fbRes = await fetch(fallbackUrl);
-        if (fbRes.ok) {
-          const fbData = await fbRes.json();
-          if (fbData?.responseData?.translatedText) {
-            translations.push(fbData.responseData.translatedText);
-            continue;
+    // Detectar si el texto contiene caracteres japoneses
+    const isJapanese = inputLines.some((l) => /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(l));
+    const explicitLangpair = isJapanese ? "ja|es" : "en|es";
+
+    // Agrupar el texto completo con delimitador de salto de línea en una sola petición HTTP
+    const joinedText = inputLines.join("\n");
+    if (joinedText.length <= 1000) {
+      const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(joinedText)}&langpair=${explicitLangpair}`;
+      const fbRes = await fetch(fallbackUrl);
+      if (fbRes.ok) {
+        const fbData: any = await fbRes.json();
+        const translatedBlob = fbData?.responseData?.translatedText;
+        if (typeof translatedBlob === "string" && translatedBlob.trim().length > 0) {
+          const splitLines = translatedBlob.split(/\r?\n/);
+          if (splitLines.length === inputLines.length) {
+            res.json({ translations: splitLines });
+            return;
           }
         }
-      } catch {
-        // Fallback por línea individual
       }
-      translations.push(trimmed);
     }
-    res.json({ translations });
-    return;
   } catch (fbErr) {
     console.warn("[Lyrics Translation] Fallback translation error:", fbErr);
   }
 
-  // 3. Si todo lo demás falla, responder con las líneas originales
+  // 3. Si todo lo demás falla, responder de forma limpia con las líneas originales
   res.json({ translations: inputLines });
 });
 

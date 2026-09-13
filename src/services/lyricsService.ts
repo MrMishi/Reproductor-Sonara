@@ -427,6 +427,18 @@ export function clearLyricsMemoryCache(): void {
  * 3. Si el backend experimenta dificultades o cuotas, aplica un fallback con la API MyMemory.
  * 4. Almacena las traducciones en memoria y retorna el arreglo ordenado de traducciones al español.
  */
+/**
+ * Función: translateTextLinesToSpanish
+ * Propósito: Traduce un conjunto de líneas de versos al español en una sola llamada agrupada.
+ * 
+ * REGLAS ESTRICTAS DE TRADUCCIÓN:
+ * 1. NUNCA envía 'langpair=auto|es' ni realiza peticiones HTTP individuales por cada verso.
+ * 2. Agrupa todo el texto de la letra y envía la estructura completa en un solo llamado al backend
+ *    ('https://sonara-backend-zpjn.onrender.com/api/lyrics/translate' con fallback local).
+ * 3. Utiliza pares de idioma explícitos ('ja|es' para japonés a español, 'en|es' para inglés a español).
+ * 4. Si la llamada falla o no hay respuesta, muestra de forma limpia el texto original sin romper
+ *    la interfaz con mensajes de error binarios o alertas invasivas.
+ */
 export async function translateTextLinesToSpanish(lines: string[]): Promise<string[]> {
   if (!lines || lines.length === 0) return [];
 
@@ -449,52 +461,64 @@ export async function translateTextLinesToSpanish(lines: string[]): Promise<stri
   }
 
   if (textsToFetch.length > 0) {
-    try {
-      const response = await fetch("/api/lyrics/translate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({ lines: textsToFetch }),
-      });
+    // Determinar par de idiomas explícito (NUNCA 'auto|es')
+    const hasJapanese = textsToFetch.some((t) => hasJapaneseText(t));
+    const langpair = hasJapanese ? "ja|es" : "en|es";
+    const sourceLang = hasJapanese ? "ja" : "en";
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data && Array.isArray(data.translations)) {
-          for (let k = 0; k < textsToFetch.length; k++) {
-            const originalText = textsToFetch[k];
-            const translatedText = data.translations[k] || originalText;
-            const targetIndex = indicesToFetch[k];
-            results[targetIndex] = translatedText;
-            spanishMemoryCache.set(originalText, translatedText);
+    let fetchedTranslations: string[] | null = null;
+
+    // 1. Intentar llamada única agrupada al backend oficial
+    const backendEndpoints = [
+      `${BACKEND_BASE_URL}/api/lyrics/translate`,
+      "/api/lyrics/translate",
+    ];
+
+    for (const endpoint of backendEndpoints) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 9000);
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            lines: textsToFetch,
+            langpair,
+            sourceLang,
+            targetLang: "es",
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data && Array.isArray(data.translations) && data.translations.length > 0) {
+            fetchedTranslations = data.translations;
+            break;
           }
         }
+      } catch (err) {
+        console.warn(`[translateTextLinesToSpanish] Intento con ${endpoint} no completado:`, err);
       }
-    } catch (err) {
-      console.warn("[translateTextLinesToSpanish] Error conectando con /api/lyrics/translate:", err);
     }
 
-    // Fallback individual para cualquier línea que aún no haya obtenido traducción
+    // 2. Asignar los resultados traducidos o usar limpiamente el texto original
     for (let k = 0; k < textsToFetch.length; k++) {
+      const originalText = textsToFetch[k];
       const targetIndex = indicesToFetch[k];
-      if (!results[targetIndex]) {
-        const originalText = textsToFetch[k];
-        try {
-          const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(originalText)}&langpair=auto|es`;
-          const fbRes = await fetch(fallbackUrl);
-          if (fbRes.ok) {
-            const fbData = await fbRes.json();
-            if (fbData?.responseData?.translatedText) {
-              const resText = fbData.responseData.translatedText;
-              results[targetIndex] = resText;
-              spanishMemoryCache.set(originalText, resText);
-              continue;
-            }
-          }
-        } catch {
-          // Ignorar fallback error
-        }
+
+      if (fetchedTranslations && fetchedTranslations[k] && fetchedTranslations[k].trim().length > 0) {
+        const cleanTranslated = fetchedTranslations[k].trim();
+        results[targetIndex] = cleanTranslated;
+        spanishMemoryCache.set(originalText, cleanTranslated);
+      } else {
+        // Fallback limpio: mostrar el texto original sin romper la interfaz ni insertar mensajes de error binarios
         results[targetIndex] = originalText;
         spanishMemoryCache.set(originalText, originalText);
       }

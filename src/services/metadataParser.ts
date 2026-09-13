@@ -361,17 +361,19 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
  * ¿Cómo funciona?:
  * 1. Filtro estricto: Descarta notas de voz de WhatsApp si el nombre inicia con 'PTT-'.
  * 2. Genera una URL en memoria (`URL.createObjectURL(file)`).
- * 3. Lee los primeros 128 KB para extraer etiquetas ID3v2 (título, artista, año y opcionalmente carátula incrustada).
- * 4. Obtiene la duración en segundos con `getAudioDuration()`.
- * 5. Si no posee carátula en ID3, genera una vectorial personalizada mediante `generateCoverArt()`.
- * 6. Extrae la jerarquía de carpetas relativas si el usuario subió una carpeta completa (`webkitRelativePath`).
- * 7. Retorna la pista instanciada con identificador único.
+ * 3. Lee los primeros 128 KB para extraer metadatos ID3v2 de texto ligero (título, artista, año).
+ * 4. OPTIMIZACIÓN DE RENDIMIENTO: Desactiva por defecto la extracción masiva de portadas en escaneo inicial
+ *    (extractCover = false) para no saturar memoria/CPU. Utiliza Lazy Loading al reproducir la pista.
+ * 5. Obtiene la duración en segundos con `getAudioDuration()`.
+ * 6. Asigna carátula vectorial ultraligera personalizada mediante `generateCoverArt()`.
+ * 7. Extrae la jerarquía de carpetas relativas si el usuario subió una carpeta completa (`webkitRelativePath`).
+ * 8. Retorna la pista instanciada con identificador único.
  */
 export async function parseAudioFile(
   file: File,
   filterShortAudios: boolean = false,
   minDurationSeconds: number = 30,
-  extractCover: boolean = true
+  extractCover: boolean = false
 ): Promise<Track | null> {
   // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' (WhatsApp Push-To-Talk)
   // El prefijo 'AUD-' se admite para canciones legítimas

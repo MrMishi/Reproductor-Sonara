@@ -49,6 +49,14 @@ interface LibraryViewProps {
   onOpenID3Editor?: (track: Track) => void;
   searchQuery?: string;
   isFavoritesView?: boolean;
+  activeSection?: LibrarySection;
+  onSectionChange?: (section: LibrarySection) => void;
+  selectedArtist?: string | null;
+  onSelectArtist?: (artist: string | null) => void;
+  selectedAlbum?: string | null;
+  onSelectAlbum?: (album: string | null) => void;
+  selectedFolder?: string | null;
+  onSelectFolder?: (folder: string | null) => void;
 }
 
 function formatDuration(sec: number): string {
@@ -58,7 +66,7 @@ function formatDuration(sec: number): string {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
-export const LibraryView: React.FC<LibraryViewProps> = ({
+export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
   tracks,
   currentTrackId,
   isPlaying,
@@ -74,14 +82,34 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   onOpenID3Editor,
   searchQuery = "",
   isFavoritesView = false,
+  activeSection: propActiveSection,
+  onSectionChange: propOnSectionChange,
+  selectedArtist: propSelectedArtist,
+  onSelectArtist: propOnSelectArtist,
+  selectedAlbum: propSelectedAlbum,
+  onSelectAlbum: propOnSelectAlbum,
+  selectedFolder: propSelectedFolder,
+  onSelectFolder: propOnSelectFolder,
 }) => {
   // Pestaña activa dentro de la biblioteca: "songs" | "artists" | "albums" | "folders"
-  const [activeSection, setActiveSection] = useState<LibrarySection>("songs");
+  const [internalSection, setInternalSection] = useState<LibrarySection>("songs");
 
   // Estado de navegación detallada (drill-down)
-  const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
-  const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [internalArtist, setInternalArtist] = useState<string | null>(null);
+  const [internalAlbum, setInternalAlbum] = useState<string | null>(null);
+  const [internalFolder, setInternalFolder] = useState<string | null>(null);
+
+  const activeSection = propActiveSection ?? internalSection;
+  const setActiveSection = propOnSectionChange ?? setInternalSection;
+
+  const selectedArtist = propSelectedArtist !== undefined ? propSelectedArtist : internalArtist;
+  const setSelectedArtist = propOnSelectArtist ?? setInternalArtist;
+
+  const selectedAlbum = propSelectedAlbum !== undefined ? propSelectedAlbum : internalAlbum;
+  const setSelectedAlbum = propOnSelectAlbum ?? setInternalAlbum;
+
+  const selectedFolder = propSelectedFolder !== undefined ? propSelectedFolder : internalFolder;
+  const setSelectedFolder = propOnSelectFolder ?? setInternalFolder;
 
   // Filtrar según búsqueda inteligente y profunda (Título, Artista ID3, Álbum, Nombre de archivo .mp3 y Carpetas)
   const filteredTracks = useMemo(() => {
@@ -551,4 +579,4 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       )}
     </div>
   );
-};
+});

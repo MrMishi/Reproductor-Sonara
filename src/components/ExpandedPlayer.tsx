@@ -135,6 +135,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   const [visualMode, setVisualMode] = useState<"cover" | "bars" | "wave" | "circle">("cover");
 
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastScrolledLyricIndexRef = useRef<number>(-1);
 
   // Estado para la transcripción automática de Romaji
   const [isTranscribingRomaji, setIsTranscribingRomaji] = useState<boolean>(false);
@@ -296,19 +297,23 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
 
   useEffect(() => {
     if (activeTab === "lyrics" && lyricsContainerRef.current && activeLyricIndex >= 0) {
-      const activeEl = lyricsContainerRef.current.querySelector(
-        `[data-lyric-index="${activeLyricIndex}"]`
-      );
-      if (activeEl) {
-        activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (lastScrolledLyricIndexRef.current !== activeLyricIndex) {
+        lastScrolledLyricIndexRef.current = activeLyricIndex;
+        const activeEl = lyricsContainerRef.current.querySelector(
+          `[data-lyric-index="${activeLyricIndex}"]`
+        );
+        if (activeEl) {
+          activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
       }
     }
   }, [activeLyricIndex, activeTab]);
 
-  // Reset slide animation when current track changes
+  // Reset slide animation and lyrics scroll when current track changes
   useEffect(() => {
     setDragOffset(0);
     setIsDragging(false);
+    lastScrolledLyricIndexRef.current = -1;
   }, [currentTrack?.id]);
 
   if (!isOpen || !currentTrack) return null;

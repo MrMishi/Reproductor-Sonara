@@ -50,7 +50,7 @@ interface NavbarProps {
   onOpenInstallModal?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({
+export const Navbar: React.FC<NavbarProps> = React.memo(({
   activeTab,
   onSelectTab,
   searchQuery,
@@ -436,4 +436,4 @@ export const Navbar: React.FC<NavbarProps> = ({
       </nav>
     </>
   );
-};
+});
