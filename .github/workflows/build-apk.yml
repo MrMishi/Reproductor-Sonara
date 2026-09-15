@@ -20,12 +20,6 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: 11.0
-          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
-
       - name: Configurar Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -43,6 +37,9 @@ jobs:
             npx cap add android
           fi
           npx cap sync android
+
+      - name: Aceptar licencias del SDK de Android
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Dar permisos y compilar APK Debug
         run: |
