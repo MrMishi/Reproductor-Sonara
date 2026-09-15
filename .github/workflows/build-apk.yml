@@ -1,4 +1,4 @@
-Name: Sonora - Compilar APK Android
+name: Sonora - Compilar APK Android
 
 on:
   push:
