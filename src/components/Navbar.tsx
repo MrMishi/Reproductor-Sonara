@@ -26,6 +26,7 @@ import {
   FolderPlus,
   Check,
   Filter,
+  Sparkles,
 } from "lucide-react";
 import { ActiveTab } from "../types";
 import { SonoraLogo } from "./SonoraLogo";
@@ -48,6 +49,7 @@ interface NavbarProps {
   filterShortAudios?: boolean;
   onToggleFilterShortAudios?: (enabled: boolean) => void;
   onOpenInstallModal?: () => void;
+  onOpenWelcome?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = React.memo(({
@@ -68,6 +70,7 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
   filterShortAudios = true,
   onToggleFilterShortAudios,
   onOpenInstallModal,
+  onOpenWelcome,
 }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
@@ -113,9 +116,14 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
           <div
             id="sonora-logo"
             onClick={() => onSelectTab("library")}
-            className="cursor-pointer select-none transition-transform active:scale-95 flex items-center gap-2"
+            className="cursor-pointer select-none transition-transform active:scale-95 flex items-center gap-2.5"
           >
-            <SonoraLogo size={32} />
+            {/* Nuevo icono oficial de Sonará (la 'S' con audífonos neón) */}
+            <img
+              src="/icon.png"
+              alt="Sonora"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover shadow-md border border-white/10 shrink-0"
+            />
             <span className="font-black text-lg tracking-tight hidden sm:inline" style={{ color: "var(--color-text-primary)" }}>
               Sonora
             </span>
@@ -370,6 +378,26 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
                     <div className="text-[10px] opacity-60">Personalizar colores y diseño</div>
                   </div>
                 </button>
+
+                {/* Botón Ver Pantalla de Bienvenida */}
+                {onOpenWelcome && (
+                  <button
+                    id="settings-welcome-btn"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onOpenWelcome();
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 transition-colors text-left group cursor-pointer"
+                  >
+                    <div className="p-2 rounded-lg bg-indigo-500/15 text-indigo-400 group-hover:bg-indigo-500/25 transition-colors">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-white font-medium text-xs">Pantalla de Bienvenida</div>
+                      <div className="text-[10px] opacity-60">Ver bienvenida e introducción</div>
+                    </div>
+                  </button>
+                )}
 
                 {/* Canciones Ocultas en menú Ajustes */}
                 {onOpenHiddenTracks && (

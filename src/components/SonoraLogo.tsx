@@ -15,59 +15,16 @@ export const SonoraLogo: React.FC<SonoraLogoProps> = ({
 }) => {
   return (
     <div className={`flex items-center gap-2.5 select-none ${className}`}>
-      {/* Dynamic Sonora Sonic Emblem */}
-      <div
-        className="relative flex items-center justify-center shrink-0 rounded-2xl shadow-lg transition-transform hover:scale-105"
+      {/* Icono oficial de Sonará (S con audífonos neón) */}
+      <img
+        src="/icon.png"
+        alt="Sonora"
+        className="shrink-0 object-cover rounded-xl shadow-lg border border-white/10 transition-transform hover:scale-105"
         style={{
           width: size,
           height: size,
-          background: "linear-gradient(135deg, #7C3AED 0%, #6366F1 50%, #06B6D4 100%)",
-          boxShadow: "0 4px 20px rgba(124, 58, 237, 0.4)",
         }}
-      >
-        <svg
-          viewBox="0 0 100 100"
-          className="w-[72%] h-[72%]"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          {/* Sonic concentric wave arcs */}
-          <path
-            d="M20 50C20 33.4315 33.4315 20 50 20"
-            stroke="white"
-            strokeWidth="6"
-            strokeLinecap="round"
-            strokeOpacity="0.45"
-          />
-          <path
-            d="M80 50C80 66.5685 66.5685 80 50 80"
-            stroke="white"
-            strokeWidth="6"
-            strokeLinecap="round"
-            strokeOpacity="0.45"
-          />
-          <path
-            d="M30 50C30 38.9543 38.9543 30 50 30"
-            stroke="white"
-            strokeWidth="6"
-            strokeLinecap="round"
-            strokeOpacity="0.8"
-          />
-          <path
-            d="M70 50C70 61.0457 61.0457 70 50 70"
-            stroke="white"
-            strokeWidth="6"
-            strokeLinecap="round"
-            strokeOpacity="0.8"
-          />
-          {/* Center Play Core with acoustic wave bars */}
-          <polygon
-            points="46,38 46,62 66,50"
-            fill="white"
-            className="drop-shadow-md"
-          />
-        </svg>
-      </div>
+      />
 
       {showText && (
         <div className="flex flex-col leading-none">

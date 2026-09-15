@@ -58,6 +58,7 @@ import { FloatingMiniPlayer } from "./components/FloatingMiniPlayer";
 import { InstallAppModal } from "./components/InstallAppModal";
 import { HiddenTracksModal } from "./components/HiddenTracksModal";
 import { SleepTimerModal } from "./components/SleepTimerModal";
+import { WelcomeScreen } from "./components/WelcomeScreen";
 import { Capacitor } from "@capacitor/core";
 import { autoScanStartup, requestStoragePermissions } from "./services/nativeScanner";
 import {
@@ -208,6 +209,34 @@ export function SonoraApp() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Pantalla de Bienvenida / Onboarding ("hasSeenWelcome")
+  const [showWelcome, setShowWelcome] = useState<boolean>(() => {
+    try {
+      const hasSeen = localStorage.getItem("hasSeenWelcome");
+      return hasSeen !== "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const handleCloseWelcome = () => {
+    try {
+      localStorage.setItem("hasSeenWelcome", "true");
+    } catch {
+      // ignore
+    }
+    setShowWelcome(false);
+  };
+
+  const handleResetWelcome = () => {
+    try {
+      localStorage.removeItem("hasSeenWelcome");
+    } catch {
+      // ignore
+    }
+    setShowWelcome(true);
+  };
+
   // Auto-dismiss toast notification
   useEffect(() => {
     if (!toastMessage) return;
@@ -245,6 +274,7 @@ export function SonoraApp() {
     isHiddenTracksOpen,
     isInstallModalOpen,
     showPermissionDialog,
+    showWelcome,
     searchQuery,
     selectedArtist,
     selectedAlbum,
@@ -266,6 +296,7 @@ export function SonoraApp() {
       isHiddenTracksOpen,
       isInstallModalOpen,
       showPermissionDialog,
+      showWelcome,
       searchQuery,
       selectedArtist,
       selectedAlbum,
@@ -304,6 +335,12 @@ export function SonoraApp() {
       // 1. Si la vista extendida de Letras (o reproductor expandido) está abierta -> Ciérrala y regresa a la pantalla principal o reproductor mini
       if (state.isExpandedPlayerOpen) {
         setIsExpandedPlayerOpen(false);
+        return;
+      }
+
+      // Si la pantalla de bienvenida está visible -> Cerrarla
+      if (state.showWelcome) {
+        handleCloseWelcome();
         return;
       }
 
@@ -1477,6 +1514,7 @@ export function SonoraApp() {
         filterShortAudios={filterShortAudios}
         onToggleFilterShortAudios={handleToggleFilterShortAudios}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
+        onOpenWelcome={handleResetWelcome}
       />
 
       {/* Main Content Area */}
@@ -1699,6 +1737,12 @@ export function SonoraApp() {
       <PermissionRequiredModal
         isOpen={showPermissionDialog}
         onClose={() => setShowPermissionDialog(false)}
+      />
+
+      {/* Pantalla de Bienvenida / Onboarding */}
+      <WelcomeScreen
+        isOpen={showWelcome}
+        onClose={handleCloseWelcome}
       />
     </div>
   );
