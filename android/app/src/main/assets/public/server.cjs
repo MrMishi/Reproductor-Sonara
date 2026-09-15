@@ -42,6 +42,7 @@ function getAI() {
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
 });
+var serverLyricsCache = /* @__PURE__ */ new Map();
 async function fetchGeminiLyrics(cleanTrack, cleanArtist) {
   const ai = getAI();
   if (!ai) return null;
@@ -51,11 +52,11 @@ Artista: "${cleanArtist || "Desconocido"}"
 
 Instrucciones:
 1. PRESERVACI\xD3N ESTRICTA UTF-8: Si la canci\xF3n es en japon\xE9s, coreano u otro idioma no latino, conserva con total fidelidad los caracteres nativos (Kanji, Hiragana, Katakana, Hangul) en codificaci\xF3n UTF-8 pura.
-2. Para canciones en japon\xE9s o asi\xE1tico: Si es posible, incluye el verso en caracteres nativos (Kanji/Hiragana) y a continuaci\xF3n o debajo su lectura fon\xE9tica en Romaji para lectura de karaoke.
-3. Organiza los versos claramente con saltos de l\xEDnea legibles (separando estrofas, coro, etc.).
+2. FORMATO INTERLINEAL ESTRICTO (L\xCDNEA POR L\xCDNEA): Si la canci\xF3n es en japon\xE9s, coloca la lectura fon\xE9tica Romaji L\xCDNEA POR L\xCDNEA inmediatamente debajo de cada verso original en caracteres nativos (Kanji/Kana). PROHIBIDO separar la canci\xF3n en dos bloques o mitades como '**[Kanji / Kana]**' o '**[Romaji]**'. NO uses encabezados ni etiquetas de bloque.
+3. Organiza los versos claramente con saltos de l\xEDnea legibles entre estrofas.
 4. Si la canci\xF3n es puramente instrumental, responde \xFAnicamente con "[Instrumental]".
 5. NO agregues introducciones conversacionales ni comentarios extras como "Aqu\xED est\xE1 la letra...". Empieza directamente con los versos.`;
-  const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+  const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash"];
   for (const model of candidateModels) {
     try {
       const geminiCall = ai.models.generateContent({
@@ -63,7 +64,7 @@ Instrucciones:
         contents: prompt
       });
       const timeoutPromise = new Promise(
-        (_, reject) => setTimeout(() => reject(new Error("Gemini timeout after 7s")), 7e3)
+        (_, reject) => setTimeout(() => reject(new Error("Gemini timeout after 8s")), 8e3)
       );
       const geminiResponse = await Promise.race([geminiCall, timeoutPromise]);
       const lyricsText = geminiResponse?.text?.trim() || "";
@@ -72,7 +73,13 @@ Instrucciones:
       }
     } catch (err) {
       const errMsg = err?.message || String(err);
-      console.warn(`[Lyrics AI] ${model} unavailable: ${errMsg.slice(0, 100)}`);
+      if (errMsg.includes("503") || errMsg.includes("high demand")) {
+        console.log(`[Lyrics AI] ${model} en alta demanda temporal, pasando al siguiente modelo disponible...`);
+      } else if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+        console.log(`[Lyrics AI] ${model} con l\xEDmite de cuota alcanzado, usando siguiente modelo...`);
+      } else {
+        console.log(`[Lyrics AI] ${model} no disponible (${errMsg.slice(0, 80)}), continuando...`);
+      }
     }
   }
   return null;
@@ -87,25 +94,37 @@ app.post("/api/lyrics/search", async (req, res) => {
   const rawCleanTrack = track.replace(/\.(mp3|wav|flac|m4a|aac|ogg|opus|webm)$/i, "").trim();
   const cleanTrack = rawCleanTrack.replace(/\s*[\(\[](official\s*(music\s*)?video|official\s*audio|video\s*oficial|audio\s*oficial|remastered\s*\d*|lyrics\s*video|letra|4k|hd)[\)\]]/gi, "").trim();
   const cleanArtist = (artist || "").trim();
+  const cacheKey = `${cleanArtist.toLowerCase()}:::${cleanTrack.toLowerCase()}`;
+  if (serverLyricsCache.has(cacheKey)) {
+    res.json(serverLyricsCache.get(cacheKey));
+    return;
+  }
+  const reply = (payload) => {
+    if (payload.plainLyrics || payload.syncedLyrics) {
+      serverLyricsCache.set(cacheKey, payload);
+    }
+    res.json(payload);
+  };
   try {
     const queryParams = new URLSearchParams();
     if (cleanArtist) queryParams.set("artist_name", cleanArtist);
     queryParams.set("track_name", cleanTrack);
     if (album) queryParams.set("album_name", album);
     if (duration && Number(duration) > 0) queryParams.set("duration", Math.round(Number(duration)).toString());
+    let exactData = null;
     let lrcResponse = await fetch(`https://lrclib.net/api/get?${queryParams.toString()}`, {
       headers: { "User-Agent": "YouTubeMusicWebPlayer/1.0" }
     });
     if (lrcResponse.ok) {
-      const data = await lrcResponse.json();
-      if (data && (data.syncedLyrics || data.plainLyrics)) {
-        res.json({
+      exactData = await lrcResponse.json();
+      if (exactData && exactData.syncedLyrics) {
+        reply({
           source: "lrclib",
-          track: data.trackName || cleanTrack,
-          artist: data.artistName || cleanArtist,
-          plainLyrics: data.plainLyrics || "",
-          syncedLyrics: data.syncedLyrics || null,
-          instrumental: Boolean(data.instrumental)
+          track: exactData.trackName || cleanTrack,
+          artist: exactData.artistName || cleanArtist,
+          plainLyrics: exactData.plainLyrics || "",
+          syncedLyrics: exactData.syncedLyrics,
+          instrumental: Boolean(exactData.instrumental)
         });
         return;
       }
@@ -117,20 +136,55 @@ app.post("/api/lyrics/search", async (req, res) => {
     if (searchResponse.ok) {
       const list = await searchResponse.json();
       if (Array.isArray(list) && list.length > 0) {
-        const best = list.find((item) => item.syncedLyrics || item.plainLyrics) || list[0];
-        if (best && (best.syncedLyrics || best.plainLyrics)) {
-          res.json({
+        const syncedItem = list.find((item) => item.syncedLyrics && item.syncedLyrics.trim().length > 0);
+        if (syncedItem) {
+          reply({
             source: "lrclib-search",
-            track: best.trackName || cleanTrack,
-            artist: best.artistName || cleanArtist,
-            album: best.albumName || void 0,
-            plainLyrics: best.plainLyrics || "",
-            syncedLyrics: best.syncedLyrics || null,
-            instrumental: Boolean(best.instrumental)
+            track: syncedItem.trackName || cleanTrack,
+            artist: syncedItem.artistName || cleanArtist,
+            album: syncedItem.albumName || void 0,
+            plainLyrics: syncedItem.plainLyrics || "",
+            syncedLyrics: syncedItem.syncedLyrics,
+            instrumental: Boolean(syncedItem.instrumental)
+          });
+          return;
+        }
+        if (exactData && exactData.plainLyrics) {
+          reply({
+            source: "lrclib",
+            track: exactData.trackName || cleanTrack,
+            artist: exactData.artistName || cleanArtist,
+            plainLyrics: exactData.plainLyrics,
+            syncedLyrics: null,
+            instrumental: Boolean(exactData.instrumental)
+          });
+          return;
+        }
+        const plainItem = list.find((item) => item.plainLyrics && item.plainLyrics.trim().length > 0);
+        if (plainItem) {
+          reply({
+            source: "lrclib-search",
+            track: plainItem.trackName || cleanTrack,
+            artist: plainItem.artistName || cleanArtist,
+            album: plainItem.albumName || void 0,
+            plainLyrics: plainItem.plainLyrics,
+            syncedLyrics: null,
+            instrumental: Boolean(plainItem.instrumental)
           });
           return;
         }
       }
+    }
+    if (exactData && exactData.plainLyrics) {
+      reply({
+        source: "lrclib",
+        track: exactData.trackName || cleanTrack,
+        artist: exactData.artistName || cleanArtist,
+        plainLyrics: exactData.plainLyrics,
+        syncedLyrics: null,
+        instrumental: Boolean(exactData.instrumental)
+      });
+      return;
     }
   } catch (err) {
     console.warn("LrcLib lookup failed, falling back to alternatives:", err);
@@ -143,7 +197,7 @@ app.post("/api/lyrics/search", async (req, res) => {
       if (ovhRes.ok) {
         const ovhData = await ovhRes.json();
         if (ovhData && ovhData.lyrics) {
-          res.json({
+          reply({
             source: "lyrics.ovh",
             track: cleanTrack,
             artist: cleanArtist,
@@ -159,7 +213,7 @@ app.post("/api/lyrics/search", async (req, res) => {
   }
   const geminiLyrics = await fetchGeminiLyrics(cleanTrack, cleanArtist);
   if (geminiLyrics) {
-    res.json({
+    reply({
       source: "gemini",
       track: cleanTrack,
       artist: cleanArtist,
@@ -178,6 +232,89 @@ app.post("/api/lyrics/search", async (req, res) => {
     instrumental: false,
     message: "No se encontraron letras en este momento o el servicio de IA est\xE1 con alta demanda. Puedes agregar la letra manualmente."
   });
+});
+app.post("/api/lyrics/translate", async (req, res) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  const { lines, text } = req.body;
+  let inputLines = [];
+  if (Array.isArray(lines)) {
+    inputLines = lines.map((l) => typeof l === "string" ? l : "");
+  } else if (typeof text === "string") {
+    inputLines = text.split(/\r?\n/);
+  }
+  if (inputLines.length === 0) {
+    res.json({ translations: [] });
+    return;
+  }
+  const ai = getAI();
+  if (ai) {
+    const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash"];
+    const prompt = `Traduce las siguientes l\xEDneas de versos musicales al espa\xF1ol de manera natural, po\xE9tica y fiel al significado de la canci\xF3n.
+REGLAS ESTRICTAS:
+1. Devuelve EXACTAMENTE una l\xEDnea traducida por cada l\xEDnea de entrada (mismo n\xFAmero de l\xEDneas).
+2. Si una l\xEDnea de entrada est\xE1 vac\xEDa, devuelve una l\xEDnea vac\xEDa.
+3. NO a\xF1adas introducciones conversacionales, notas, n\xFAmeros de verso ni explicaciones adicionales.
+4. Responde \xDANICAMENTE con los versos traducidos, l\xEDnea por l\xEDnea.
+
+L\xEDneas a traducir:
+${inputLines.join("\n")}`;
+    for (const model of candidateModels) {
+      try {
+        const geminiCall = ai.models.generateContent({
+          model,
+          contents: prompt
+        });
+        const timeoutPromise = new Promise(
+          (_, reject) => setTimeout(() => reject(new Error("Gemini translation timeout")), 12e3)
+        );
+        const response = await Promise.race([geminiCall, timeoutPromise]);
+        const outputText = response?.text || "";
+        if (outputText && outputText.trim().length > 0) {
+          const rawTranslatedLines = outputText.split(/\r?\n/);
+          if (rawTranslatedLines.length >= inputLines.length) {
+            const translations = inputLines.map((orig, i) => {
+              if (!orig.trim()) return "";
+              return (rawTranslatedLines[i] || "").trim();
+            });
+            res.json({ translations });
+            return;
+          } else {
+            const translations = inputLines.map((orig, i) => {
+              if (!orig.trim()) return "";
+              return (rawTranslatedLines[i] || "").trim() || orig;
+            });
+            res.json({ translations });
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn(`[Lyrics Translation] Advertencia con modelo ${model}:`, err?.message || err);
+      }
+    }
+  }
+  try {
+    const isJapanese = inputLines.some((l) => /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(l));
+    const explicitLangpair = isJapanese ? "ja|es" : "en|es";
+    const joinedText = inputLines.join("\n");
+    if (joinedText.length <= 1e3) {
+      const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(joinedText)}&langpair=${explicitLangpair}`;
+      const fbRes = await fetch(fallbackUrl);
+      if (fbRes.ok) {
+        const fbData = await fbRes.json();
+        const translatedBlob = fbData?.responseData?.translatedText;
+        if (typeof translatedBlob === "string" && translatedBlob.trim().length > 0) {
+          const splitLines = translatedBlob.split(/\r?\n/);
+          if (splitLines.length === inputLines.length) {
+            res.json({ translations: splitLines });
+            return;
+          }
+        }
+      }
+    }
+  } catch (fbErr) {
+    console.warn("[Lyrics Translation] Fallback translation error:", fbErr);
+  }
+  res.json({ translations: inputLines });
 });
 async function start() {
   if (process.env.NODE_ENV !== "production") {

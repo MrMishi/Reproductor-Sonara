@@ -96,11 +96,15 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
   }, [isSettingsOpen, isAddMenuOpen]);
   return (
     <>
+      {/* 
+        Header/Navbar Superior Fijo (Sticky Header):
+        Fijado en top: 0 con z-index: 40 y fondo oscuro desenfocado (bg-[#0a0a16]/90 backdrop-blur-md)
+        para permitir que las canciones pasen suavemente por debajo sin mezclar el texto ni transparentarse.
+      */}
       <header
         id="ytm-navbar"
-        className="sticky top-0 z-30 w-full px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 border-b flex items-center justify-between gap-2 sm:gap-4 backdrop-blur-xl transition-colors"
+        className="sticky top-0 z-40 w-full px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 border-b flex items-center justify-between gap-2 sm:gap-4 bg-[#0a0a16]/90 backdrop-blur-md transition-colors"
         style={{
-          backgroundColor: "var(--color-surface, #030303)",
           borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
         }}
       >
@@ -403,9 +407,8 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
       <nav
         id="mobile-nav-tabs"
         aria-label="Navegación móvil principal"
-        className="flex md:hidden items-center justify-around px-3 py-2 border-b sticky top-[53px] z-25 backdrop-blur-xl gap-2"
+        className="flex md:hidden items-center justify-around px-3 py-2 border-b sticky top-[53px] z-35 bg-[#0a0a16]/90 backdrop-blur-md gap-2 transition-colors"
         style={{
-          backgroundColor: "var(--color-surface, #0c0c0c)",
           borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
         }}
       >
