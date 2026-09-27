@@ -142,6 +142,85 @@ public class NativeFolderPickerPlugin extends Plugin {
     }
 
     /**
+     * Solicita directamente los permisos de almacenamiento / audio requeridos:
+     * - En Android 13+ (API 33+): READ_MEDIA_AUDIO y READ_MEDIA_VIDEO
+     * - En Android 12 o inferior: READ_EXTERNAL_STORAGE
+     */
+    @PluginMethod
+    public void requestStoragePermissions(PluginCall call) {
+        try {
+            if (getActivity() != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    getActivity().requestPermissions(
+                        new String[]{
+                            Manifest.permission.READ_MEDIA_AUDIO,
+                            Manifest.permission.READ_MEDIA_VIDEO
+                        },
+                        1001
+                    );
+                } else {
+                    getActivity().requestPermissions(
+                        new String[]{
+                            Manifest.permission.READ_EXTERNAL_STORAGE
+                        },
+                        1001
+                    );
+                }
+            }
+            JSObject res = new JSObject();
+            res.put("success", true);
+            call.resolve(res);
+        } catch (Exception e) {
+            Log.w(TAG, "Error solicitando permisos de almacenamiento: " + e.getMessage());
+            JSObject res = new JSObject();
+            res.put("success", false);
+            call.resolve(res);
+        }
+    }
+
+    /**
+     * Solicita todos los permisos iniciales requeridos: Almacenamiento/Audio y Notificaciones
+     */
+    @PluginMethod
+    public void requestStartupPermissions(PluginCall call) {
+        try {
+            if (getActivity() != null) {
+                List<String> permsToRequest = new ArrayList<>();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        permsToRequest.add(Manifest.permission.READ_MEDIA_AUDIO);
+                    }
+                    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                        permsToRequest.add(Manifest.permission.READ_MEDIA_VIDEO);
+                    }
+                    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        permsToRequest.add(Manifest.permission.POST_NOTIFICATIONS);
+                    }
+                } else {
+                    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                        permsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+                    }
+                }
+
+                if (!permsToRequest.isEmpty()) {
+                    getActivity().requestPermissions(
+                        permsToRequest.toArray(new String[0]),
+                        1003
+                    );
+                }
+            }
+            JSObject res = new JSObject();
+            res.put("success", true);
+            call.resolve(res);
+        } catch (Exception e) {
+            Log.w(TAG, "Error solicitando permisos iniciales: " + e.getMessage());
+            JSObject res = new JSObject();
+            res.put("success", false);
+            call.resolve(res);
+        }
+    }
+
+    /**
      * Solicita permisos de notificación nativa (POST_NOTIFICATIONS) en Android 13+ (API 33+)
      * para asegurar que el control de reproducción en la barra de estado y pantalla de bloqueo sea visible.
      */

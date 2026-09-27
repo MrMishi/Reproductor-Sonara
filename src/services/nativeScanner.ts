@@ -29,7 +29,11 @@ import {
   MAX_VIDEO_DURATION_SECONDS,
 } from "./metadataParser";
 import { isTrackHidden, addSingleTrackToDB } from "./db";
-import { checkNativeStoragePermissions, openNativeAppSettings } from "./nativeFolderPicker";
+import {
+  checkNativeStoragePermissions,
+  requestNativeStoragePermissionsDirect,
+  openNativeAppSettings,
+} from "./nativeFolderPicker";
 
 export interface ScanProgressCallback {
   (currentFolder: string, foundFilesCount: number, processedCount: number, message: string): void;
@@ -284,6 +288,10 @@ export async function requestStoragePermissions(): Promise<boolean> {
     console.log("[NativeScanner] Comprobando permisos de almacenamiento nativos...");
     const nativeCheck = await checkNativeStoragePermissions();
     if (nativeCheck) return true;
+
+    // 1. Invocar solicitud nativa directa (READ_MEDIA_AUDIO / READ_EXTERNAL_STORAGE)
+    await requestNativeStoragePermissionsDirect();
+    if (await checkNativeStoragePermissions()) return true;
 
     const checkState = await Filesystem.checkPermissions();
     console.log("[NativeScanner] Estado previo de permisos:", checkState);

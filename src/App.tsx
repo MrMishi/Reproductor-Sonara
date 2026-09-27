@@ -461,46 +461,59 @@ export function SonoraApp() {
         }
       }
 
-      // ESCANEO AUTOMÁTICO PREDETERMINADO EN ANDROID:
-      // Al iniciar la app, solicita permisos de almacenamiento ('READ_MEDIA_AUDIO' y 'READ_EXTERNAL_STORAGE')
-      // y permisos de notificación ('POST_NOTIFICATIONS') para la barra de estado y pantalla de bloqueo,
-      // y escanea automáticamente la carpeta '/Music', '/Download' y '/YMusic' guardando rutas nativas y actualizando la lista al instante.
+      // ESCANEO Y SOLICITUD AUTOMÁTICA DE PERMISOS EN ANDROID AL INICIAR LA APP:
+      // Pide dinámicamente:
+      //   * Almacenamiento/Audio: 'READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE'.
+      //   * Notificaciones: 'POST_NOTIFICATIONS'.
+      // Si no han sido concedidos, muestra el cuadro emergente pidiendo "Conceder permisos de almacenamiento para cargar tu música local".
       if (Capacitor.isNativePlatform()) {
         try {
           console.log("[App] Solicitando permisos nativos de almacenamiento y notificación en inicio de app...");
+          // 1. Notificaciones Android 13+ (POST_NOTIFICATIONS)
           requestNativeNotificationPermission().catch(console.warn);
-          await requestStoragePermissions();
-          const newDiscovered = await autoScanStartup(
-            currentList,
-            filterShortAudios,
-            (newTrack) => {
-              // 3. AGREGAR A BIBLIOTECA:
-              // Registra de inmediato en el estado global para que se refleje en la lista al instante
-              setTracks((prev) => {
-                if (
-                  prev.some(
-                    (t) =>
-                      t.id === newTrack.id ||
-                      (t.nativePath && t.nativePath === newTrack.nativePath) ||
-                      (t.url && t.url === newTrack.url)
-                  )
-                ) {
-                  return prev;
-                }
-                return [...prev, newTrack];
-              });
+
+          // 2. Comprobar permisos de almacenamiento ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE')
+          const hasPerms = await checkNativeStoragePermissions();
+          if (!hasPerms) {
+            const requested = await requestStoragePermissions();
+            if (!requested) {
+              setShowPermissionDialog(true);
             }
-          );
-          if (newDiscovered.length > 0) {
-            setTracks((prev) => {
-              const existingIds = new Set(prev.map((t) => t.id));
-              const filteredNew = newDiscovered.filter((t) => !existingIds.has(t.id));
-              if (filteredNew.length === 0) return prev;
-              const merged = [...prev, ...filteredNew];
-              saveTracksToDB(merged);
-              return merged;
-            });
-            setToastMessage(`Biblioteca actualizada: ${newDiscovered.length} canción(es) detectada(s)`);
+          }
+
+          if (await checkNativeStoragePermissions()) {
+            const newDiscovered = await autoScanStartup(
+              currentList,
+              filterShortAudios,
+              (newTrack) => {
+                // 3. AGREGAR A BIBLIOTECA:
+                // Registra de inmediato en el estado global para que se refleje en la lista al instante
+                setTracks((prev) => {
+                  if (
+                    prev.some(
+                      (t) =>
+                        t.id === newTrack.id ||
+                        (t.nativePath && t.nativePath === newTrack.nativePath) ||
+                        (t.url && t.url === newTrack.url)
+                    )
+                  ) {
+                    return prev;
+                  }
+                  return [...prev, newTrack];
+                });
+              }
+            );
+            if (newDiscovered.length > 0) {
+              setTracks((prev) => {
+                const existingIds = new Set(prev.map((t) => t.id));
+                const filteredNew = newDiscovered.filter((t) => !existingIds.has(t.id));
+                if (filteredNew.length === 0) return prev;
+                const merged = [...prev, ...filteredNew];
+                saveTracksToDB(merged);
+                return merged;
+              });
+              setToastMessage(`Biblioteca actualizada: ${newDiscovered.length} canción(es) detectada(s)`);
+            }
           }
         } catch (scanErr) {
           console.warn("Auto-escaneo al inicio falló:", scanErr);
@@ -700,6 +713,7 @@ export function SonoraApp() {
       const nextIdx = (currentTrackIndex + 1) % activeList.length;
       setCurrentTrackIndex(nextIdx);
     }
+    isPlayingRef.current = true;
     setIsPlaying(true);
   };
 
@@ -718,6 +732,7 @@ export function SonoraApp() {
 
     const prevIdx = (currentTrackIndex - 1 + activeList.length) % activeList.length;
     setCurrentTrackIndex(prevIdx);
+    isPlayingRef.current = true;
     setIsPlaying(true);
   };
 
@@ -749,12 +764,18 @@ export function SonoraApp() {
 
       if (document.hidden) {
         // App minimizada o pantalla bloqueada mientras ESTABA reproduciendo activamente:
-        // Mantener activo el contexto de audio nativo sin alterar el estado
+        // Mantener activo el contexto de audio nativo sin alterar el estado y reafirmar MediaSession
         audioEngine.resumeContext();
+        if ("mediaSession" in navigator) {
+          navigator.mediaSession.playbackState = "playing";
+        }
       } else {
         // App restaurada al primer plano mientras estaba reproduciendo
         if (audioRef.current && !audioRef.current.paused) {
           audioEngine.resumeContext();
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = "playing";
+          }
         }
       }
     };
@@ -771,9 +792,15 @@ export function SonoraApp() {
         if (isActive) {
           if (audioRef.current && !audioRef.current.paused) {
             audioEngine.resumeContext();
+            if ("mediaSession" in navigator) {
+              navigator.mediaSession.playbackState = "playing";
+            }
           }
         } else {
           audioEngine.resumeContext();
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = "playing";
+          }
         }
       }).then((handle) => {
         appStateHandle = handle;
@@ -827,6 +854,9 @@ export function SonoraApp() {
             { src: `${origin}/pwa-512x512.png`, sizes: "512x512", type: "image/png" },
           ],
         });
+
+        // Asegurar que playbackState refleje el estado activo
+        navigator.mediaSession.playbackState = isPlayingRef.current ? "playing" : "paused";
       } catch (e) {
         console.warn("Error setting MediaSession metadata:", e);
       }
@@ -1775,6 +1805,45 @@ export function SonoraApp() {
       <PermissionRequiredModal
         isOpen={showPermissionDialog}
         onClose={() => setShowPermissionDialog(false)}
+        onPermissionGranted={async () => {
+          setShowPermissionDialog(false);
+          if (Capacitor.isNativePlatform()) {
+            try {
+              const newDiscovered = await autoScanStartup(
+                tracks,
+                filterShortAudios,
+                (newTrack) => {
+                  setTracks((prev) => {
+                    if (
+                      prev.some(
+                        (t) =>
+                          t.id === newTrack.id ||
+                          (t.nativePath && t.nativePath === newTrack.nativePath) ||
+                          (t.url && t.url === newTrack.url)
+                      )
+                    ) {
+                      return prev;
+                    }
+                    return [...prev, newTrack];
+                  });
+                }
+              );
+              if (newDiscovered.length > 0) {
+                setTracks((prev) => {
+                  const existingIds = new Set(prev.map((t) => t.id));
+                  const filteredNew = newDiscovered.filter((t) => !existingIds.has(t.id));
+                  if (filteredNew.length === 0) return prev;
+                  const merged = [...prev, ...filteredNew];
+                  saveTracksToDB(merged);
+                  return merged;
+                });
+                setToastMessage(`Biblioteca actualizada: ${newDiscovered.length} canción(es) detectada(s)`);
+              }
+            } catch (scanErr) {
+              console.warn("Auto-escaneo tras conceder permisos falló:", scanErr);
+            }
+          }
+        }}
       />
 
       {/* Pantalla de Carga Inicial (Splash Screen tipo Lark Player) */}

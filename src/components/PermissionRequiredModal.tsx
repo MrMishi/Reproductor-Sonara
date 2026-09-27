@@ -15,7 +15,8 @@
 
 import React from "react";
 import { ShieldAlert, Settings, X, Music } from "lucide-react";
-import { openNativeAppSettings } from "../services/nativeFolderPicker";
+import { openNativeAppSettings, requestNativeNotificationPermission } from "../services/nativeFolderPicker";
+import { requestStoragePermissions } from "../services/nativeScanner";
 
 interface PermissionRequiredModalProps {
   isOpen: boolean;
@@ -26,11 +27,20 @@ interface PermissionRequiredModalProps {
 export const PermissionRequiredModal: React.FC<PermissionRequiredModalProps> = ({
   isOpen,
   onClose,
+  onPermissionGranted,
 }) => {
   if (!isOpen) return null;
 
   const handleAllowClick = async () => {
-    // Abre directamente la pantalla de Ajustes de la Aplicación en Android
+    // 1. Solicitar directamente los permisos nativos de almacenamiento y notificaciones
+    const granted = await requestStoragePermissions();
+    await requestNativeNotificationPermission();
+    if (granted) {
+      if (onPermissionGranted) onPermissionGranted();
+      onClose();
+      return;
+    }
+    // 2. Si el sistema no permite el diálogo directo (denegado previamente), abrir Ajustes
     await openNativeAppSettings();
     onClose();
   };
@@ -76,13 +86,12 @@ export const PermissionRequiredModal: React.FC<PermissionRequiredModalProps> = (
             id="permission-required-title"
             className="text-lg font-bold tracking-tight text-white mb-2 leading-snug"
           >
-            Se requiere acceso a tus archivos de audio para importar música
+            Conceder permisos de almacenamiento para cargar tu música local
           </h3>
 
           {/* Explicación concisa y amigable */}
           <p className="text-xs text-neutral-300 mb-6 leading-relaxed">
-            Para escanear tu almacenamiento y reproducir canciones o el audio de tus videos locales,
-            Sonora necesita autorización para leer los archivos multimedia de tu dispositivo.
+            Para escanear tu dispositivo, reproducir tus pistas locales y mostrar los controles en la barra de notificaciones, Sonora necesita autorización para acceder a los archivos multimedia y emitir notificaciones.
           </p>
 
           {/* Acciones principales */}
@@ -101,7 +110,7 @@ export const PermissionRequiredModal: React.FC<PermissionRequiredModalProps> = (
               className="w-full sm:w-1/2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-purple-900/30 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <Settings className="w-4 h-4" />
-              <span>Permitir</span>
+              <span>Conceder Permisos</span>
             </button>
           </div>
         </div>

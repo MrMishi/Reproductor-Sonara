@@ -70,12 +70,12 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
               {/* Imagen del icono oficial */}
               <img
                 src="/icon.png"
-                alt="Sonará Logo"
+                alt="Sonora Logo"
                 className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-3xl object-cover shadow-[0_0_40px_rgba(147,51,234,0.4)] border border-white/20"
               />
             </motion.div>
 
-            {/* Texto "Sonará" estilizado */}
+            {/* Texto "Sonora" estilizado */}
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -84,7 +84,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
             >
               <h1 className="text-3xl sm:text-4xl font-extrabold tracking-wider text-white">
                 <span className="bg-gradient-to-r from-white via-neutral-100 to-neutral-300 bg-clip-text text-transparent">
-                  Sonará
+                  Sonora
                 </span>
               </h1>
               <p className="text-[11px] sm:text-xs font-semibold tracking-widest uppercase text-purple-300/80">

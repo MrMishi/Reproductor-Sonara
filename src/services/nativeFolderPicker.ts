@@ -36,6 +36,8 @@ export interface NativeFolderPickerPlugin {
   pickFolder(): Promise<NativeFolderPickResponse>;
   openAppSettings(): Promise<{ success: boolean }>;
   checkStoragePermissions(): Promise<{ granted: boolean }>;
+  requestStoragePermissions(): Promise<{ success: boolean }>;
+  requestStartupPermissions(): Promise<{ success: boolean }>;
   requestNotificationPermission(): Promise<{ success: boolean }>;
 }
 
@@ -43,6 +45,34 @@ export interface NativeFolderPickerPlugin {
  * Registro del plugin nativo 'NativeFolderPicker' de Capacitor
  */
 export const NativeFolderPicker = registerPlugin<NativeFolderPickerPlugin>("NativeFolderPicker");
+
+/**
+ * Solicita los permisos nativos de almacenamiento ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE')
+ */
+export async function requestNativeStoragePermissionsDirect(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return true;
+  try {
+    const res = await NativeFolderPicker.requestStoragePermissions();
+    return !!res?.success;
+  } catch (err) {
+    console.warn("[NativeFolderPicker] Error solicitando permisos de almacenamiento nativos:", err);
+    return false;
+  }
+}
+
+/**
+ * Solicita todos los permisos iniciales ('READ_MEDIA_AUDIO', 'READ_EXTERNAL_STORAGE', 'POST_NOTIFICATIONS')
+ */
+export async function requestNativeStartupPermissions(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return true;
+  try {
+    const res = await NativeFolderPicker.requestStartupPermissions();
+    return !!res?.success;
+  } catch (err) {
+    console.warn("[NativeFolderPicker] Error solicitando permisos de inicio:", err);
+    return false;
+  }
+}
 
 /**
  * Abre directamente la pantalla de Ajustes de la Aplicación en Android mediante Intent nativo
