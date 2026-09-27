@@ -359,24 +359,17 @@ ${inputLines.join("\n")}`;
         );
 
         const response: any = await Promise.race([geminiCall, timeoutPromise]);
-        const outputText = response?.text || "";
-        if (outputText && outputText.trim().length > 0) {
+        let outputText = response?.text || "";
+        // Limpiar bloques de código markdown que Gemini suele incluir
+        outputText = outputText.replace(/^```[a-z]*\s*/i, "").replace(/\s*```$/i, "").trim();
+        if (outputText && outputText.length > 0) {
           const rawTranslatedLines = outputText.split(/\r?\n/);
-          if (rawTranslatedLines.length >= inputLines.length) {
-            const translations = inputLines.map((orig, i) => {
-              if (!orig.trim()) return "";
-              return (rawTranslatedLines[i] || "").trim();
-            });
-            res.json({ translations });
-            return;
-          } else {
-            const translations = inputLines.map((orig, i) => {
-              if (!orig.trim()) return "";
-              return (rawTranslatedLines[i] || "").trim() || orig;
-            });
-            res.json({ translations });
-            return;
-          }
+          const translations = inputLines.map((orig, i) => {
+            if (!orig.trim()) return "";
+            return (rawTranslatedLines[i] || "").trim() || orig;
+          });
+          res.json({ translations });
+          return;
         }
       } catch (err: any) {
         console.warn(`[Lyrics Translation] Advertencia con modelo ${model}:`, err?.message || err);
@@ -384,28 +377,78 @@ ${inputLines.join("\n")}`;
     }
   }
 
-  // 2. Fallback de traducción agrupada en un solo bloque con pares de idioma explícitos
+  // 2. Fallback de traducción agrupada en bloques por lotes con pares de idioma explícitos
   try {
     // Detectar si el texto contiene caracteres japoneses
     const isJapanese = inputLines.some((l) => /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(l));
     const explicitLangpair = isJapanese ? "ja|es" : "en|es";
 
-    // Agrupar el texto completo con delimitador de salto de línea en una sola petición HTTP
-    const joinedText = inputLines.join("\n");
-    if (joinedText.length <= 1000) {
-      const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(joinedText)}&langpair=${explicitLangpair}`;
-      const fbRes = await fetch(fallbackUrl);
-      if (fbRes.ok) {
-        const fbData: any = await fbRes.json();
-        const translatedBlob = fbData?.responseData?.translatedText;
-        if (typeof translatedBlob === "string" && translatedBlob.trim().length > 0) {
-          const splitLines = translatedBlob.split(/\r?\n/);
-          if (splitLines.length === inputLines.length) {
-            res.json({ translations: splitLines });
-            return;
-          }
+    const decodeEntities = (s: string) =>
+      s
+        .replace(/&#39;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">");
+
+    const translatedResults: string[] = [...inputLines];
+    const chunks: { indices: number[]; lines: string[] }[] = [];
+    let currentChunk: { indices: number[]; lines: string[] } = { indices: [], lines: [] };
+    let currentLen = 0;
+
+    for (let i = 0; i < inputLines.length; i++) {
+      const line = inputLines[i];
+      if (!line.trim()) {
+        translatedResults[i] = "";
+        continue;
+      }
+      if (currentLen + line.length > 400 || currentChunk.lines.length >= 8) {
+        if (currentChunk.lines.length > 0) {
+          chunks.push(currentChunk);
+          currentChunk = { indices: [], lines: [] };
+          currentLen = 0;
         }
       }
+      currentChunk.indices.push(i);
+      currentChunk.lines.push(line);
+      currentLen += line.length + 1;
+    }
+    if (currentChunk.lines.length > 0) {
+      chunks.push(currentChunk);
+    }
+
+    let hadAnySuccess = false;
+    for (const chunk of chunks) {
+      try {
+        const textToTranslate = chunk.lines.join("\n");
+        const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(textToTranslate)}&langpair=${explicitLangpair}`;
+        const fbRes = await fetch(fallbackUrl);
+        if (fbRes.ok) {
+          const fbData: any = await fbRes.json();
+          const translatedBlob = fbData?.responseData?.translatedText;
+          if (typeof translatedBlob === "string" && translatedBlob.trim().length > 0) {
+            const splitLines = translatedBlob.split(/\r?\n/);
+            for (let idx = 0; idx < chunk.lines.length; idx++) {
+              const origLine = chunk.lines[idx];
+              const transLine = splitLines[idx] ? decodeEntities(splitLines[idx].trim()) : "";
+              const targetIdx = chunk.indices[idx];
+              if (transLine && transLine.length > 0) {
+                translatedResults[targetIdx] = transLine;
+                hadAnySuccess = true;
+              } else {
+                translatedResults[targetIdx] = origLine;
+              }
+            }
+          }
+        }
+      } catch (cErr) {
+        console.warn("[Lyrics Translation] Error traduciendo bloque:", cErr);
+      }
+    }
+
+    if (hadAnySuccess) {
+      res.json({ translations: translatedResults });
+      return;
     }
   } catch (fbErr) {
     console.warn("[Lyrics Translation] Fallback translation error:", fbErr);

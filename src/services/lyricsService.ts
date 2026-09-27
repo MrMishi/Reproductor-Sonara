@@ -428,6 +428,122 @@ export function clearLyricsMemoryCache(): void {
  * 4. Almacena las traducciones en memoria y retorna el arreglo ordenado de traducciones al español.
  */
 /**
+ * Helper: Decodifica entidades HTML que suelen devolver servicios de traducción (ej. &#39; -> ')
+ */
+function decodeTranslationEntities(str: string): string {
+  return str
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+/**
+ * Helper: Extrae de forma tolerante el arreglo de textos traducidos desde cualquier
+ * variante de respuesta (translations, translatedLines, objetos con text/translatedText, etc.).
+ */
+function parseTranslationsFromResponseData(data: any): string[] | null {
+  if (!data) return null;
+
+  const extractString = (item: any): string => {
+    if (typeof item === "string") return item;
+    if (item && typeof item === "object") {
+      return (
+        item.translatedText ||
+        item.text ||
+        item.translation ||
+        item.spanish ||
+        item.result ||
+        ""
+      );
+    }
+    return "";
+  };
+
+  if (Array.isArray(data)) {
+    return data.map(extractString);
+  }
+  if (Array.isArray(data.translations)) {
+    return data.translations.map(extractString);
+  }
+  if (Array.isArray(data.translatedLines)) {
+    return data.translatedLines.map(extractString);
+  }
+  if (Array.isArray(data.result)) {
+    return data.result.map(extractString);
+  }
+  if (typeof data.translatedText === "string") {
+    return data.translatedText.split(/\r?\n/);
+  }
+
+  return null;
+}
+
+/**
+ * Helper: Fallback de traducción por lotes directos (ej. para Android Capacitor o cuando
+ * el backend remoto no está disponible). Agrupa versos respetando límites de caracteres.
+ */
+async function fetchClientBatchTranslations(
+  linesToTranslate: string[],
+  langpair: string
+): Promise<string[] | null> {
+  try {
+    const results: string[] = new Array(linesToTranslate.length).fill("");
+    const chunks: { indices: number[]; lines: string[] }[] = [];
+    let currentChunk: { indices: number[]; lines: string[] } = { indices: [], lines: [] };
+    let currentLen = 0;
+
+    for (let i = 0; i < linesToTranslate.length; i++) {
+      const line = linesToTranslate[i];
+      if (currentLen + line.length > 400 || currentChunk.lines.length >= 8) {
+        if (currentChunk.lines.length > 0) {
+          chunks.push(currentChunk);
+          currentChunk = { indices: [], lines: [] };
+          currentLen = 0;
+        }
+      }
+      currentChunk.indices.push(i);
+      currentChunk.lines.push(line);
+      currentLen += line.length + 1;
+    }
+    if (currentChunk.lines.length > 0) {
+      chunks.push(currentChunk);
+    }
+
+    let hadAnyMatch = false;
+    for (const chunk of chunks) {
+      const joined = chunk.lines.join("\n");
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
+        joined
+      )}&langpair=${langpair}`;
+
+      const res = await fetch(url);
+      if (res.ok) {
+        const json: any = await res.json();
+        const rawBlob = json?.responseData?.translatedText;
+        if (typeof rawBlob === "string" && rawBlob.trim().length > 0) {
+          const split = rawBlob.split(/\r?\n/);
+          for (let k = 0; k < chunk.lines.length; k++) {
+            const translatedPart = split[k] ? decodeTranslationEntities(split[k].trim()) : "";
+            const targetIdx = chunk.indices[k];
+            if (translatedPart && translatedPart.length > 0) {
+              results[targetIdx] = translatedPart;
+              hadAnyMatch = true;
+            }
+          }
+        }
+      }
+    }
+
+    return hadAnyMatch ? results : null;
+  } catch (e) {
+    console.warn("[fetchClientBatchTranslations] Fallback directo no disponible:", e);
+    return null;
+  }
+}
+
+/**
  * Función: translateTextLinesToSpanish
  * Propósito: Traduce un conjunto de líneas de versos al español en una sola llamada agrupada.
  * 
@@ -452,12 +568,16 @@ export async function translateTextLinesToSpanish(lines: string[]): Promise<stri
       results[i] = "";
       continue;
     }
+    // Solo reutilizar de la caché si la traducción es un valor real y no idéntico al original
     if (spanishMemoryCache.has(trimmed)) {
-      results[i] = spanishMemoryCache.get(trimmed)!;
-    } else {
-      indicesToFetch.push(i);
-      textsToFetch.push(trimmed);
+      const cached = spanishMemoryCache.get(trimmed)!;
+      if (cached && cached.trim().toLowerCase() !== trimmed.toLowerCase()) {
+        results[i] = cached;
+        continue;
+      }
     }
+    indicesToFetch.push(i);
+    textsToFetch.push(trimmed);
   }
 
   if (textsToFetch.length > 0) {
@@ -498,9 +618,16 @@ export async function translateTextLinesToSpanish(lines: string[]): Promise<stri
 
         if (response.ok) {
           const data = await response.json();
-          if (data && Array.isArray(data.translations) && data.translations.length > 0) {
-            fetchedTranslations = data.translations;
-            break;
+          const parsed = parseTranslationsFromResponseData(data);
+          if (parsed && parsed.length > 0) {
+            // Verificar si devolvió traducciones reales y no solo repitió las entradas
+            const hasRealTranslation = parsed.some(
+              (p, idx) => p && p.trim().toLowerCase() !== (textsToFetch[idx] || "").toLowerCase()
+            );
+            if (hasRealTranslation) {
+              fetchedTranslations = parsed;
+              break;
+            }
           }
         }
       } catch (err) {
@@ -508,19 +635,25 @@ export async function translateTextLinesToSpanish(lines: string[]): Promise<stri
       }
     }
 
-    // 2. Asignar los resultados traducidos o usar limpiamente el texto original
+    // 2. Si el backend no devolvió traducciones reales, utilizar fallback de traducción por lotes
+    if (!fetchedTranslations) {
+      fetchedTranslations = await fetchClientBatchTranslations(textsToFetch, langpair);
+    }
+
+    // 3. Asignar los resultados traducidos procesando la respuesta limpia
     for (let k = 0; k < textsToFetch.length; k++) {
       const originalText = textsToFetch[k];
       const targetIndex = indicesToFetch[k];
+      const rawTrans = fetchedTranslations && fetchedTranslations[k] ? fetchedTranslations[k] : "";
+      const cleanTranslated = rawTrans ? decodeTranslationEntities(rawTrans.trim()) : "";
 
-      if (fetchedTranslations && fetchedTranslations[k] && fetchedTranslations[k].trim().length > 0) {
-        const cleanTranslated = fetchedTranslations[k].trim();
+      if (cleanTranslated && cleanTranslated.length > 0 && cleanTranslated.toLowerCase() !== originalText.toLowerCase()) {
         results[targetIndex] = cleanTranslated;
+        // Solo guardar en memoria traducciones verdaderas
         spanishMemoryCache.set(originalText, cleanTranslated);
       } else {
-        // Fallback limpio: mostrar el texto original sin romper la interfaz ni insertar mensajes de error binarios
+        // Fallback limpio: si no se pudo traducir este verso específico, usar texto original sin contaminar la caché
         results[targetIndex] = originalText;
-        spanishMemoryCache.set(originalText, originalText);
       }
     }
   }

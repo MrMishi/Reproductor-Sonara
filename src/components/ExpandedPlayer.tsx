@@ -271,8 +271,24 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
 
     const lyrics = currentTrack.lyrics;
     const hasSpanishAlready =
-      (lyrics.synced && lyrics.synced.some((l) => Boolean(l.spanish && l.spanish.trim().length > 0))) ||
-      (lyrics.pairedPlainLines && lyrics.pairedPlainLines.some((p) => Boolean(p.spanish && p.spanish.trim().length > 0)));
+      (lyrics.synced &&
+        lyrics.synced.some(
+          (l) =>
+            Boolean(
+              l.spanish &&
+                l.spanish.trim().length > 0 &&
+                l.spanish.trim().toLowerCase() !== (l.original || l.text || "").trim().toLowerCase()
+            )
+        )) ||
+      (lyrics.pairedPlainLines &&
+        lyrics.pairedPlainLines.some(
+          (p) =>
+            Boolean(
+              p.spanish &&
+                p.spanish.trim().length > 0 &&
+                p.spanish.trim().toLowerCase() !== p.original.trim().toLowerCase()
+            )
+        ));
 
     // Si ya contamos con las líneas en español traducidas previamente, activar inmediatamente la vista
     if (hasSpanishAlready) {

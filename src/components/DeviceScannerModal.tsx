@@ -32,7 +32,6 @@ import {
   Filter,
   EyeOff,
   VolumeX,
-  Smartphone,
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { Track } from "../types";
@@ -851,29 +850,6 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
                 Importar Música Local
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {/* Escaneo Automático Android Nativo */}
-                <button
-                  id="scan-native-directories-btn"
-                  disabled={isScanning}
-                  onClick={handleScanNativeAndroidFolders}
-                  className="p-3.5 rounded-xl border flex items-center gap-3 text-left hover:bg-emerald-500/10 transition-all disabled:opacity-50 cursor-pointer group col-span-1 sm:col-span-2 bg-emerald-500/5 border-emerald-500/20"
-                >
-                  <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 group-hover:scale-105 transition-transform shrink-0">
-                    <Smartphone className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold block text-white">Escaneo Automático Android</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold">
-                        Capacitor Native
-                      </span>
-                    </div>
-                    <span className="text-[11px] opacity-70">
-                      Escaneo recursivo: /Music, /Download, /YMusic, WhatsApp y raíz
-                    </span>
-                  </div>
-                </button>
-
                 <button
                   id="select-audio-files-btn"
                   disabled={isScanning}

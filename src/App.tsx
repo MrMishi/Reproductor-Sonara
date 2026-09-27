@@ -59,6 +59,7 @@ import { InstallAppModal } from "./components/InstallAppModal";
 import { HiddenTracksModal } from "./components/HiddenTracksModal";
 import { SleepTimerModal } from "./components/SleepTimerModal";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { SplashScreen } from "./components/SplashScreen";
 import { Capacitor } from "@capacitor/core";
 import { autoScanStartup, requestStoragePermissions } from "./services/nativeScanner";
 import {
@@ -208,6 +209,9 @@ export function SonoraApp() {
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Pantalla de Carga Inicial (Splash Screen tipo Lark Player, 1.5 a 2 segundos)
+  const [showSplash, setShowSplash] = useState<boolean>(true);
 
   // Pantalla de Bienvenida / Onboarding ("hasSeenWelcome")
   const [showWelcome, setShowWelcome] = useState<boolean>(() => {
@@ -549,6 +553,7 @@ export function SonoraApp() {
    * del elemento <audio>, garantizando que Android mantenga visible y reactiva la tarjeta de control.
    */
   const syncMediaSessionPlaybackState = (state: "playing" | "paused") => {
+    isPlayingRef.current = state === "playing";
     if (!("mediaSession" in navigator)) return;
     try {
       navigator.mediaSession.playbackState = state;
@@ -733,30 +738,53 @@ export function SonoraApp() {
   });
 
   // Asegurar la reproducción continua en segundo plano cuando la app se minimiza o se bloquea la pantalla
+  // REGLA ESTRICTA: Si el reproductor estaba en PAUSA, conservar rigurosamente su estado.
+  // Evitar forzar un '.play()' automático cuando la app cambie de estado o se minimice si estaba en PAUSA.
   useEffect(() => {
     const handleVisibilityChange = () => {
+      // Si la app estaba en PAUSA (el usuario pausó intencionalmente), NUNCA forzar play()
+      if (!isPlayingRef.current) {
+        return;
+      }
+
       if (document.hidden) {
-        // App minimizada o pantalla bloqueada en Android / MIUI / HyperOS
-        if (isPlayingRef.current && audioRef.current) {
-          audioEngine.resumeContext();
-          if (audioRef.current.paused) {
-            audioRef.current.play().catch((err) => {
-              console.warn("[BackgroundPlayback] Manteniendo reproducción en segundo plano:", err);
-            });
-          }
-        }
+        // App minimizada o pantalla bloqueada mientras ESTABA reproduciendo activamente:
+        // Mantener activo el contexto de audio nativo sin alterar el estado
+        audioEngine.resumeContext();
       } else {
-        // App restaurada al primer plano
-        if (isPlayingRef.current && audioRef.current && audioRef.current.paused) {
+        // App restaurada al primer plano mientras estaba reproduciendo
+        if (audioRef.current && !audioRef.current.paused) {
           audioEngine.resumeContext();
-          audioRef.current.play().catch(() => {});
         }
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    let appStateHandle: any = null;
+    if (Capacitor.isNativePlatform()) {
+      App.addListener("appStateChange", ({ isActive }) => {
+        // Si el reproductor estaba en PAUSA, conservar rigurosamente su estado
+        if (!isPlayingRef.current) {
+          return;
+        }
+        if (isActive) {
+          if (audioRef.current && !audioRef.current.paused) {
+            audioEngine.resumeContext();
+          }
+        } else {
+          audioEngine.resumeContext();
+        }
+      }).then((handle) => {
+        appStateHandle = handle;
+      });
+    }
+
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (appStateHandle && typeof appStateHandle.remove === "function") {
+        appStateHandle.remove();
+      }
     };
   }, []);
 
@@ -773,10 +801,12 @@ export function SonoraApp() {
     if (currentTrack) {
       try {
         const origin = window.location.origin;
-        const defaultPng = `${origin}/pwa-512x512.png`;
+        const defaultPng = `${origin}/icon.png`;
         const urlPortadaCancion =
           currentTrack.coverUrl && !currentTrack.coverUrl.includes("svg")
-            ? currentTrack.coverUrl
+            ? (currentTrack.coverUrl.startsWith("http") || currentTrack.coverUrl.startsWith("data:")
+                ? currentTrack.coverUrl
+                : `${origin}${currentTrack.coverUrl}`)
             : defaultPng;
 
         // 1. Actualizar metadatos de la sesión multimedia
@@ -792,6 +822,7 @@ export function SonoraApp() {
             { src: urlPortadaCancion, sizes: "384x384", type: "image/png" },
             { src: urlPortadaCancion, sizes: "512x512", type: "image/png" },
             // Respaldo de alta resolución para centros de control y bloqueo de pantalla
+            { src: `${origin}/icon.png`, sizes: "512x512", type: "image/png" },
             { src: `${origin}/pwa-192x192.png`, sizes: "192x192", type: "image/png" },
             { src: `${origin}/pwa-512x512.png`, sizes: "512x512", type: "image/png" },
           ],
@@ -810,8 +841,9 @@ export function SonoraApp() {
           audioRef.current
             .play()
             .then(() => {
+              isPlayingRef.current = true;
               setIsPlaying(true);
-              if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+              syncMediaSessionPlaybackState("playing");
             })
             .catch(console.warn);
         } else {
@@ -821,10 +853,11 @@ export function SonoraApp() {
 
       // Acción 'pause': Ejecuta la función de pausar
       navigator.mediaSession.setActionHandler("pause", () => {
+        isPlayingRef.current = false;
         if (audioRef.current && !audioRef.current.paused) {
           audioRef.current.pause();
           setIsPlaying(false);
-          if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+          syncMediaSessionPlaybackState("paused");
         } else {
           handleTogglePlayRef.current();
         }
@@ -1442,6 +1475,7 @@ export function SonoraApp() {
           }
         }}
         onEnded={() => {
+          isPlayingRef.current = false;
           setIsPlaying(false);
           audioEngine.setPlaybackState(false);
           syncMediaSessionPlaybackState("paused");
@@ -1452,22 +1486,26 @@ export function SonoraApp() {
           }
         }}
         onPlay={() => {
+          isPlayingRef.current = true;
           setIsPlaying(true);
           audioEngine.setPlaybackState(true);
           syncMediaSessionPlaybackState("playing");
         }}
         onPause={() => {
+          isPlayingRef.current = false;
           setIsPlaying(false);
           audioEngine.setPlaybackState(false);
           syncMediaSessionPlaybackState("paused");
         }}
         onError={() => {
+          isPlayingRef.current = false;
           const mediaErr = audioRef.current?.error;
           if (mediaErr) {
             console.warn(`Audio playback issue (code ${mediaErr.code}): ${mediaErr.message || "media load failed"}`);
           }
           setToastMessage("No se pudo cargar el archivo de audio.");
           setIsPlaying(false);
+          syncMediaSessionPlaybackState("paused");
         }}
       />
 
@@ -1739,9 +1777,14 @@ export function SonoraApp() {
         onClose={() => setShowPermissionDialog(false)}
       />
 
+      {/* Pantalla de Carga Inicial (Splash Screen tipo Lark Player) */}
+      {showSplash && (
+        <SplashScreen onFinish={() => setShowSplash(false)} />
+      )}
+
       {/* Pantalla de Bienvenida / Onboarding */}
       <WelcomeScreen
-        isOpen={showWelcome}
+        isOpen={!showSplash && showWelcome}
         onClose={handleCloseWelcome}
       />
     </div>
