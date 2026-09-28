@@ -110,9 +110,9 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
   const [processedCount, setProcessedCount] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Audio Duration & Blacklist Filters (Default: 30 seconds minimum to eliminate WhatsApp audio / voice notes)
+  // Audio Duration & Blacklist Filters (Default: 60 seconds minimum to eliminate WhatsApp audio / voice notes)
   const [filterShortAudios, setFilterShortAudios] = useState<boolean>(true);
-  const [minDurationSeconds, setMinDurationSeconds] = useState<number>(30);
+  const [minDurationSeconds, setMinDurationSeconds] = useState<number>(60);
   const [filterHiddenTracks, setFilterHiddenTracks] = useState<boolean>(true);
   const [showPermissionDialog, setShowPermissionDialog] = useState<boolean>(false);
 
@@ -834,11 +834,11 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
                     onChange={(e) => setMinDurationSeconds(Number(e.target.value))}
                     className="bg-neutral-800 text-white rounded-lg px-2.5 py-1.5 text-xs border border-white/10 font-bold focus:outline-none cursor-pointer hover:border-white/20"
                   >
-                    <option value={30}>30s (Recomendado)</option>
-                    <option value={60}>60s</option>
+                    <option value={60}>60s (Mínimo 1 min - Recomendado)</option>
+                    <option value={30}>30s</option>
                     <option value={75}>75s</option>
                     <option value={90}>90s</option>
-                    <option value={120}>120s</option>
+                    <option value={120}>120s (2 min)</option>
                   </select>
                 </div>
               )}

@@ -462,64 +462,83 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
           <span className="hidden sm:inline">Minimizar</span>
         </button>
 
-        {/* Center Tabs: Tema (Cover) | Letras | Cola | Audio & EQ */}
+        {/* Holographic Cyberpunk HUD Tactical Menu */}
         <div
-          className="flex items-center gap-1 p-1 rounded-full border bg-neutral-900/80 backdrop-blur-sm"
-          style={{ borderColor: "var(--color-border-subtle)" }}
+          className="flex items-center gap-0.5 sm:gap-1 p-1 bg-black/60 border border-purple-500/30 backdrop-blur-md relative [clip-path:polygon(8px_0,100%_0,100%_calc(100%-8px),calc(100%-8px)_100%,0_100%,0_8px)]"
         >
+          {/* Neon tactical corner accents */}
+          <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-fuchsia-400 pointer-events-none" />
+          <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-cyan-400 pointer-events-none" />
+
+          {/* Tab 1: Tema (Cover) */}
           <button
             id="expanded-tab-cover"
             onClick={() => setActiveTab("cover")}
-            className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`relative px-2.5 sm:px-4 py-1.5 text-xs font-mono tracking-wider transition-all flex items-center gap-1.5 ${
               activeTab === "cover"
-                ? "bg-white text-black shadow-md"
-                : "text-neutral-400 hover:text-white"
+                ? "text-fuchsia-300 font-bold bg-purple-500/15"
+                : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
             }`}
           >
             <Music2 className="w-3.5 h-3.5" />
-            <span>Tema</span>
+            <span className="uppercase text-[11px] sm:text-xs">Tema</span>
+            {activeTab === "cover" && (
+              <span className="absolute bottom-0 inset-x-1.5 h-0.5 bg-gradient-to-r from-purple-500 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.95)]" />
+            )}
           </button>
+
+          {/* Tab 2: Letras */}
           <button
             id="expanded-tab-lyrics"
             onClick={() => setActiveTab("lyrics")}
-            className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 relative ${
+            className={`relative px-2.5 sm:px-4 py-1.5 text-xs font-mono tracking-wider transition-all flex items-center gap-1.5 ${
               activeTab === "lyrics"
-                ? "bg-white text-black shadow-md"
-                : "text-neutral-400 hover:text-white"
+                ? "text-fuchsia-300 font-bold bg-purple-500/15"
+                : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Letras</span>
+            <span className="uppercase text-[11px] sm:text-xs">Letras</span>
             {currentTrack.lyrics && (
-              <span
-                className="w-1.5 h-1.5 rounded-full"
-                style={{ backgroundColor: "var(--color-accent, #FF0000)" }}
-              />
+              <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-400 shadow-[0_0_6px_rgba(236,72,153,1)]" />
+            )}
+            {activeTab === "lyrics" && (
+              <span className="absolute bottom-0 inset-x-1.5 h-0.5 bg-gradient-to-r from-purple-500 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.95)]" />
             )}
           </button>
+
+          {/* Tab 3: Cola */}
           <button
             id="expanded-tab-queue"
             onClick={() => setActiveTab("queue")}
-            className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`relative px-2.5 sm:px-4 py-1.5 text-xs font-mono tracking-wider transition-all flex items-center gap-1.5 ${
               activeTab === "queue"
-                ? "bg-white text-black shadow-md"
-                : "text-neutral-400 hover:text-white"
+                ? "text-fuchsia-300 font-bold bg-purple-500/15"
+                : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
             }`}
           >
             <ListMusic className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">A continuación</span>
+            <span className="uppercase text-[11px] sm:text-xs">Cola</span>
+            {activeTab === "queue" && (
+              <span className="absolute bottom-0 inset-x-1.5 h-0.5 bg-gradient-to-r from-purple-500 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.95)]" />
+            )}
           </button>
+
+          {/* Tab 4: Audio & EQ */}
           <button
             id="expanded-tab-details"
             onClick={() => setActiveTab("details")}
-            className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`relative px-2.5 sm:px-4 py-1.5 text-xs font-mono tracking-wider transition-all flex items-center gap-1.5 ${
               activeTab === "details"
-                ? "bg-white text-black shadow-md"
-                : "text-neutral-400 hover:text-white"
+                ? "text-fuchsia-300 font-bold bg-purple-500/15"
+                : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Audio & EQ</span>
+            <span className="uppercase text-[11px] sm:text-xs">EQ / Info</span>
+            {activeTab === "details" && (
+              <span className="absolute bottom-0 inset-x-1.5 h-0.5 bg-gradient-to-r from-purple-500 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.95)]" />
+            )}
           </button>
         </div>
 
@@ -530,7 +549,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
             <button
               id="expanded-sleep-timer-btn"
               onClick={onOpenSleepTimer}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 text-xs font-semibold border ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 text-xs font-semibold border ${
                 sleepTimer?.isActive
                   ? "bg-indigo-500/25 text-indigo-200 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse"
                   : "hover:bg-white/10 text-neutral-300 hover:text-white border-white/10"
@@ -561,11 +580,11 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                 onClose();
                 onToggleMiniMode();
               }}
-              className="px-2.5 sm:px-3 py-1.5 rounded-full hover:bg-white/10 transition-colors flex items-center gap-1 text-xs font-semibold border border-white/10 text-neutral-300 hover:text-white"
-              title="Modo Mini flotante"
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl hover:bg-purple-500/20 transition-all flex items-center gap-1.5 text-xs font-mono border border-purple-500/40 text-purple-300 hover:text-white shadow-[0_0_12px_rgba(168,85,247,0.3)] bg-purple-950/40"
+              title="Activar ventana flotante Dynamic Glass"
             >
-              <PictureInPicture2 className="w-4 h-4" />
-              <span className="hidden md:inline">Mini</span>
+              <Sparkles className="w-3.5 h-3.5 text-fuchsia-400 animate-pulse" />
+              <span className="hidden sm:inline font-bold">Dynamic Glass</span>
             </button>
           )}
 
@@ -615,11 +634,21 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                 transition: isDragging
                   ? "none"
                   : "transform 0.28s cubic-bezier(0.2, 0, 0, 1), opacity 0.28s ease-out",
-                borderColor: "var(--color-border-subtle)",
-                backgroundColor: "var(--color-surface, #121212)",
+                borderColor: "rgba(217, 70, 239, 0.4)",
+                backgroundColor: "var(--color-surface, #0d0d12)",
+                clipPath: "polygon(22px 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%, 0 22px)",
               }}
-              className="relative w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 rounded-3xl overflow-hidden shadow-2xl border flex items-center justify-center group mb-6 cursor-grab active:cursor-grabbing select-none"
+              className="relative w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 overflow-hidden border border-fuchsia-500/40 shadow-[0_0_35px_rgba(168,85,247,0.35),0_0_80px_rgba(236,72,153,0.2)] flex items-center justify-center group mb-6 cursor-grab active:cursor-grabbing select-none"
             >
+              {/* Tactical Cyberpunk HUD Corner Overlays */}
+              <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-fuchsia-400 z-10 pointer-events-none" />
+              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-cyan-400 z-10 pointer-events-none" />
+              <div className="absolute top-2 right-3 font-mono text-[9px] tracking-widest text-fuchsia-400/80 z-10 pointer-events-none select-none uppercase">
+                [ HUD // HI-FI 45° ]
+              </div>
+              <div className="absolute bottom-2 left-3 font-mono text-[9px] tracking-widest text-cyan-400/80 z-10 pointer-events-none select-none uppercase">
+                {currentTrack.format || "STEREO 24B"}
+              </div>
               {visualMode === "cover" ? (
                 <img
                   src={currentTrack.coverUrl}
@@ -1108,18 +1137,31 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
         )}
 
         {/* ========================================================= */}
-        {/* VIEW 3: QUEUE (A CONTINUACIÓN)                            */}
+        {/* VIEW 3: QUEUE (COLA DE REPRODUCCIÓN - CONSOLA FUTURISTA)  */}
         {/* ========================================================= */}
         {activeTab === "queue" && (
-          <div className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full p-4 sm:p-6">
-            <div className="flex items-center justify-between mb-4 shrink-0">
-              <h3 className="font-bold text-sm tracking-wider uppercase opacity-70">
-                Cola de Reproducción ({queue.length} temas)
-              </h3>
-              <span className="text-xs opacity-60">Tema {currentTrackIndex + 1} de {queue.length}</span>
+          <div className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full p-3 sm:p-5">
+            <div className="flex items-center justify-between mb-3 px-1 shrink-0 border-b border-purple-500/20 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 bg-fuchsia-400 shadow-[0_0_8px_rgba(236,72,153,1)] animate-pulse" />
+                <h3 className="font-mono text-xs font-bold tracking-widest uppercase text-purple-300">
+                  // COLA DE REPRODUCCIÓN [{queue.length} PISTAS]
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {playbackMode === "shuffle" && (
+                  <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-fuchsia-950/80 border border-fuchsia-500/40 text-fuchsia-300 flex items-center gap-1 shadow-[0_0_10px_rgba(236,72,153,0.4)]">
+                    <Shuffle className="w-3 h-3" />
+                    Orden Aleatorio Real
+                  </span>
+                )}
+                <span className="font-mono text-xs text-neutral-400">
+                  [{currentTrackIndex + 1}/{queue.length}]
+                </span>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-1.5 pr-2">
+            <div className="flex-1 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
               {queue.map((track, idx) => {
                 const isCurrent = track.id === currentTrack.id;
                 return (
@@ -1127,29 +1169,54 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     key={`${track.id}-${idx}`}
                     id={`queue-item-${track.id}`}
                     onClick={() => onSelectTrack(track, idx)}
-                    className={`flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all ${
+                    style={{
+                      clipPath: "polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px)",
+                    }}
+                    className={`flex items-center justify-between p-2.5 cursor-pointer transition-all border font-mono ${
                       isCurrent
-                        ? "bg-white/15 shadow-sm font-bold"
-                        : "hover:bg-white/5 opacity-80 hover:opacity-100"
+                        ? "bg-purple-950/60 border-fuchsia-500/60 shadow-[0_0_15px_rgba(236,72,153,0.3)] text-white"
+                        : "bg-black/40 hover:bg-purple-950/20 border-white/5 hover:border-purple-500/30 text-neutral-300 hover:text-white"
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="w-5 text-xs text-center opacity-60 font-mono">
-                        {isCurrent && isPlaying ? "▶" : idx + 1}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-6 text-[11px] text-center font-mono shrink-0">
+                        {isCurrent && isPlaying ? (
+                          <span className="text-fuchsia-400 font-bold animate-pulse">▶</span>
+                        ) : (
+                          <span className="opacity-50 text-[10px]">{String(idx + 1).padStart(2, "0")}</span>
+                        )}
                       </span>
-                      <img
-                        src={track.coverUrl}
-                        alt={track.title}
-                        className="w-10 h-10 rounded-lg object-cover shrink-0"
-                      />
+                      {/* Carátula compacta con biselado 45° */}
+                      <div
+                        style={{
+                          clipPath: "polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px)",
+                        }}
+                        className={`w-9 h-9 shrink-0 overflow-hidden border ${
+                          isCurrent ? "border-fuchsia-400 shadow-[0_0_8px_rgba(236,72,153,0.5)]" : "border-white/10"
+                        }`}
+                      >
+                        <img
+                          src={track.coverUrl}
+                          alt={track.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
                       <div className="min-w-0">
                         <p
-                          className="text-xs sm:text-sm font-semibold truncate"
-                          style={{ color: isCurrent ? "var(--color-accent)" : undefined }}
+                          className={`text-xs sm:text-sm font-semibold truncate ${
+                            isCurrent ? "text-fuchsia-300 font-bold" : "text-white"
+                          }`}
                         >
                           {track.title}
                         </p>
-                        <p className="text-[11px] truncate opacity-70">{track.artist}</p>
+                        <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 truncate">
+                          <span className="truncate">{track.artist}</span>
+                          {track.format && (
+                            <span className="px-1 py-0.2 bg-white/5 border border-white/10 text-[9px] text-purple-300">
+                              {track.format}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -1157,7 +1224,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                       className="flex items-center gap-2 shrink-0 ml-2"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <span className="text-xs font-mono opacity-60">
+                      <span className="text-[11px] font-mono opacity-60">
                         {formatTime(track.duration)}
                       </span>
                       {onHideTrack && (
@@ -1165,7 +1232,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                           id={`queue-hide-btn-${track.id}`}
                           onClick={() => onHideTrack(track)}
                           title="Ocultar pista"
-                          className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white opacity-40 hover:opacity-100 transition-all"
+                          className="p-1 rounded hover:bg-white/10 text-neutral-400 hover:text-white opacity-40 hover:opacity-100 transition-all"
                         >
                           <EyeOff className="w-3.5 h-3.5" />
                         </button>
@@ -1174,8 +1241,8 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                         <button
                           id={`queue-delete-btn-${track.id}`}
                           onClick={() => onDeleteTracks([track.id])}
-                          title="Eliminar del reproductor"
-                          className="p-1.5 rounded-full hover:bg-red-500/20 text-neutral-400 hover:text-red-400 opacity-40 hover:opacity-100 transition-all"
+                          title="Eliminar de la cola"
+                          className="p-1 rounded hover:bg-red-500/20 text-neutral-400 hover:text-red-400 opacity-40 hover:opacity-100 transition-all"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

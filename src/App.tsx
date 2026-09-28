@@ -524,9 +524,9 @@ export function SonoraApp() {
     initLibrary();
   }, []);
 
-  // Pistas visibles con filtro de notas de voz ('PTT-') y audios cortos (< 30s)
+  // Pistas visibles con filtro de notas de voz ('PTT-') y audios cortos (< 60s)
   // Se admite el prefijo 'AUD-' para no descartar canciones legítimas
-  // Asegurarse de que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
+  // Asegurarse de que el filtro de duración (60s / 1 minuto) descarte notas de voz y audios breves sin descartar canciones con metadatos pendientes.
   const visibleTracks = useMemo(() => {
     return tracks.filter((t) => {
       if (t.fileName && /^PTT-/i.test(t.fileName)) return false;
@@ -537,7 +537,7 @@ export function SonoraApp() {
         t.duration !== null &&
         !isNaN(t.duration) &&
         t.duration > 0 &&
-        t.duration < 30
+        t.duration < 60
       ) {
         return false;
       }
@@ -545,7 +545,30 @@ export function SonoraApp() {
     });
   }, [tracks, filterShortAudios]);
 
-  const currentTrack = visibleTracks[currentTrackIndex] || tracks[currentTrackIndex] || null;
+  // Cola reordenada físicamente para Modo Aleatorio (Shuffle)
+  const [shuffledQueue, setShuffledQueue] = useState<Track[] | null>(null);
+
+  // Helper para mezclar la lista manteniendo la canción actual anclada al inicio
+  const createShuffledQueue = (list: Track[], activeTrack: Track | null): Track[] => {
+    if (list.length <= 1) return [...list];
+    const others = activeTrack ? list.filter((t) => t.id !== activeTrack.id) : [...list];
+    const shuffledOthers = [...others];
+    for (let i = shuffledOthers.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffledOthers[i], shuffledOthers[j]] = [shuffledOthers[j], shuffledOthers[i]];
+    }
+    return activeTrack ? [activeTrack, ...shuffledOthers] : shuffledOthers;
+  };
+
+  // Cola activa: si shuffle está activo y existe shuffledQueue, se utiliza la cola física reordenada
+  const activeQueue = useMemo(() => {
+    if (playbackMode === "shuffle" && shuffledQueue && shuffledQueue.length > 0) {
+      return shuffledQueue;
+    }
+    return visibleTracks;
+  }, [playbackMode, shuffledQueue, visibleTracks]);
+
+  const currentTrack = activeQueue[currentTrackIndex] || visibleTracks[currentTrackIndex] || tracks[currentTrackIndex] || null;
 
   // Refs estables para eventos de MediaSession y segundo plano en Android
   const isPlayingRef = useRef(isPlaying);
@@ -695,21 +718,18 @@ export function SonoraApp() {
     }
   };
 
-  // Next Track
+  // Next Track (Avanza exactamente según el orden físico visualizado en la cola de reproducción)
   const handleNext = () => {
-    const activeList = visibleTracks.length > 0 ? visibleTracks : tracks;
+    const activeList = activeQueue.length > 0 ? activeQueue : (visibleTracks.length > 0 ? visibleTracks : tracks);
     if (activeList.length === 0) return;
 
-    if (playbackMode === "shuffle") {
-      const nextIdx = Math.floor(Math.random() * activeList.length);
-      setCurrentTrackIndex(nextIdx);
-    } else if (playbackMode === "repeat-one") {
+    if (playbackMode === "repeat-one") {
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
         audioRef.current.play().catch(() => {});
       }
     } else {
-      // Normal or repeat-all
+      // Tanto en normal, repeat-all, como en shuffle (que ya está ordenado físicamente):
       const nextIdx = (currentTrackIndex + 1) % activeList.length;
       setCurrentTrackIndex(nextIdx);
     }
@@ -719,7 +739,7 @@ export function SonoraApp() {
 
   // Previous Track
   const handlePrev = () => {
-    const activeList = visibleTracks.length > 0 ? visibleTracks : tracks;
+    const activeList = activeQueue.length > 0 ? activeQueue : (visibleTracks.length > 0 ? visibleTracks : tracks);
     if (activeList.length === 0) return;
 
     if (currentTime > 3) {
@@ -987,12 +1007,35 @@ export function SonoraApp() {
     }
   };
 
-  // Cycle playback mode
+  // Cycle playback mode con reordenamiento físico real de la cola en Shuffle
   const handleCyclePlaybackMode = () => {
     const modes: PlaybackMode[] = ["normal", "repeat-all", "repeat-one", "shuffle"];
     const currentIdx = modes.indexOf(playbackMode);
     const nextMode = modes[(currentIdx + 1) % modes.length];
     setPlaybackMode(nextMode);
+
+    const baseList = visibleTracks.length > 0 ? visibleTracks : tracks;
+    if (nextMode === "shuffle") {
+      // Activar Shuffle: reordenar físicamente la cola colocando la pista actual al inicio
+      const activeCurrent = (shuffledQueue ? shuffledQueue[currentTrackIndex] : null) || baseList[currentTrackIndex] || null;
+      const newShuffled = createShuffledQueue(baseList, activeCurrent);
+      setShuffledQueue(newShuffled);
+      setCurrentTrackIndex(0);
+      setToastMessage("Modo Aleatorio activado: Cola reordenada físicamente");
+    } else {
+      // Desactivar Shuffle: restaurar orden original
+      if (shuffledQueue) {
+        const activeCurrent = shuffledQueue[currentTrackIndex] || null;
+        if (activeCurrent) {
+          const originalIdx = baseList.findIndex((t) => t.id === activeCurrent.id);
+          if (originalIdx !== -1) {
+            setCurrentTrackIndex(originalIdx);
+          }
+        }
+        setShuffledQueue(null);
+        setToastMessage("Modo normal: Cola original restaurada");
+      }
+    }
   };
 
   // Direct play from list
@@ -1002,38 +1045,52 @@ export function SonoraApp() {
       return;
     }
 
-    const foundIndex = tracks.findIndex((t) => t.id === track.id);
-    if (foundIndex !== -1) {
-      if (foundIndex === currentTrackIndex && isPlaying) {
-        handleTogglePlay();
-      } else {
+    const baseList = visibleTracks.length > 0 ? visibleTracks : tracks;
+    if (playbackMode === "shuffle") {
+      // Si el usuario toca una pista mientras está en Shuffle, re-anclar la cola empezando por dicha canción
+      const newShuffled = createShuffledQueue(baseList, track);
+      setShuffledQueue(newShuffled);
+      setCurrentTrackIndex(0);
+    } else {
+      const foundIndex = activeQueue.findIndex((t) => t.id === track.id);
+      if (foundIndex !== -1) {
+        if (foundIndex === currentTrackIndex && isPlaying) {
+          handleTogglePlay();
+          return;
+        }
         setCurrentTrackIndex(foundIndex);
-        setIsPlaying(true);
-        if (audioRef.current) {
-          audioRef.current.currentTime = 0;
-          audioRef.current.src = track.url;
-          audioRef.current
-            .play()
-            .then(() => {
-              setIsPlaying(true);
-              syncMediaSessionPlaybackState("playing");
-            })
-            .catch((err) => {
-              // Si el audio está sonando o fue una interrupción transitoria/abort, no mostrar toast falso
-              if (audioRef.current && !audioRef.current.paused) {
-                setIsPlaying(true);
-                syncMediaSessionPlaybackState("playing");
-                return;
-              }
-              if (err?.name === "AbortError") {
-                return;
-              }
-              console.warn("Playback error:", err);
-              setIsPlaying(false);
-              syncMediaSessionPlaybackState("paused");
-            });
+      } else {
+        const baseIndex = baseList.findIndex((t) => t.id === track.id);
+        if (baseIndex !== -1) {
+          setCurrentTrackIndex(baseIndex);
         }
       }
+    }
+
+    setIsPlaying(true);
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.src = track.url;
+      audioRef.current
+        .play()
+        .then(() => {
+          setIsPlaying(true);
+          syncMediaSessionPlaybackState("playing");
+        })
+        .catch((err) => {
+          // Si el audio está sonando o fue una interrupción transitoria/abort, no mostrar toast falso
+          if (audioRef.current && !audioRef.current.paused) {
+            setIsPlaying(true);
+            syncMediaSessionPlaybackState("playing");
+            return;
+          }
+          if (err?.name === "AbortError") {
+            return;
+          }
+          console.warn("Playback error:", err);
+          setIsPlaying(false);
+          syncMediaSessionPlaybackState("paused");
+        });
     }
   };
 
@@ -1675,7 +1732,7 @@ export function SonoraApp() {
         isOpen={isExpandedPlayerOpen}
         onClose={() => setIsExpandedPlayerOpen(false)}
         currentTrack={currentTrack}
-        queue={visibleTracks}
+        queue={activeQueue}
         currentTrackIndex={currentTrackIndex}
         isPlaying={isPlaying}
         currentTime={currentTime}

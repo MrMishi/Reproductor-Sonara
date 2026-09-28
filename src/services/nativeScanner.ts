@@ -187,12 +187,12 @@ export function isAudioFileName(filename: string): boolean {
  * - Descarta automáticamente notas de voz de mensajería identificadas por 'PTT-' (WhatsApp Push-To-Talk).
  * - IMPORTANTE: NO descarta canciones con prefijo 'AUD-' (removido bloqueo para admitir canciones legítimas).
  * - IMPORTANTE: NO descarta canciones si el metadato de tiempo aún no se ha terminado de leer (duración es 0, indefinida o NaN).
- * - Solo descarta si la duración fue leída con certeza (> 0) y es menor a 30 segundos (o minDurationSeconds si está activo).
+ * - Solo descarta si la duración fue leída con certeza (> 0) y es menor a 60 segundos (o minDurationSeconds si está activo).
  */
 export function isVoiceNoteOrShortAudio(
   fileName: string,
   duration?: number,
-  minDurationSeconds: number = 30
+  minDurationSeconds: number = 60
 ): boolean {
   if (!fileName) return false;
   const baseName = fileName.replace(/^.*[/\\]/, "").trim();
@@ -562,8 +562,8 @@ export async function scanNativeMusicDirectories(
       await new Promise((r) => setTimeout(r, 0));
 
       try {
-        // Filtro estricto de notas de voz: descarta si comienza por 'PTT-' o por duración < 30s
-        if (isVoiceNoteOrShortAudio(item.fileName, undefined, 30)) {
+        // Filtro estricto de notas de voz: descarta si comienza por 'PTT-' o por duración < 60s
+        if (isVoiceNoteOrShortAudio(item.fileName, undefined, 60)) {
           continue;
         }
 
@@ -599,10 +599,10 @@ export async function scanNativeMusicDirectories(
           continue;
         }
 
-        // 2. FILTRO DE DURACIÓN (30s):
-        // Asegurarse de que el filtro de duración (30s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
-        // Solo descartar si filterShortAudios está activo, duration > 0 (leída con certeza) y duration < 30.
-        if (filterShortAudios && duration && duration > 0 && duration < 30) {
+        // 2. FILTRO DE DURACIÓN (60s):
+        // Asegurarse de que el filtro de duración (60s) NO descarte canciones si el metadato de tiempo aún no se ha terminado de leer.
+        // Solo descartar si filterShortAudios está activo, duration > 0 (leída con certeza) y duration < 60.
+        if (filterShortAudios && duration && duration > 0 && duration < 60) {
           continue;
         }
 
@@ -806,7 +806,7 @@ export async function scanSpecificNativeDirectory(
 
       try {
         // Descartar notas de voz que comiencen por 'PTT-' (se admite prefijo 'AUD-')
-        if (isVoiceNoteOrShortAudio(item.fileName, undefined, 30)) {
+        if (isVoiceNoteOrShortAudio(item.fileName, undefined, 60)) {
           continue;
         }
 
@@ -837,9 +837,9 @@ export async function scanSpecificNativeDirectory(
           continue;
         }
 
-        // FILTRO DE DURACIÓN (30s):
+        // FILTRO DE DURACIÓN (60s):
         // NO descartar canciones si el metadato de tiempo aún no se ha terminado de leer (duration <= 0).
-        if (filterShortAudios && duration && duration > 0 && duration < 30) {
+        if (filterShortAudios && duration && duration > 0 && duration < 60) {
           continue;
         }
 

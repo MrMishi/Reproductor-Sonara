@@ -29,6 +29,7 @@ import {
   SkipForward,
   ChevronUp,
   Music,
+  Sparkles,
 } from "lucide-react";
 import { Track, PlaybackMode } from "../types";
 
@@ -64,6 +65,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
   onNext,
   onSeek,
   onOpenExpanded,
+  onToggleMiniMode,
 }) => {
   const [isHoveringProgress, setIsHoveringProgress] = useState(false);
   const progressBarRef = useRef<HTMLDivElement | null>(null);
@@ -131,14 +133,17 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
       </div>
 
       <div className="flex items-center justify-between px-3 sm:px-6 py-2.5 gap-4 max-w-7xl mx-auto">
-        {/* 1. EXTREMO IZQUIERDO: ÚNICAMENTE la carátula/portada del álbum (sin texto) */}
+        {/* 1. EXTREMO IZQUIERDO: Portada del álbum con biselado 45° Cyberpunk HUD y resplandor neón */}
         <div className="flex items-center shrink-0">
           <button
             type="button"
             id="player-artwork-thumbnail"
             onClick={onOpenExpanded}
             title="Abrir reproductor a pantalla completa"
-            className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden shrink-0 cursor-pointer shadow-md border border-white/10 group bg-neutral-800 transition-transform hover:scale-105 active:scale-95 focus:outline-none"
+            style={{
+              clipPath: "polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px)",
+            }}
+            className="relative w-11 h-11 sm:w-12 sm:h-12 overflow-hidden shrink-0 cursor-pointer shadow-[0_0_14px_rgba(168,85,247,0.4)] border border-purple-500/50 group bg-neutral-900 transition-all hover:scale-105 active:scale-95 focus:outline-none"
           >
             {currentTrack.coverUrl ? (
               <img
@@ -200,8 +205,20 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
           </button>
         </div>
 
-        {/* 3. EXTREMO DERECHO: Flecha/icono para desplegar el reproductor completo */}
-        <div className="flex items-center justify-end shrink-0">
+        {/* 3. EXTREMO DERECHO: Botón Modo Flotante Dynamic Glass y Desplegar completo */}
+        <div className="flex items-center justify-end gap-1.5 sm:gap-2 shrink-0">
+          {onToggleMiniMode && (
+            <button
+              id="bottom-player-dynamic-glass-btn"
+              onClick={onToggleMiniMode}
+              title="Activar ventana flotante Dynamic Glass"
+              className="px-2.5 py-1.5 rounded-lg border border-purple-500/30 bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 hover:text-white transition-all flex items-center gap-1.5 text-xs font-mono shadow-[0_0_10px_rgba(168,85,247,0.25)] active:scale-95 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-fuchsia-400 animate-pulse" />
+              <span className="hidden sm:inline font-bold">Dynamic Glass</span>
+            </button>
+          )}
+
           <button
             id="player-expand-btn"
             onClick={onOpenExpanded}

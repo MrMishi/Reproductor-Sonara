@@ -113,16 +113,28 @@ const TrackRow = React.memo<TrackRowProps>(
             onPlay(track, idx);
           }
         }}
-        className={`relative flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4 rounded-2xl cursor-pointer transition-all group select-none ${
+        style={{
+          clipPath: "polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px)",
+        }}
+        className={`relative flex items-center justify-between gap-3 px-3 py-2 sm:px-3.5 rounded-none cursor-pointer transition-all group select-none border font-mono ${
           isSelected
-            ? "bg-violet-950/40 border border-violet-500/30 shadow-sm"
+            ? "bg-violet-950/50 border-violet-500/50 shadow-[0_0_12px_rgba(139,92,246,0.25)]"
             : isCurrent
-            ? "bg-white/[0.08] shadow-sm border border-white/10"
-            : "hover:bg-white/[0.04] border border-transparent"
+            ? "bg-purple-950/40 border-fuchsia-500/50 shadow-[0_0_14px_rgba(236,72,153,0.25)]"
+            : "bg-black/20 hover:bg-purple-950/20 border-white/5 hover:border-purple-500/25"
         }`}
       >
-        {/* Izquierda: Portada + Selección + Título + Artista */}
-        <div className="flex items-center gap-3 min-w-0 flex-1">
+        {/* Izquierda: Portada biselada 45° + Selección + Título + Artista */}
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+          {/* Índice estilo consola futurista */}
+          <span className="w-5 text-[10px] text-center font-mono text-purple-400/60 shrink-0 hidden xs:inline select-none">
+            {isCurrent && isPlaying ? (
+              <span className="text-fuchsia-400 font-bold animate-pulse">▶</span>
+            ) : (
+              String(idx + 1).padStart(2, "0")
+            )}
+          </span>
+
           {isSelectionMode && (
             <button
               type="button"
@@ -139,8 +151,17 @@ const TrackRow = React.memo<TrackRowProps>(
             </button>
           )}
 
-          {/* Portada pequeña con indicador de reproducción */}
-          <div className="relative w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-neutral-900 border border-white/5 shadow-sm group-hover:shadow-md transition-shadow">
+          {/* Portada pequeña con biselado 45° Cyberpunk HUD y resplandor neón */}
+          <div
+            style={{
+              clipPath: "polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px)",
+            }}
+            className={`relative w-10 h-10 sm:w-11 sm:h-11 overflow-hidden shrink-0 bg-neutral-900 border transition-all ${
+              isCurrent
+                ? "border-fuchsia-500/60 shadow-[0_0_12px_rgba(236,72,153,0.4)]"
+                : "border-purple-500/30 group-hover:border-purple-500/60 shadow-[0_0_8px_rgba(168,85,247,0.2)]"
+            }`}
+          >
             <img
               src={track.coverUrl}
               alt={track.title}
@@ -166,21 +187,20 @@ const TrackRow = React.memo<TrackRowProps>(
           {/* Título y Artista */}
           <div className="min-w-0 flex-1">
             <p
-              className={`text-sm font-semibold truncate ${
-                isCurrent ? "font-bold" : ""
+              className={`text-xs sm:text-sm font-semibold truncate ${
+                isCurrent ? "text-fuchsia-300 font-bold" : "text-neutral-100"
               }`}
-              style={{
-                color: isCurrent ? "var(--color-accent, #8B5CF6)" : "var(--color-text-primary, #ffffff)",
-              }}
             >
               {track.title}
             </p>
-            <p
-              className="text-xs truncate opacity-65 mt-0.5"
-              style={{ color: "var(--color-text-secondary, #9ca3af)" }}
-            >
-              {track.artist || "Artista Desconocido"}
-            </p>
+            <div className="flex items-center gap-1.5 text-[11px] truncate opacity-65 mt-0.5">
+              <span className="truncate">{track.artist || "Artista Desconocido"}</span>
+              {track.format && (
+                <span className="px-1 py-0.2 bg-purple-950/60 border border-purple-500/20 text-[9px] text-purple-300 font-mono">
+                  {track.format}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

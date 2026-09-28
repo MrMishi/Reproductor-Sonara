@@ -317,7 +317,7 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-white font-medium text-xs truncate">Filtrar audios cortos</div>
-                      <div className="text-[10px] opacity-60 truncate">Ocultar notas de voz (&lt; 30s)</div>
+                      <div className="text-[10px] opacity-60 truncate">Ocultar notas de voz (&lt; 1 min)</div>
                     </div>
                   </div>
                   <button
@@ -327,7 +327,7 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
                     className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 cursor-pointer ${
                       filterShortAudios ? "bg-purple-600" : "bg-neutral-700"
                     }`}
-                    title={filterShortAudios ? "Filtro activo: audios < 30s ocultos" : "Filtro inactivo"}
+                    title={filterShortAudios ? "Filtro activo: audios < 60s ocultos" : "Filtro inactivo"}
                   >
                     <div
                       className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${

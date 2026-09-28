@@ -138,7 +138,7 @@ export async function pickAndScanNativeSafFolder(
 ): Promise<{ tracks: Track[]; cancelled: boolean; error?: string }> {
   const {
     filterShortAudios = true,
-    minDurationSeconds = 30,
+    minDurationSeconds = 60,
     filterHiddenTracks = true,
     onProgress,
     onTrackDiscovered,

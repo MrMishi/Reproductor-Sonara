@@ -71,18 +71,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 key={track.id}
                 id={`quick-pick-${track.id}`}
                 onClick={() => onPlayTrack(track, idx)}
-                className={`flex items-center gap-3 sm:gap-3.5 p-3 sm:p-2.5 rounded-2xl sm:rounded-xl cursor-pointer transition-all border group relative overflow-hidden ${
-                  isCurrent
-                    ? "bg-white/15 border-white/20 shadow-md"
-                    : "hover:bg-white/10 border-white/5"
-                }`}
                 style={{
-                  backgroundColor: isCurrent ? "rgba(255,255,255,0.12)" : "var(--color-surface, #141414)",
-                  borderColor: "var(--color-border-subtle)",
+                  clipPath: "polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px)",
+                  backgroundColor: isCurrent ? "rgba(147, 51, 234, 0.15)" : "var(--color-surface, #141414)",
                 }}
+                className={`flex items-center gap-3 sm:gap-3.5 p-3 sm:p-2.5 rounded-none cursor-pointer transition-all border group relative overflow-hidden font-mono ${
+                  isCurrent
+                    ? "border-fuchsia-500/60 shadow-[0_0_15px_rgba(236,72,153,0.3)]"
+                    : "hover:bg-purple-950/20 border-purple-500/20 hover:border-purple-500/50"
+                }`}
               >
-                {/* Artwork with play overlay */}
-                <div className="relative w-14 h-14 sm:w-13 sm:h-13 rounded-xl sm:rounded-lg overflow-hidden shrink-0 shadow">
+                {/* Artwork with play overlay and 45° beveled corners */}
+                <div
+                  style={{
+                    clipPath: "polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px)",
+                  }}
+                  className={`relative w-14 h-14 sm:w-13 sm:h-13 overflow-hidden shrink-0 border transition-all ${
+                    isCurrent
+                      ? "border-fuchsia-400 shadow-[0_0_10px_rgba(236,72,153,0.4)]"
+                      : "border-purple-500/30 group-hover:border-purple-500/60 shadow-[0_0_8px_rgba(168,85,247,0.2)]"
+                  }`}
+                >
                   <img
                     src={track.coverUrl}
                     alt={track.title}

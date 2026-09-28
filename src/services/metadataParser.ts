@@ -372,7 +372,7 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
 export async function parseAudioFile(
   file: File,
   filterShortAudios: boolean = false,
-  minDurationSeconds: number = 30,
+  minDurationSeconds: number = 60,
   extractCover: boolean = false
 ): Promise<Track | null> {
   // Filtro de notas de voz: descarta si el nombre comienza por 'PTT-' (WhatsApp Push-To-Talk)

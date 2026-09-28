@@ -4,7 +4,7 @@
  * ============================================================================
  * Estilo: Lark Player / Minimalista Hi-Fi
  * Duración: 1.8 segundos con transición suave (fade-out).
- * Muestra el logo oficial neón animado de Sonará y el texto "Sonará".
+ * Muestra el logo oficial neón animado de Sonora y el texto "Sonora".
  */
 
 import React, { useEffect, useState } from "react";
