@@ -24,3 +24,12 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+@keyframes cyber-marquee-pingpong {
+  0%, 18% {
+    transform: translateX(0);
+  }
+  82%, 100% {
+    transform: translateX(calc(-1 * var(--marquee-dist, 0px)));
+  }
+}

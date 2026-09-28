@@ -4,21 +4,17 @@
  * ============================================================================
  * Propósito y función del archivo:
  * Este componente renderiza la barra persistente de reproducción anclada en la parte
- * inferior de la pantalla. Proporciona controles rápidos y fluidos sin interrumpir
- * la navegación de la biblioteca.
+ * inferior de la pantalla. Proporciona controles estándar limpios, rápidos y fiables.
  *
- * ¿Cómo funciona?:
- * 1. Muestra la carátula, título y artista de la pista actual (`currentTrack`).
- * 2. Barra de progreso interactiva: Permite hacer clic o arrastrar para saltar
- *    a cualquier punto de la pista mediante `onSeek`.
- * 3. Botones de transporte: Play/Pausa (`onTogglePlay`), Anterior (`onPrev`),
- *    Siguiente (`onNext`).
- * 4. Apertura del reproductor expandido: Al tocar la información de la pista o el botón
- *    dedicado, ejecuta `onOpenExpanded` para mostrar la carátula gigante y el karaoke.
+ * Controles estándar conservados:
+ * 1. Extremo izquierdo: Carátula + Título/Artista (tocar abre el reproductor completo).
+ * 2. Centro: Botones de transporte (Anterior, Play/Pausa destacado, Siguiente).
+ * 3. Extremo derecho: Botón exclusivo para desplegar el reproductor completo.
  *
- * Guía para futuras actualizaciones:
- * - Los colores de fondo y acento responden a las variables CSS dinámicas del tema
- *   `--color-player-bg` y `--color-accent`.
+ * Estabilidad táctil:
+ * - Todos los botones cuentan con parada de propagación explícita (e.stopPropagation()),
+ *   áreas táctiles cómodas de 48px y estado 'type="button"' para garantizar respuesta
+ *   inmediata al primer toque en cualquier dispositivo.
  */
 
 import React, { useState, useRef } from "react";
@@ -29,9 +25,9 @@ import {
   SkipForward,
   ChevronUp,
   Music,
-  Sparkles,
 } from "lucide-react";
-import { Track, PlaybackMode } from "../types";
+import { Track } from "../types";
+import { CyberMarquee } from "./CyberMarquee";
 
 interface BottomPlayerProps {
   currentTrack: Track | null;
@@ -40,19 +36,11 @@ interface BottomPlayerProps {
   duration: number;
   volume?: number;
   isMuted?: boolean;
-  playbackMode?: PlaybackMode;
   onTogglePlay: () => void;
   onPrev: () => void;
   onNext: () => void;
   onSeek: (time: number) => void;
-  onVolumeChange?: (vol: number) => void;
-  onToggleMute?: () => void;
-  onCyclePlaybackMode?: () => void;
-  onToggleFavorite?: (id: string) => void;
   onOpenExpanded: () => void;
-  onOpenEqualizer?: () => void;
-  onOpenLyrics?: () => void;
-  onToggleMiniMode?: () => void;
 }
 
 export const BottomPlayer: React.FC<BottomPlayerProps> = ({
@@ -65,7 +53,6 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
   onNext,
   onSeek,
   onOpenExpanded,
-  onToggleMiniMode,
 }) => {
   const [isHoveringProgress, setIsHoveringProgress] = useState(false);
   const progressBarRef = useRef<HTMLDivElement | null>(null);
@@ -89,6 +76,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
     if (!progressBarRef.current || duration <= 0) return;
     const rect = progressBarRef.current.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -113,7 +101,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
         onClick={handleProgressBarClick}
         onMouseEnter={() => setIsHoveringProgress(true)}
         onMouseLeave={() => setIsHoveringProgress(false)}
-        className="relative w-full cursor-pointer h-1 hover:h-2 transition-all bg-white/10 group"
+        className="relative w-full cursor-pointer h-1.5 hover:h-2 transition-all bg-white/10 group"
       >
         <div
           id="player-progress-bar-fill"
@@ -132,24 +120,25 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
         </div>
       </div>
 
-      <div className="flex items-center justify-between px-3 sm:px-6 py-2.5 gap-4 max-w-7xl mx-auto">
-        {/* 1. EXTREMO IZQUIERDO: Portada del álbum con biselado 45° Cyberpunk HUD y resplandor neón */}
-        <div className="flex items-center shrink-0">
-          <button
-            type="button"
+      <div className="flex items-center justify-between px-3 sm:px-6 py-2 sm:py-2.5 gap-3 max-w-7xl mx-auto">
+        {/* 1. EXTREMO IZQUIERDO: Carátula + Título/Artista (toque abre reproductor expandido) */}
+        <div
+          className="flex items-center gap-3 min-w-0 max-w-[42%] sm:max-w-[32%] cursor-pointer group shrink-0"
+          onClick={onOpenExpanded}
+          title="Toca para abrir el reproductor completo"
+        >
+          <div
             id="player-artwork-thumbnail"
-            onClick={onOpenExpanded}
-            title="Abrir reproductor a pantalla completa"
             style={{
-              clipPath: "polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px)",
+              clipPath: "polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px)",
             }}
-            className="relative w-11 h-11 sm:w-12 sm:h-12 overflow-hidden shrink-0 cursor-pointer shadow-[0_0_14px_rgba(168,85,247,0.4)] border border-purple-500/50 group bg-neutral-900 transition-all hover:scale-105 active:scale-95 focus:outline-none"
+            className="relative w-11 h-11 sm:w-12 sm:h-12 overflow-hidden shrink-0 shadow-[0_0_12px_rgba(168,85,247,0.35)] border border-purple-500/40 bg-neutral-900 transition-transform group-hover:scale-105 active:scale-95"
           >
             {currentTrack.coverUrl ? (
               <img
                 src={currentTrack.coverUrl}
                 alt={currentTrack.title}
-                className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 ${
+                className={`w-full h-full object-cover transition-transform duration-300 ${
                   isPlaying ? "brightness-100" : "brightness-90"
                 }`}
               />
@@ -161,27 +150,52 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
               <ChevronUp className="w-4 h-4 text-white" />
             </div>
-          </button>
+          </div>
+
+          <div className="min-w-0 flex-1 flex flex-col justify-center">
+            <div className="w-full min-w-0">
+              <CyberMarquee
+                text={currentTrack.title}
+                active={isPlaying}
+                className="text-xs sm:text-sm font-bold tracking-wide text-white group-hover:text-fuchsia-300 transition-colors leading-tight"
+              />
+            </div>
+            <div className="w-full min-w-0 mt-0.5">
+              <CyberMarquee
+                text={currentTrack.artist || "Artista Desconocido"}
+                active={isPlaying}
+                className="text-[11px] font-mono tracking-wider text-purple-300/80 leading-tight"
+              />
+            </div>
+          </div>
         </div>
 
-        {/* 2. REDISTRIBUCIÓN ESPACIOSA: Anterior, Play/Pause destacado y Siguiente */}
-        <div className="flex items-center justify-center gap-6 sm:gap-10 flex-1">
+        {/* 2. CENTRO: Controles estándar de reproducción (Anterior, Play/Pausa, Siguiente) */}
+        <div className="flex items-center justify-center gap-3 sm:gap-7 flex-1 min-w-0">
           {/* Anterior (Skip Back) */}
           <button
             id="player-prev-btn"
-            onClick={onPrev}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPrev();
+            }}
             title="Canción anterior"
-            className="p-2.5 rounded-full hover:bg-white/10 transition-transform active:scale-90 text-neutral-300 hover:text-white cursor-pointer"
+            className="min-w-[44px] min-h-[44px] p-2.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white flex items-center justify-center cursor-pointer pointer-events-auto"
           >
             <SkipBack className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
 
-          {/* Play / Pause (centrado y destacado) */}
+          {/* Play / Pause (centrado y destacado con respuesta táctil inmediata) */}
           <button
             id="player-play-pause-btn"
-            onClick={onTogglePlay}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePlay();
+            }}
             title={isPlaying ? "Pausar" : "Reproducir"}
-            className="w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95 text-white cursor-pointer"
+            className="min-w-[48px] min-h-[48px] w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95 text-white cursor-pointer shrink-0 pointer-events-auto"
             style={{
               backgroundColor: "var(--color-accent, #7C3AED)",
               boxShadow: "0 4px 18px rgba(124, 58, 237, 0.45)",
@@ -197,33 +211,29 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
           {/* Siguiente (Skip Forward) */}
           <button
             id="player-next-btn"
-            onClick={onNext}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNext();
+            }}
             title="Canción siguiente"
-            className="p-2.5 rounded-full hover:bg-white/10 transition-transform active:scale-90 text-neutral-300 hover:text-white cursor-pointer"
+            className="min-w-[44px] min-h-[44px] p-2.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white flex items-center justify-center cursor-pointer pointer-events-auto"
           >
             <SkipForward className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
 
-        {/* 3. EXTREMO DERECHO: Botón Modo Flotante Dynamic Glass y Desplegar completo */}
-        <div className="flex items-center justify-end gap-1.5 sm:gap-2 shrink-0">
-          {onToggleMiniMode && (
-            <button
-              id="bottom-player-dynamic-glass-btn"
-              onClick={onToggleMiniMode}
-              title="Activar ventana flotante Dynamic Glass"
-              className="px-2.5 py-1.5 rounded-lg border border-purple-500/30 bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 hover:text-white transition-all flex items-center gap-1.5 text-xs font-mono shadow-[0_0_10px_rgba(168,85,247,0.25)] active:scale-95 cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-fuchsia-400 animate-pulse" />
-              <span className="hidden sm:inline font-bold">Dynamic Glass</span>
-            </button>
-          )}
-
+        {/* 3. EXTREMO DERECHO: ÚNICAMENTE el botón para desplegar el reproductor completo */}
+        <div className="flex items-center justify-end shrink-0">
           <button
             id="player-expand-btn"
-            onClick={onOpenExpanded}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenExpanded();
+            }}
             title="Desplegar reproductor completo"
-            className="p-2.5 rounded-full hover:bg-white/10 transition-all active:scale-95 text-neutral-300 hover:text-white cursor-pointer"
+            className="min-w-[44px] min-h-[44px] p-2.5 rounded-full hover:bg-white/10 active:scale-95 transition-all text-neutral-300 hover:text-white flex items-center justify-center cursor-pointer pointer-events-auto"
           >
             <ChevronUp className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>

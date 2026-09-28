@@ -62,6 +62,7 @@ import {
   enrichLyricsWithSpanish,
 } from "../services/lyricsService";
 import { VisualizerCanvas } from "./VisualizerCanvas";
+import { CyberMarquee } from "./CyberMarquee";
 
 export interface ExpandedPlayerProps {
   isOpen: boolean;
@@ -462,82 +463,80 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
           <span className="hidden sm:inline">Minimizar</span>
         </button>
 
-        {/* Holographic Cyberpunk HUD Tactical Menu */}
-        <div
-          className="flex items-center gap-0.5 sm:gap-1 p-1 bg-black/60 border border-purple-500/30 backdrop-blur-md relative [clip-path:polygon(8px_0,100%_0,100%_calc(100%-8px),calc(100%-8px)_100%,0_100%,0_8px)]"
-        >
-          {/* Neon tactical corner accents */}
-          <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-fuchsia-400 pointer-events-none" />
-          <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-cyan-400 pointer-events-none" />
-
-          {/* Tab 1: Tema (Cover) */}
+        {/* Pestañas superiores limpias y minimalistas */}
+        <div className="flex items-center gap-1 sm:gap-1.5">
+          {/* Tab 1: Tema */}
           <button
             id="expanded-tab-cover"
+            type="button"
             onClick={() => setActiveTab("cover")}
-            className={`relative px-2.5 sm:px-4 py-1.5 text-xs font-mono tracking-wider transition-all flex items-center gap-1.5 ${
+            className={`relative px-3 py-1.5 text-xs font-semibold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer rounded-lg ${
               activeTab === "cover"
-                ? "text-fuchsia-300 font-bold bg-purple-500/15"
+                ? "text-white bg-white/10"
                 : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
             }`}
           >
             <Music2 className="w-3.5 h-3.5" />
-            <span className="uppercase text-[11px] sm:text-xs">Tema</span>
+            <span>Tema</span>
             {activeTab === "cover" && (
-              <span className="absolute bottom-0 inset-x-1.5 h-0.5 bg-gradient-to-r from-purple-500 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.95)]" />
+              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
             )}
           </button>
 
           {/* Tab 2: Letras */}
           <button
             id="expanded-tab-lyrics"
+            type="button"
             onClick={() => setActiveTab("lyrics")}
-            className={`relative px-2.5 sm:px-4 py-1.5 text-xs font-mono tracking-wider transition-all flex items-center gap-1.5 ${
+            className={`relative px-3 py-1.5 text-xs font-semibold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer rounded-lg ${
               activeTab === "lyrics"
-                ? "text-fuchsia-300 font-bold bg-purple-500/15"
+                ? "text-white bg-white/10"
                 : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span className="uppercase text-[11px] sm:text-xs">Letras</span>
+            <span>Letras</span>
             {currentTrack.lyrics && (
-              <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-400 shadow-[0_0_6px_rgba(236,72,153,1)]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-500 shadow-[0_0_6px_rgba(236,72,153,0.8)]" />
             )}
             {activeTab === "lyrics" && (
-              <span className="absolute bottom-0 inset-x-1.5 h-0.5 bg-gradient-to-r from-purple-500 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.95)]" />
+              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
             )}
           </button>
 
           {/* Tab 3: Cola */}
           <button
             id="expanded-tab-queue"
+            type="button"
             onClick={() => setActiveTab("queue")}
-            className={`relative px-2.5 sm:px-4 py-1.5 text-xs font-mono tracking-wider transition-all flex items-center gap-1.5 ${
+            className={`relative px-3 py-1.5 text-xs font-semibold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer rounded-lg ${
               activeTab === "queue"
-                ? "text-fuchsia-300 font-bold bg-purple-500/15"
+                ? "text-white bg-white/10"
                 : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
             }`}
           >
             <ListMusic className="w-3.5 h-3.5" />
-            <span className="uppercase text-[11px] sm:text-xs">Cola</span>
+            <span>Cola</span>
             {activeTab === "queue" && (
-              <span className="absolute bottom-0 inset-x-1.5 h-0.5 bg-gradient-to-r from-purple-500 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.95)]" />
+              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
             )}
           </button>
 
           {/* Tab 4: Audio & EQ */}
           <button
             id="expanded-tab-details"
+            type="button"
             onClick={() => setActiveTab("details")}
-            className={`relative px-2.5 sm:px-4 py-1.5 text-xs font-mono tracking-wider transition-all flex items-center gap-1.5 ${
+            className={`relative px-3 py-1.5 text-xs font-semibold tracking-wide transition-all flex items-center gap-1.5 cursor-pointer rounded-lg ${
               activeTab === "details"
-                ? "text-fuchsia-300 font-bold bg-purple-500/15"
+                ? "text-white bg-white/10"
                 : "text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span className="uppercase text-[11px] sm:text-xs">EQ / Info</span>
+            <span>EQ</span>
             {activeTab === "details" && (
-              <span className="absolute bottom-0 inset-x-1.5 h-0.5 bg-gradient-to-r from-purple-500 via-fuchsia-400 to-pink-500 shadow-[0_0_10px_rgba(236,72,153,0.95)]" />
+              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
             )}
           </button>
         </div>
@@ -741,19 +740,19 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
 
             {/* Track Info & Actions */}
             <div className="w-full flex items-center justify-between mb-4">
-              <div className="min-w-0 pr-4">
-                <h1
-                  className="text-xl sm:text-2xl font-extrabold truncate"
-                  style={{ color: "var(--color-text-primary)" }}
-                >
-                  {currentTrack.title}
-                </h1>
-                <p
-                  className="text-sm font-medium truncate opacity-75 mt-0.5"
-                  style={{ color: "var(--color-text-secondary)" }}
-                >
-                  {currentTrack.artist} {currentTrack.album ? `• ${currentTrack.album}` : ""}
-                </p>
+              <div className="min-w-0 pr-4 flex-1">
+                <CyberMarquee
+                  text={currentTrack.title}
+                  active={isPlaying}
+                  className="text-xl sm:text-2xl font-extrabold tracking-wide text-white"
+                />
+                <div className="mt-1">
+                  <CyberMarquee
+                    text={`${currentTrack.artist || "Artista Desconocido"}${currentTrack.album ? ` • ${currentTrack.album}` : ""}`}
+                    active={isPlaying}
+                    className="text-xs sm:text-sm font-mono tracking-wider text-purple-300/80"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
@@ -1137,26 +1136,33 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
         )}
 
         {/* ========================================================= */}
-        {/* VIEW 3: QUEUE (COLA DE REPRODUCCIÓN - CONSOLA FUTURISTA)  */}
+        {/* VIEW 3: QUEUE (COLA / SIGUIENTES)                         */}
         {/* ========================================================= */}
         {activeTab === "queue" && (
-          <div className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full p-3 sm:p-5">
-            <div className="flex items-center justify-between mb-3 px-1 shrink-0 border-b border-purple-500/20 pb-2">
+          <div className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full px-3 sm:px-6 py-2">
+            {/* Encabezado ultra compacto y limpio */}
+            <div className="flex items-center justify-between mb-2 px-1 shrink-0">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-fuchsia-400 shadow-[0_0_8px_rgba(236,72,153,1)] animate-pulse" />
-                <h3 className="font-mono text-xs font-bold tracking-widest uppercase text-purple-300">
-                  // COLA DE REPRODUCCIÓN [{queue.length} PISTAS]
+                <h3 className="text-sm font-bold text-white tracking-wide">
+                  Cola
                 </h3>
+                <span className="text-xs text-neutral-400 font-normal">
+                  ({queue.length})
+                </span>
               </div>
+
               <div className="flex items-center gap-2">
                 {playbackMode === "shuffle" && (
-                  <span className="font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-fuchsia-950/80 border border-fuchsia-500/40 text-fuchsia-300 flex items-center gap-1 shadow-[0_0_10px_rgba(236,72,153,0.4)]">
+                  <span
+                    className="inline-flex items-center gap-1 text-[11px] text-purple-300 font-medium bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 rounded-full"
+                    title="Orden aleatorio activo"
+                  >
                     <Shuffle className="w-3 h-3" />
-                    Orden Aleatorio Real
+                    <span>Aleatorio</span>
                   </span>
                 )}
-                <span className="font-mono text-xs text-neutral-400">
-                  [{currentTrackIndex + 1}/{queue.length}]
+                <span className="text-xs text-neutral-400 font-mono">
+                  {currentTrackIndex + 1} de {queue.length}
                 </span>
               </div>
             </div>
@@ -1178,7 +1184,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                         : "bg-black/40 hover:bg-purple-950/20 border-white/5 hover:border-purple-500/30 text-neutral-300 hover:text-white"
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <span className="w-6 text-[11px] text-center font-mono shrink-0">
                         {isCurrent && isPlaying ? (
                           <span className="text-fuchsia-400 font-bold animate-pulse">▶</span>
@@ -1201,21 +1207,25 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                           className="w-full h-full object-cover"
                         />
                       </div>
-                      <div className="min-w-0">
-                        <p
-                          className={`text-xs sm:text-sm font-semibold truncate ${
-                            isCurrent ? "text-fuchsia-300 font-bold" : "text-white"
-                          }`}
-                        >
-                          {track.title}
-                        </p>
-                        <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 truncate">
-                          <span className="truncate">{track.artist}</span>
-                          {track.format && (
-                            <span className="px-1 py-0.2 bg-white/5 border border-white/10 text-[9px] text-purple-300">
-                              {track.format}
-                            </span>
-                          )}
+                      {/* Título y Artista en dos líneas separadas con tipografía Cyberpunk y Marquee */}
+                      <div className="min-w-0 flex-1 flex flex-col justify-center py-0.5">
+                        <div className="w-full min-w-0">
+                          <CyberMarquee
+                            text={track.title}
+                            active={isCurrent && isPlaying}
+                            animateOnHover={true}
+                            className={`text-xs sm:text-sm font-bold tracking-wide ${
+                              isCurrent ? "text-fuchsia-300 font-bold drop-shadow-[0_0_8px_rgba(236,72,153,0.4)]" : "text-white"
+                            }`}
+                          />
+                        </div>
+                        <div className="w-full min-w-0 mt-0.5">
+                          <CyberMarquee
+                            text={track.artist || "Artista Desconocido"}
+                            active={isCurrent && isPlaying}
+                            animateOnHover={true}
+                            className="text-[10px] sm:text-[11px] font-mono tracking-wider text-purple-300/80 group-hover:text-purple-200"
+                          />
                         </div>
                       </div>
                     </div>

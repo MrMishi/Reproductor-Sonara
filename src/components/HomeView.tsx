@@ -1,6 +1,7 @@
 import React from "react";
 import { Play, HardDrive, Heart, Trash2 } from "lucide-react";
 import { Track } from "../types";
+import { CyberMarquee } from "./CyberMarquee";
 
 interface HomeViewProps {
   tracks: Track[];
@@ -116,16 +117,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
 
                 {/* Info */}
-                <div className="min-w-0 flex-1 pr-1">
-                  <h4
-                    className="text-xs sm:text-sm font-bold truncate leading-snug"
-                    style={{ color: isCurrent ? "var(--color-accent)" : "var(--color-text-primary)" }}
-                  >
-                    {track.title}
-                  </h4>
-                  <p className="text-[11px] sm:text-xs truncate opacity-70 mt-0.5" style={{ color: "var(--color-text-secondary)" }}>
-                    {track.artist}
-                  </p>
+                <div className="min-w-0 flex-1 pr-1 flex flex-col justify-center">
+                  <div className="w-full min-w-0">
+                    <CyberMarquee
+                      text={track.title}
+                      active={isCurrent && isPlaying}
+                      animateOnHover={true}
+                      className={`text-xs sm:text-sm font-bold tracking-wide ${
+                        isCurrent ? "text-fuchsia-300 font-bold drop-shadow-[0_0_8px_rgba(236,72,153,0.4)]" : "text-neutral-100"
+                      }`}
+                    />
+                  </div>
+                  <div className="w-full min-w-0 mt-0.5">
+                    <CyberMarquee
+                      text={track.artist || "Artista Desconocido"}
+                      active={isCurrent && isPlaying}
+                      animateOnHover={true}
+                      className="text-[11px] sm:text-xs font-mono tracking-wider text-purple-300/80 group-hover:text-purple-200"
+                    />
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">

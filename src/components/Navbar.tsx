@@ -204,7 +204,7 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
             </button>
           )}
 
-          {/* Modo Mini Gadget Button (desktop/tablet only) */}
+          {/* Modo Ventana Flotante / Liquid Glass (Dynamic Island) Button */}
           {onToggleMiniMode && (
             <button
               id="navbar-mini-mode-btn"
@@ -212,19 +212,16 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
               title={
                 isMiniMode
                   ? "Restaurar barra de reproducción normal (Tecla M)"
-                  : "Activar Modo Mini (Gadget flotante) [Tecla M]"
+                  : "Activar Ventana Flotante Liquid Glass estilo Dynamic Island [Tecla M]"
               }
-              className={`hidden sm:flex p-2 sm:px-3 sm:py-2 rounded-full text-xs font-semibold border items-center gap-1.5 transition-all shrink-0 ${
+              className={`flex p-2 sm:px-3 sm:py-2 rounded-full text-xs font-semibold border items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
                 isMiniMode
-                  ? "bg-white text-black shadow-md border-white"
-                  : "hover:bg-white/10 text-neutral-300 hover:text-white"
+                  ? "bg-fuchsia-600 text-white shadow-[0_0_15px_rgba(217,70,239,0.5)] border-fuchsia-400"
+                  : "hover:bg-purple-950/40 text-neutral-300 hover:text-white border-white/10"
               }`}
-              style={{
-                borderColor: isMiniMode ? "transparent" : "var(--color-border-subtle)",
-              }}
             >
-              <PictureInPicture2 className="w-4 h-4" />
-              <span className="hidden xl:inline">{isMiniMode ? "Modo Mini Activo" : "Modo Mini"}</span>
+              <PictureInPicture2 className="w-4 h-4 text-fuchsia-400" />
+              <span className="hidden xl:inline">{isMiniMode ? "Liquid Glass Activo" : "Ventana Flotante"}</span>
             </button>
           )}
 
@@ -342,6 +339,36 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
                 <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider opacity-50 select-none">
                   Audio y Apariencia
                 </div>
+
+                {/* Conmutador Ventana Flotante / Liquid Glass */}
+                {onToggleMiniMode && (
+                  <div className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition-colors">
+                    <div className="flex items-center gap-3 min-w-0 pr-2">
+                      <div className="p-2 rounded-lg bg-fuchsia-500/15 text-fuchsia-400 shrink-0">
+                        <PictureInPicture2 className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white font-medium text-xs truncate">Ventana Flotante Liquid Glass</div>
+                        <div className="text-[10px] opacity-60 truncate">Mini-Player estilo Dynamic Island</div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      id="settings-mini-mode-toggle-btn"
+                      onClick={() => onToggleMiniMode()}
+                      className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 cursor-pointer ${
+                        isMiniMode ? "bg-fuchsia-600" : "bg-neutral-700"
+                      }`}
+                      title={isMiniMode ? "Ventana flotante activa" : "Activar ventana flotante"}
+                    >
+                      <div
+                        className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                          isMiniMode ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
 
                 {/* Botón Ecualizador 10 bandas */}
                 <button

@@ -39,6 +39,7 @@ import {
   Tag,
 } from "lucide-react";
 import { Track } from "../types";
+import { CyberMarquee } from "./CyberMarquee";
 
 interface TrackListProps {
   tracks: Track[];
@@ -184,22 +185,30 @@ const TrackRow = React.memo<TrackRowProps>(
             )}
           </div>
 
-          {/* Título y Artista */}
-          <div className="min-w-0 flex-1">
-            <p
-              className={`text-xs sm:text-sm font-semibold truncate ${
-                isCurrent ? "text-fuchsia-300 font-bold" : "text-neutral-100"
-              }`}
-            >
-              {track.title}
-            </p>
-            <div className="flex items-center gap-1.5 text-[11px] truncate opacity-65 mt-0.5">
-              <span className="truncate">{track.artist || "Artista Desconocido"}</span>
-              {track.format && (
-                <span className="px-1 py-0.2 bg-purple-950/60 border border-purple-500/20 text-[9px] text-purple-300 font-mono">
-                  {track.format}
-                </span>
-              )}
+          {/* Título y Artista: Dos líneas claramente separadas con tipografía Cyberpunk HUD y Marquee */}
+          <div className="min-w-0 flex-1 flex flex-col justify-center py-0.5">
+            {/* Línea 1: Título con Marquee si es largo */}
+            <div className="w-full min-w-0">
+              <CyberMarquee
+                text={track.title}
+                active={isCurrent && isPlaying}
+                animateOnHover={true}
+                className={`text-xs sm:text-sm font-bold tracking-wide ${
+                  isCurrent
+                    ? "text-fuchsia-300 drop-shadow-[0_0_8px_rgba(236,72,153,0.45)]"
+                    : "text-neutral-100 group-hover:text-white"
+                }`}
+              />
+            </div>
+
+            {/* Línea 2: Artista claramente separado, tipografía Cyberpunk mono legible y Marquee */}
+            <div className="w-full min-w-0 mt-0.5 sm:mt-1">
+              <CyberMarquee
+                text={track.artist || "Artista Desconocido"}
+                active={isCurrent && isPlaying}
+                animateOnHover={true}
+                className="text-[11px] sm:text-xs font-mono tracking-wider text-purple-300/80 group-hover:text-purple-200 transition-colors"
+              />
             </div>
           </div>
         </div>
@@ -582,8 +591,8 @@ export const TrackList: React.FC<TrackListProps> = ({
                     className="w-8 h-8 rounded-lg object-cover shrink-0 shadow"
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold truncate">{t.title}</p>
-                    <p className="opacity-60 text-[11px] truncate">{t.artist}</p>
+                    <CyberMarquee text={t.title} className="font-semibold text-white" />
+                    <CyberMarquee text={t.artist || "Artista Desconocido"} className="opacity-60 text-[11px] font-mono mt-0.5" />
                   </div>
                 </div>
               ))}

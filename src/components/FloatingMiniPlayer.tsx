@@ -46,6 +46,7 @@ import {
   Layers,
 } from "lucide-react";
 import { Track, PlaybackMode } from "../types";
+import { CyberMarquee } from "./CyberMarquee";
 
 interface FloatingMiniPlayerProps {
   currentTrack: Track | null;
@@ -403,7 +404,7 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             )}
           </div>
 
-          {/* Center: Título de la canción y Artista */}
+          {/* Center: Título de la canción y Artista con Marquee y separación clara */}
           <div
             className="min-w-0 flex-1 cursor-pointer pr-1"
             onClick={(e) => {
@@ -412,21 +413,38 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             }}
             title="Toca para expandir isla dinámica"
           >
-            <p className="text-xs font-bold truncate leading-tight text-white hover:text-fuchsia-300 transition-colors">
-              {currentTrack.title}
-            </p>
-            <p className="text-[10px] text-neutral-400 truncate leading-tight font-medium mt-0.5">
-              {currentTrack.artist}
-            </p>
+            <div className="w-full min-w-0">
+              <CyberMarquee
+                text={currentTrack.title}
+                active={isPlaying}
+                className="text-xs font-bold leading-tight text-white hover:text-fuchsia-300 transition-colors"
+              />
+            </div>
+            <div className="w-full min-w-0 mt-0.5">
+              <CyberMarquee
+                text={currentTrack.artist || "Artista Desconocido"}
+                active={isPlaying}
+                className="text-[10px] text-neutral-400 font-mono leading-tight font-medium"
+              />
+            </div>
           </div>
 
           {/* Right: Botones táctiles rápidos (Anterior, Pausa/Play, Siguiente, Expandir/Cerrar) */}
-          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="flex items-center gap-1 shrink-0 pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             {/* Anterior */}
             <button
               id="dynamic-island-prev-btn"
-              onClick={onPrev}
-              className="p-1.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPrev();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="p-1.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white cursor-pointer pointer-events-auto"
               title="Anterior"
             >
               <SkipBack className="w-3.5 h-3.5" />
@@ -435,8 +453,13 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             {/* Play / Pause táctil con resplandor neón violeta */}
             <button
               id="dynamic-island-play-btn"
-              onClick={onTogglePlay}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95 transition-all"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePlay();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95 transition-all cursor-pointer pointer-events-auto"
               style={{
                 backgroundColor: "var(--color-accent, #7C3AED)",
                 boxShadow: isPlaying ? "0 0 14px rgba(168, 85, 247, 0.8)" : "none",
@@ -453,8 +476,13 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             {/* Siguiente */}
             <button
               id="dynamic-island-next-btn"
-              onClick={onNext}
-              className="p-1.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNext();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="p-1.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white cursor-pointer pointer-events-auto"
               title="Siguiente"
             >
               <SkipForward className="w-3.5 h-3.5" />
@@ -463,8 +491,13 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             {/* Expandir a tarjeta */}
             <button
               id="dynamic-island-expand-btn"
-              onClick={() => setIsPillMode(false)}
-              className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsPillMode(false);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer pointer-events-auto"
               title="Expandir Dynamic Glass"
             >
               <ChevronUp className="w-3.5 h-3.5 rotate-180" />
@@ -473,8 +506,13 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             {/* Restaurar a barra inferior */}
             <button
               id="dynamic-island-restore-btn"
-              onClick={onRestoreBottomPlayer}
-              className="p-1.5 rounded-full hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-colors"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRestoreBottomPlayer();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="p-1.5 rounded-full hover:bg-red-500/20 text-neutral-400 hover:text-red-400 transition-colors cursor-pointer pointer-events-auto"
               title="Restaurar barra inferior clásica"
             >
               <X className="w-3.5 h-3.5" />
@@ -555,22 +593,26 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
                 </div>
               </div>
 
-              {/* Título y artista */}
-              <div className="min-w-0 flex-1">
+              {/* Título y artista en dos líneas con Marquee y sin badge */}
+              <div className="min-w-0 flex-1 flex flex-col justify-center">
                 <button
+                  type="button"
                   onClick={onOpenExpanded}
-                  className="text-xs sm:text-sm font-bold truncate text-left block w-full hover:underline leading-tight text-white hover:text-fuchsia-300 transition-colors"
+                  className="w-full min-w-0 text-left cursor-pointer"
                 >
-                  {currentTrack.title}
+                  <CyberMarquee
+                    text={currentTrack.title}
+                    active={isPlaying}
+                    className="text-xs sm:text-sm font-bold leading-tight text-white hover:text-fuchsia-300 transition-colors"
+                  />
                 </button>
-                <p className="text-[11px] truncate opacity-70 leading-tight text-neutral-300 mt-0.5">
-                  {currentTrack.artist}
-                </p>
-                {currentTrack.format && (
-                  <span className="inline-block mt-1 font-mono text-[9px] px-1 py-0.2 rounded bg-purple-950/60 border border-purple-500/30 text-purple-300">
-                    {currentTrack.format}
-                  </span>
-                )}
+                <div className="w-full min-w-0 mt-0.5">
+                  <CyberMarquee
+                    text={currentTrack.artist || "Artista Desconocido"}
+                    active={isPlaying}
+                    className="text-[11px] font-mono tracking-wider opacity-75 leading-tight text-purple-300"
+                  />
+                </div>
               </div>
 
               {/* Favorita */}
@@ -635,11 +677,20 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
               </button>
 
               {/* Botones de reproducción principales */}
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2 pointer-events-auto"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
                   id="gadget-prev-btn"
-                  onClick={onPrev}
-                  className="p-1.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPrev();
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="p-1.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white cursor-pointer pointer-events-auto"
                   title="Canción anterior"
                 >
                   <SkipBack className="w-4 h-4" />
@@ -647,8 +698,13 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
 
                 <button
                   id="gadget-play-pause-btn"
-                  onClick={onTogglePlay}
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95 transition-transform"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePlay();
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95 transition-transform cursor-pointer pointer-events-auto"
                   style={{
                     backgroundColor: "var(--color-accent, #7C3AED)",
                     boxShadow: isPlaying ? "0 0 14px rgba(168, 85, 247, 0.8)" : "none",
@@ -664,8 +720,13 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
 
                 <button
                   id="gadget-next-btn"
-                  onClick={onNext}
-                  className="p-1.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNext();
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="p-1.5 rounded-full hover:bg-white/10 active:scale-90 transition-transform text-neutral-300 hover:text-white cursor-pointer pointer-events-auto"
                   title="Canción siguiente"
                 >
                   <SkipForward className="w-4 h-4" />

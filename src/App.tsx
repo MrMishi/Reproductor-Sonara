@@ -107,13 +107,7 @@ export function SonoraApp() {
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
 
   // Modo Mini (Floating Gadget)
-  const [isMiniMode, setIsMiniMode] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("ytm_mini_mode_active") === "true";
-    } catch {
-      return false;
-    }
-  });
+  const [isMiniMode, setIsMiniMode] = useState<boolean>(false);
 
   // Save mini mode preference
   useEffect(() => {
@@ -1698,7 +1692,6 @@ export function SonoraApp() {
             setExpandedSubTab("lyrics");
             setIsExpandedPlayerOpen(true);
           }}
-          onToggleMiniMode={() => setIsMiniMode(true)}
         />
       ) : (
         /* Floating Mini Gadget Player */
