@@ -127,6 +127,14 @@ export function SonoraApp() {
   const [expandedSubTab, setExpandedSubTab] = useState<"cover" | "queue" | "lyrics" | "details">("cover");
   const [lyricsSearchTrack, setLyricsSearchTrack] = useState<Track | null>(null);
 
+// Puedes colocar esto junto a tus otros estados (useState)
+    // Bucasdor de Caratulas 
+    const [buscarCaratulasOnline, setBuscarCaratulasOnline] = useState<boolean>(() => {
+    const saved = localStorage.getItem('buscar_caratulas_online');
+    return saved !== null ? JSON.parse(saved) : true; // Activado por defecto
+});
+  
+  
   // Hidden File and Folder Input Refs for '+' menu
   const localFilesInputRef = useRef<HTMLInputElement | null>(null);
   const localFolderInputRef = useRef<HTMLInputElement | null>(null);
@@ -249,10 +257,10 @@ export function SonoraApp() {
     let isMounted = true;
 
     async function actualizarCaratula() {
+        // Si el usuario desactivó la opción en ajustes, no hacemos nada
+        if (!buscarCaratulasOnline) return;
         if (!currentTrack || !currentTrack.artist || !currentTrack.title) return;
 
-        // Si ya tiene una carátula válida y no quieres sobrescribirla innecesariamente, puedes validarlo aquí
-        // O si quieres buscarla siempre para asegurar la mejor calidad:
         const nuevaCaratula = await buscarYObtenerCaratula(currentTrack.artist, currentTrack.title);
 
         if (nuevaCaratula && isMounted) {
@@ -265,9 +273,9 @@ export function SonoraApp() {
     return () => {
         isMounted = false;
     };
-}, [currentTrack?.id]); // Se dispara al cambiar de canción
+}, [currentTrack?.id, buscarCaratulasOnline]); // Se ejecuta si cambia la pista o si cambian la configuración
   
-
+        
   // Capture PWA beforeinstallprompt event if browser fires it
   useEffect(() => {
     const handleBeforeInstall = (e: Event) => {
