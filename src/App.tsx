@@ -243,6 +243,31 @@ export function SonoraApp() {
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
+
+  // Buscador automatizado de caratulas 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function actualizarCaratula() {
+        if (!currentTrack || !currentTrack.artist || !currentTrack.title) return;
+
+        // Si ya tiene una carátula válida y no quieres sobrescribirla innecesariamente, puedes validarlo aquí
+        // O si quieres buscarla siempre para asegurar la mejor calidad:
+        const nuevaCaratula = await buscarYObtenerCaratula(currentTrack.artist, currentTrack.title);
+
+        if (nuevaCaratula && isMounted) {
+            setCurrentTrack(prev => prev ? { ...prev, cover: nuevaCaratula } : null);
+        }
+    }
+
+    actualizarCaratula();
+
+    return () => {
+        isMounted = false;
+    };
+}, [currentTrack?.id]); // Se dispara al cambiar de canción
+  
+
   // Capture PWA beforeinstallprompt event if browser fires it
   useEffect(() => {
     const handleBeforeInstall = (e: Event) => {
