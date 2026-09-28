@@ -20,7 +20,7 @@
  *   y ejecute la función correspondiente con `Array.from(selectedTrackIds)`.
  */
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Play,
   Heart,
@@ -104,6 +104,17 @@ const TrackRow = React.memo<TrackRowProps>(
     onHideTrack,
     onStartDelete,
   }) => {
+    const [openUpward, setOpenUpward] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+    useEffect(() => {
+      if (isMenuOpen && buttonRef.current) {
+        const rect = buttonRef.current.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        setOpenUpward(spaceBelow < 230 && rect.top > 230);
+      }
+    }, [isMenuOpen]);
+
     return (
       <div
         id={`track-row-${track.id}`}
@@ -114,17 +125,24 @@ const TrackRow = React.memo<TrackRowProps>(
             onPlay(track, idx);
           }
         }}
-        style={{
-          clipPath: "polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px)",
-        }}
-        className={`relative flex items-center justify-between gap-3 px-3 py-2 sm:px-3.5 rounded-none cursor-pointer transition-all group select-none border font-mono ${
-          isSelected
-            ? "bg-violet-950/50 border-violet-500/50 shadow-[0_0_12px_rgba(139,92,246,0.25)]"
-            : isCurrent
-            ? "bg-purple-950/40 border-fuchsia-500/50 shadow-[0_0_14px_rgba(236,72,153,0.25)]"
-            : "bg-black/20 hover:bg-purple-950/20 border-white/5 hover:border-purple-500/25"
+        className={`relative flex items-center justify-between gap-3 px-3 py-2 sm:px-3.5 rounded-none cursor-pointer transition-all group select-none font-mono ${
+          isMenuOpen ? "z-40" : "z-0 hover:z-10"
         }`}
       >
+        {/* Fondo biselado a 45° Cyberpunk HUD en capa absoluta para no recortar menús flotantes */}
+        <div
+          aria-hidden="true"
+          className={`absolute inset-0 pointer-events-none transition-all ${
+            isSelected
+              ? "bg-violet-950/50 border border-violet-500/50 shadow-[0_0_12px_rgba(139,92,246,0.25)]"
+              : isCurrent
+              ? "bg-purple-950/40 border border-fuchsia-500/50 shadow-[0_0_14px_rgba(236,72,153,0.25)]"
+              : "bg-black/20 group-hover:bg-purple-950/20 border border-white/5 group-hover:border-purple-500/25"
+          }`}
+          style={{
+            clipPath: "polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px)",
+          }}
+        />
         {/* Izquierda: Portada biselada 45° + Selección + Título + Artista */}
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
           {/* Índice estilo consola futurista */}
@@ -222,81 +240,100 @@ const TrackRow = React.memo<TrackRowProps>(
           {/* Menú tres puntos (...) */}
           <div className="relative">
             <button
+              ref={buttonRef}
               id={`track-menu-btn-${track.id}`}
               type="button"
               onClick={(e) => onToggleMenu(track.id, e)}
               title="Opciones"
-              className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer active:scale-95"
+              className={`p-1.5 rounded-full transition-colors cursor-pointer active:scale-95 ${
+                isMenuOpen
+                  ? "bg-purple-600/30 text-white shadow-[0_0_10px_rgba(168,85,247,0.4)]"
+                  : "hover:bg-white/10 text-neutral-400 hover:text-white"
+              }`}
             >
               <MoreVertical className="w-4 h-4" />
             </button>
 
             {isMenuOpen && (
-              <div
-                id={`track-options-menu-${track.id}`}
-                onClick={(e) => e.stopPropagation()}
-                className="absolute right-0 top-full mt-1 w-44 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-100"
-                style={{
-                  backgroundColor: "var(--color-surface-elevated, #1c1c1c)",
-                  borderColor: "var(--color-border-subtle, rgba(255,255,255,0.12))",
-                }}
-              >
-                {/* Favorita */}
-                <button
-                  onClick={() => {
-                    onToggleFavorite(track.id);
+              <>
+                {/* Telón transparente para cerrar el menú con un toque/clic fuera */}
+                <div
+                  className="fixed inset-0 z-40 bg-transparent cursor-default"
+                  onClick={(e) => {
+                    e.stopPropagation();
                     onCloseMenu();
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
-                >
-                  <Heart
-                    className={`w-3.5 h-3.5 ${
-                      track.isFavorite ? "fill-red-500 text-red-500" : "text-neutral-400"
-                    }`}
-                  />
-                  <span>{track.isFavorite ? "Quitar de Favoritas" : "Marcar Favorita"}</span>
-                </button>
+                />
 
-                {/* Editar ID3 */}
-                {onOpenID3Editor && (
+                <div
+                  id={`track-options-menu-${track.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className={`absolute right-0 ${
+                    openUpward ? "bottom-full mb-1" : "top-full mt-1"
+                  } w-48 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-100`}
+                  style={{
+                    backgroundColor: "var(--color-surface-elevated, #1c1c1c)",
+                    borderColor: "var(--color-border-subtle, rgba(255,255,255,0.15))",
+                    boxShadow: "0 12px 36px rgba(0, 0, 0, 0.75)",
+                  }}
+                >
+                  {/* Favorita */}
                   <button
                     onClick={() => {
-                      onOpenID3Editor(track);
+                      onToggleFavorite(track.id);
                       onCloseMenu();
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
                   >
-                    <Tag className="w-3.5 h-3.5 text-violet-400" />
-                    <span>Editar</span>
+                    <Heart
+                      className={`w-3.5 h-3.5 ${
+                        track.isFavorite ? "fill-red-500 text-red-500" : "text-neutral-400"
+                      }`}
+                    />
+                    <span>{track.isFavorite ? "Quitar de Favoritas" : "Marcar Favorita"}</span>
                   </button>
-                )}
 
-                {/* Ocultar */}
-                {onHideTrack && (
+                  {/* Editar ID3 */}
+                  {onOpenID3Editor && (
+                    <button
+                      onClick={() => {
+                        onOpenID3Editor(track);
+                        onCloseMenu();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-white"
+                    >
+                      <Tag className="w-3.5 h-3.5 text-violet-400" />
+                      <span>Editar</span>
+                    </button>
+                  )}
+
+                  {/* Ocultar */}
+                  {onHideTrack && (
+                    <button
+                      onClick={() => {
+                        onHideTrack(track);
+                        onCloseMenu();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-neutral-300 hover:text-white"
+                    >
+                      <EyeOff className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Ocultar Canción</span>
+                    </button>
+                  )}
+
+                  {/* Eliminar */}
                   <button
                     onClick={() => {
-                      onHideTrack(track);
                       onCloseMenu();
+                      onStartDelete(track);
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-neutral-300 hover:text-white"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-red-500/20 text-left transition-colors cursor-pointer text-red-400"
                   >
-                    <EyeOff className="w-3.5 h-3.5 text-neutral-400" />
-                    <span>Ocultar Canción</span>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Eliminar Canción</span>
                   </button>
-                )}
-
-                {/* Eliminar */}
-                <button
-                  onClick={() => {
-                    onCloseMenu();
-                    onStartDelete(track);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-red-500/20 text-left transition-colors cursor-pointer text-red-400"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Eliminar Canción</span>
-                </button>
-              </div>
+                </div>
+              </>
             )}
           </div>
         </div>

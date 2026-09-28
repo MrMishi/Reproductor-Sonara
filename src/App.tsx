@@ -127,12 +127,24 @@ export function SonoraApp() {
   const [expandedSubTab, setExpandedSubTab] = useState<"cover" | "queue" | "lyrics" | "details">("cover");
   const [lyricsSearchTrack, setLyricsSearchTrack] = useState<Track | null>(null);
 
-// Puedes colocar esto junto a tus otros estados (useState)
-    // Bucasdor de Caratulas 
-    const [buscarCaratulasOnline, setBuscarCaratulasOnline] = useState<boolean>(() => {
-    const saved = localStorage.getItem('buscar_caratulas_online');
-    return saved !== null ? JSON.parse(saved) : true; // Activado por defecto
-});
+  // Buscador de Carátulas Online (Deezer / iTunes)
+  const [buscarCaratulasOnline, setBuscarCaratulasOnline] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("buscar_caratulas_online");
+      return saved !== null ? JSON.parse(saved) : true; // Activado por defecto
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleBuscarCaratulasOnline = (enabled: boolean) => {
+    setBuscarCaratulasOnline(enabled);
+    try {
+      localStorage.setItem("buscar_caratulas_online", JSON.stringify(enabled));
+    } catch {
+      // ignore
+    }
+  };
   
   
   // Hidden File and Folder Input Refs for '+' menu
@@ -251,31 +263,6 @@ export function SonoraApp() {
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
-
-  // Buscador automatizado de caratulas 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function actualizarCaratula() {
-        // Si el usuario desactivó la opción en ajustes, no hacemos nada
-        if (!buscarCaratulasOnline) return;
-        if (!currentTrack || !currentTrack.artist || !currentTrack.title) return;
-
-        const nuevaCaratula = await buscarYObtenerCaratula(currentTrack.artist, currentTrack.title);
-
-        if (nuevaCaratula && isMounted) {
-            setCurrentTrack(prev => prev ? { ...prev, cover: nuevaCaratula } : null);
-        }
-    }
-
-    actualizarCaratula();
-
-    return () => {
-        isMounted = false;
-    };
-}, [currentTrack?.id, buscarCaratulasOnline]); // Se ejecuta si cambia la pista o si cambian la configuración
-  
-        
   // Capture PWA beforeinstallprompt event if browser fires it
   useEffect(() => {
     const handleBeforeInstall = (e: Event) => {
@@ -597,6 +584,46 @@ export function SonoraApp() {
   }, [playbackMode, shuffledQueue, visibleTracks]);
 
   const currentTrack = activeQueue[currentTrackIndex] || visibleTracks[currentTrackIndex] || tracks[currentTrackIndex] || null;
+
+  // Buscador automatizado de carátulas en línea (Deezer con respaldo en iTunes)
+  useEffect(() => {
+    let isMounted = true;
+
+    async function actualizarCaratula() {
+      // Si el usuario desactivó la opción en ajustes, no hacemos nada
+      if (!buscarCaratulasOnline) return;
+      if (!currentTrack || !currentTrack.artist || !currentTrack.title) return;
+
+      // Si la pista ya tiene carátula válida (local blob o imagen web), no la sobreescribimos
+      if (
+        currentTrack.cover &&
+        (currentTrack.cover.startsWith("blob:") ||
+          currentTrack.cover.startsWith("data:") ||
+          currentTrack.cover.startsWith("http"))
+      ) {
+        return;
+      }
+
+      const trackId = currentTrack.id;
+      const trackToUpdate = currentTrack;
+      const nuevaCaratula = await buscarYObtenerCaratula(currentTrack.artist, currentTrack.title);
+
+      if (nuevaCaratula && isMounted) {
+        setTracks((prev) =>
+          prev.map((t) => (t.id === trackId ? { ...t, cover: nuevaCaratula } : t))
+        );
+        updateTrackInDb({ ...trackToUpdate, cover: nuevaCaratula }).catch((err) =>
+          console.warn("Error guardando carátula en base de datos:", err)
+        );
+      }
+    }
+
+    actualizarCaratula();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentTrack?.id, currentTrack?.cover, buscarCaratulasOnline]);
 
   // Refs estables para eventos de MediaSession y segundo plano en Android
   const isPlayingRef = useRef(isPlaying);
@@ -1666,6 +1693,8 @@ export function SonoraApp() {
         onToggleMiniMode={() => setIsMiniMode((prev) => !prev)}
         filterShortAudios={filterShortAudios}
         onToggleFilterShortAudios={handleToggleFilterShortAudios}
+        buscarCaratulasOnline={buscarCaratulasOnline}
+        onToggleBuscarCaratulasOnline={handleToggleBuscarCaratulasOnline}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         onOpenWelcome={handleResetWelcome}
       />

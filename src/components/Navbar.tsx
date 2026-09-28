@@ -48,6 +48,8 @@ interface NavbarProps {
   onToggleMiniMode?: () => void;
   filterShortAudios?: boolean;
   onToggleFilterShortAudios?: (enabled: boolean) => void;
+  buscarCaratulasOnline?: boolean;
+  onToggleBuscarCaratulasOnline?: (enabled: boolean) => void;
   onOpenInstallModal?: () => void;
   onOpenWelcome?: () => void;
 }
@@ -69,6 +71,8 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
   onToggleMiniMode,
   filterShortAudios = true,
   onToggleFilterShortAudios,
+  buscarCaratulasOnline = true,
+  onToggleBuscarCaratulasOnline,
   onOpenInstallModal,
   onOpenWelcome,
 }) => {
@@ -306,29 +310,46 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
                   </button>
                 )}
 
-{/* Opción de Buscador de Carátulas Online */}
-<div className="flex items-center justify-between p-3 hover:bg-white/5 rounded-xl transition-colors cursor-pointer"
-     onClick={() => {
-         const nuevoValor = !buscarCaratulasOnline;
-         setBuscarCaratulasOnline(nuevoValor);
-         localStorage.setItem('buscar_caratulas_online', JSON.stringify(nuevoValor));
-     }}>
-    <div className="flex items-center space-x-3">
-        <div className="p-2 bg-purple-500/20 text-purple-400 rounded-lg">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-        </div>
-        <div>
-            <p className="text-white font-medium text-sm">Buscador de Carátulas</p>
-            <p className="text-gray-400 text-xs">Obtener carátulas automáticamente de Deezer</p>
-        </div>
-    </div>
-    
-    <div className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${buscarCaratulasOnline ? 'bg-purple-600' : 'bg-gray-700'}`}>
-        <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${buscarCaratulasOnline ? 'translate-x-5' : 'translate-x-0'}`} />
-    </div>
-</div>
+                {/* Opción de Buscador de Carátulas Online */}
+                <div
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition-colors cursor-pointer"
+                  onClick={() => {
+                    const nuevoValor = !buscarCaratulasOnline;
+                    onToggleBuscarCaratulasOnline?.(nuevoValor);
+                  }}
+                >
+                  <div className="flex items-center gap-3 min-w-0 pr-2">
+                    <div className="p-2 rounded-lg bg-purple-500/15 text-purple-400 shrink-0">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-white font-medium text-xs truncate">Buscador de Carátulas</div>
+                      <div className="text-[10px] opacity-60 truncate">Obtener carátulas automáticamente en línea</div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    id="settings-online-covers-toggle-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const nuevoValor = !buscarCaratulasOnline;
+                      onToggleBuscarCaratulasOnline?.(nuevoValor);
+                    }}
+                    className={`w-9 h-5 rounded-full p-0.5 transition-colors shrink-0 cursor-pointer ${
+                      buscarCaratulasOnline ? "bg-purple-600" : "bg-neutral-700"
+                    }`}
+                    title={buscarCaratulasOnline ? "Búsqueda automática activa" : "Búsqueda automática inactiva"}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                        buscarCaratulasOnline ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
       
                 
                 {/* Toggle Filtrar Audios Cortos (< 30 segundos) */}
