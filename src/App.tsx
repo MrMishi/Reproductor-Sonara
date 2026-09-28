@@ -44,6 +44,7 @@ import {
   LibrarySection,
 } from "./types";
 import { audioEngine } from "./services/audioEngine";
+import { buscarYObtenerCaratula } from './services/coverService';
 import { getInitialDemoTracks } from "./services/demoTracks";
 import { loadSavedTheme, applyThemeToDocument } from "./services/themeEngine";
 import { Navbar } from "./components/Navbar";
