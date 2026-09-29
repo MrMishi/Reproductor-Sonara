@@ -43,7 +43,7 @@ interface BottomPlayerProps {
   onOpenExpanded: () => void;
 }
 
-export const BottomPlayer: React.FC<BottomPlayerProps> = ({
+export const BottomPlayer: React.FC<BottomPlayerProps> = React.memo(({
   currentTrack,
   isPlaying,
   currentTime,
@@ -241,4 +241,4 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = ({
       </div>
     </footer>
   );
-};
+});

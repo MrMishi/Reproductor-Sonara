@@ -20,7 +20,7 @@
  *   y ejecute la función correspondiente con `Array.from(selectedTrackIds)`.
  */
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Play,
   Heart,
@@ -368,7 +368,8 @@ const TrackRow = React.memo<TrackRowProps>(
       prev.track.isFavorite === next.track.isFavorite &&
       prev.track.duration === next.track.duration &&
       prev.isCurrent === next.isCurrent &&
-      prev.isPlaying === next.isPlaying &&
+      // Optimización: Solo re-renderizar si el estado de reproducción cambia en ESTA pista activa
+      (prev.isCurrent ? prev.isPlaying : false) === (next.isCurrent ? next.isPlaying : false) &&
       prev.isSelected === next.isSelected &&
       prev.isSelectionMode === next.isSelectionMode &&
       prev.isMenuOpen === next.isMenuOpen
@@ -376,7 +377,7 @@ const TrackRow = React.memo<TrackRowProps>(
   }
 );
 
-export const TrackList: React.FC<TrackListProps> = ({
+export const TrackList: React.FC<TrackListProps> = React.memo(({
   tracks,
   currentTrackId,
   isPlaying,
@@ -398,8 +399,44 @@ export const TrackList: React.FC<TrackListProps> = ({
   const [pendingDeleteTracks, setPendingDeleteTracks] = useState<Track[]>([]);
   const [openMenuTrackId, setOpenMenuTrackId] = useState<string | null>(null);
 
+  // Optimización de renderizado progresivo: Renderizar en lotes (batching) de 60 pistas
+  // para evitar saturar el DOM cuando la biblioteca tiene cientos o miles de canciones
+  const [displayLimit, setDisplayLimit] = useState(60);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  // Cargar más canciones automáticamente al aproximarse al final del scroll
+  useEffect(() => {
+    if (displayLimit >= tracks.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setDisplayLimit((prev) => Math.min(prev + 60, tracks.length));
+        }
+      },
+      { rootMargin: "400px" }
+    );
+
+    const el = loadMoreRef.current;
+    if (el) observer.observe(el);
+
+    return () => {
+      if (el) observer.unobserve(el);
+      observer.disconnect();
+    };
+  }, [displayLimit, tracks.length]);
+
+  // Callbacks estables para evitar re-renderizados innecesarios de las filas de canciones
+  const handleToggleMenu = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpenMenuTrackId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const handleCloseMenu = useCallback(() => {
+    setOpenMenuTrackId(null);
+  }, []);
+
   // Cerrar menú contextual al hacer clic en cualquier parte de la ventana
-  React.useEffect(() => {
+  useEffect(() => {
     if (!openMenuTrackId) return;
     const handleDocumentClick = () => setOpenMenuTrackId(null);
     window.addEventListener("click", handleDocumentClick);
@@ -578,9 +615,9 @@ export const TrackList: React.FC<TrackListProps> = ({
         )
       )}
 
-      {/* Lista de Canciones: Filas Modernas y Optimizadas con React.memo */}
+      {/* Lista de Canciones: Filas Modernas y Optimizadas con Renderizado Progresivo y React.memo */}
       <div className="flex flex-col space-y-1">
-        {tracks.map((track, idx) => (
+        {tracks.slice(0, displayLimit).map((track, idx) => (
           <TrackRow
             key={track.id}
             track={track}
@@ -593,17 +630,25 @@ export const TrackList: React.FC<TrackListProps> = ({
             onPlay={onPlayTrack}
             onToggleSelect={handleToggleSelect}
             onToggleFavorite={onToggleFavorite}
-            onToggleMenu={(id, e) => {
-              e.stopPropagation();
-              setOpenMenuTrackId((prev) => (prev === id ? null : id));
-            }}
-            onCloseMenu={() => setOpenMenuTrackId(null)}
+            onToggleMenu={handleToggleMenu}
+            onCloseMenu={handleCloseMenu}
             onOpenID3Editor={onOpenID3Editor}
             onHideTrack={onHideTrack}
             onStartDelete={handleStartDeleteSingle}
             onSwapTitleArtist={onSwapTitleArtist}
           />
         ))}
+
+        {/* Sentinel para carga progresiva fluida al desplazarse */}
+        {displayLimit < tracks.length && (
+          <div
+            ref={loadMoreRef}
+            className="py-3.5 flex items-center justify-center gap-2 text-xs text-neutral-400 font-mono select-none"
+          >
+            <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+            <span>Mostrando {displayLimit} de {tracks.length} canciones</span>
+          </div>
+        )}
       </div>
 
       {/* Confirmation Modal for Deletion */}
@@ -693,4 +738,4 @@ export const TrackList: React.FC<TrackListProps> = ({
       )}
     </div>
   );
-};
+});

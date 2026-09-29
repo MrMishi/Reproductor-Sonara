@@ -13,7 +13,7 @@
  * Incluye cabecera discreta para importar archivos locales o descargar por URL.
  */
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   Music,
   Users,
@@ -29,9 +29,34 @@ import {
   Sparkles,
   Search,
   FolderPlus,
+  ArrowUpDown,
+  ArrowDownAZ,
+  ArrowUpAZ,
+  ChevronDown,
+  Check,
+  Calendar,
+  Clock,
+  User,
 } from "lucide-react";
-import { Track, LibrarySection } from "../types";
+import { Track, LibrarySection, LibrarySortOption, SortDirection } from "../types";
 import { TrackList } from "./TrackList";
+
+const STORAGE_KEY_SORT_BY = "sonora_library_sort_by";
+const STORAGE_KEY_SORT_DIR = "sonora_library_sort_direction";
+
+interface SortConfigOption {
+  id: LibrarySortOption;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  description: string;
+}
+
+const SORT_OPTIONS: SortConfigOption[] = [
+  { id: "title", label: "Nombre", icon: Music, description: "Título de la canción (A-Z)" },
+  { id: "artist", label: "Artista", icon: User, description: "Nombre del cantante o grupo" },
+  { id: "addedAt", label: "Fecha de agregado", icon: Calendar, description: "Más recientes o antiguas" },
+  { id: "duration", label: "Duración", icon: Clock, description: "Tiempo total de reproducción" },
+];
 
 interface LibraryViewProps {
   tracks: Track[];
@@ -112,6 +137,75 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
 
   const selectedFolder = propSelectedFolder !== undefined ? propSelectedFolder : internalFolder;
   const setSelectedFolder = propOnSelectFolder ?? setInternalFolder;
+
+  // Estado de ordenación de canciones con persistencia en localStorage
+  const [sortBy, setSortBy] = useState<LibrarySortOption>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SORT_BY);
+      if (saved === "title" || saved === "artist" || saved === "addedAt" || saved === "duration") {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return "title";
+  });
+
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SORT_DIR);
+      if (saved === "asc" || saved === "desc") {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return "asc";
+  });
+
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Cerrar menú de ordenación al hacer clic afuera
+  useEffect(() => {
+    if (!isSortMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+        setIsSortMenuOpen(false);
+      }
+    };
+    window.addEventListener("click", handleClickOutside);
+    return () => window.removeEventListener("click", handleClickOutside);
+  }, [isSortMenuOpen]);
+
+  const handleSelectSort = (option: LibrarySortOption) => {
+    let newDir = sortDirection;
+    if (sortBy === option) {
+      // Alternar dirección si presiona la misma opción
+      newDir = sortDirection === "asc" ? "desc" : "asc";
+    } else {
+      // Por defecto: Fecha y Duración se ordenan desc (más recientes / más largas), Nombre y Artista asc (A-Z)
+      newDir = option === "addedAt" || option === "duration" ? "desc" : "asc";
+      setSortBy(option);
+      try {
+        localStorage.setItem(STORAGE_KEY_SORT_BY, option);
+      } catch {}
+    }
+    setSortDirection(newDir);
+    try {
+      localStorage.setItem(STORAGE_KEY_SORT_DIR, newDir);
+    } catch {}
+    setIsSortMenuOpen(false);
+  };
+
+  const handleToggleSortDirection = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newDir = sortDirection === "asc" ? "desc" : "asc";
+    setSortDirection(newDir);
+    try {
+      localStorage.setItem(STORAGE_KEY_SORT_DIR, newDir);
+    } catch {}
+  };
 
   // Filtrar según búsqueda inteligente y profunda (Título, Artista ID3, Álbum, Nombre de archivo .mp3 y Carpetas)
   const filteredTracks = useMemo(() => {
@@ -238,6 +332,193 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
     setSelectedFolder(null);
   };
 
+  // Canciones filtradas y ordenadas según la preferencia del usuario (Nombre, Artista, Fecha, Duración)
+  const sortedTracks = useMemo(() => {
+    const list = [...filteredTracks];
+    const isAsc = sortDirection === "asc";
+
+    list.sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortBy) {
+        case "title":
+          comparison = (a.title || "").localeCompare(b.title || "", undefined, {
+            sensitivity: "base",
+            numeric: true,
+          });
+          break;
+        case "artist": {
+          const artA = a.artist || "Artista Desconocido";
+          const artB = b.artist || "Artista Desconocido";
+          comparison = artA.localeCompare(artB, undefined, {
+            sensitivity: "base",
+            numeric: true,
+          });
+          if (comparison === 0) {
+            comparison = (a.title || "").localeCompare(b.title || "", undefined, {
+              sensitivity: "base",
+              numeric: true,
+            });
+          }
+          break;
+        }
+        case "addedAt":
+          comparison = (a.addedAt || 0) - (b.addedAt || 0);
+          break;
+        case "duration":
+          comparison = (a.duration || 0) - (b.duration || 0);
+          break;
+      }
+
+      return isAsc ? comparison : -comparison;
+    });
+
+    return list;
+  }, [filteredTracks, sortBy, sortDirection]);
+
+  // Canciones de la vista en detalle ordenadas
+  const sortedDetailTracks = useMemo(() => {
+    const list = [...activeDetailTracks];
+    const isAsc = sortDirection === "asc";
+
+    list.sort((a, b) => {
+      let comparison = 0;
+      switch (sortBy) {
+        case "title":
+          comparison = (a.title || "").localeCompare(b.title || "", undefined, {
+            sensitivity: "base",
+            numeric: true,
+          });
+          break;
+        case "artist":
+          comparison = (a.artist || "").localeCompare(b.artist || "", undefined, {
+            sensitivity: "base",
+            numeric: true,
+          });
+          break;
+        case "addedAt":
+          comparison = (a.addedAt || 0) - (b.addedAt || 0);
+          break;
+        case "duration":
+          comparison = (a.duration || 0) - (b.duration || 0);
+          break;
+      }
+      return isAsc ? comparison : -comparison;
+    });
+
+    return list;
+  }, [activeDetailTracks, sortBy, sortDirection]);
+
+  const currentSortObj = SORT_OPTIONS.find((s) => s.id === sortBy) || SORT_OPTIONS[0];
+
+  // Componente del Menú Desplegable de Ordenación con diseño Cyberpunk HUD
+  const renderSortDropdown = () => (
+    <div className="relative" ref={sortMenuRef}>
+      <div className="flex items-center gap-1.5">
+        <button
+          id="library-sort-dropdown-btn"
+          type="button"
+          onClick={() => setIsSortMenuOpen((prev) => !prev)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-white/[0.05] hover:bg-white/10 border border-white/10 text-neutral-200 hover:text-white transition-all cursor-pointer shadow-sm active:scale-95"
+          title="Ordenar canciones por Nombre, Artista, Fecha de agregado o Duración"
+          aria-haspopup="true"
+          aria-expanded={isSortMenuOpen}
+        >
+          <ArrowUpDown className="w-3.5 h-3.5 text-violet-400" />
+          <span className="hidden xs:inline text-neutral-400 font-normal">Ordenar:</span>
+          <span className="font-bold text-white">{currentSortObj.label}</span>
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-neutral-400 transition-transform duration-200 ${
+              isSortMenuOpen ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+
+        {/* Botón para alternar rápidamente dirección Ascendente / Descendente */}
+        <button
+          id="library-sort-dir-toggle-btn"
+          type="button"
+          onClick={handleToggleSortDirection}
+          className="p-1.5 rounded-full bg-white/[0.05] hover:bg-white/10 border border-white/10 text-neutral-300 hover:text-white transition-all cursor-pointer shadow-sm active:scale-90"
+          title={
+            sortDirection === "asc"
+              ? "Orden actual: Ascendente (A-Z / Menor). Clic para invertir a Descendente."
+              : "Orden actual: Descendente (Z-A / Mayor). Clic para invertir a Ascendente."
+          }
+        >
+          {sortDirection === "asc" ? (
+            <ArrowUpAZ className="w-3.5 h-3.5 text-fuchsia-400" />
+          ) : (
+            <ArrowDownAZ className="w-3.5 h-3.5 text-cyan-400" />
+          )}
+        </button>
+      </div>
+
+      {/* Menú Desplegable con Estilo Cyberpunk HUD */}
+      {isSortMenuOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-transparent"
+            onClick={() => setIsSortMenuOpen(false)}
+          />
+          <div
+            id="library-sort-dropdown-menu"
+            className="absolute right-0 mt-2 w-60 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-xl z-50 animate-in fade-in zoom-in-95 duration-150"
+            style={{
+              backgroundColor: "rgba(18, 18, 24, 0.96)",
+              borderColor: "rgba(255, 255, 255, 0.12)",
+              boxShadow: "0 12px 36px -4px rgba(0, 0, 0, 0.7), 0 0 16px rgba(124, 58, 237, 0.25)",
+            }}
+          >
+            <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-400 border-b border-white/5 mb-1 flex items-center justify-between">
+              <span>Criterio de orden</span>
+              <span className="text-violet-400 font-bold">
+                {sortDirection === "asc" ? "Ascendente" : "Descendente"}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-0.5">
+              {SORT_OPTIONS.map((opt) => {
+                const isSelected = sortBy === opt.id;
+                const Icon = opt.icon;
+                return (
+                  <button
+                    key={opt.id}
+                    id={`sort-option-${opt.id}`}
+                    type="button"
+                    onClick={() => handleSelectSort(opt.id)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      isSelected
+                        ? "bg-violet-600/25 text-violet-200 border border-violet-500/30"
+                        : "text-neutral-300 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Icon
+                        className={`w-4 h-4 shrink-0 ${
+                          isSelected ? "text-violet-400" : "text-neutral-400"
+                        }`}
+                      />
+                      <div className="flex flex-col text-left min-w-0">
+                        <span className="truncate">{opt.label}</span>
+                        <span className="text-[10px] opacity-60 font-normal truncate">
+                          {opt.description}
+                        </span>
+                      </div>
+                    </div>
+                    {isSelected && (
+                      <Check className="w-4 h-4 text-violet-400 stroke-[2.5] shrink-0 ml-2" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-6 pb-12 animate-in fade-in duration-200">
       {/* Encabezado Principal */}
@@ -265,65 +546,70 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
 
       {/* Pestañas / Filtros Superiores de Biblioteca: Pequeñas, Limpias y Minimalistas */}
       {!selectedArtist && !selectedAlbum && !selectedFolder && (
-        <div className="flex items-center gap-1 sm:gap-2 p-1 rounded-full bg-white/[0.04] border border-white/5 max-w-fit select-none">
-          <button
-            id="tab-section-songs"
-            onClick={() => setActiveSection("songs")}
-            className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeSection === "songs"
-                ? "bg-white text-black shadow-sm font-bold"
-                : "text-neutral-400 hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <Music className="w-3.5 h-3.5" />
-            <span>Canciones</span>
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 select-none">
+          <div className="flex items-center gap-1 sm:gap-2 p-1 rounded-full bg-white/[0.04] border border-white/5 max-w-fit select-none">
+            <button
+              id="tab-section-songs"
+              onClick={() => setActiveSection("songs")}
+              className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeSection === "songs"
+                  ? "bg-white text-black shadow-sm font-bold"
+                  : "text-neutral-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Music className="w-3.5 h-3.5" />
+              <span>Canciones</span>
+            </button>
 
-          <button
-            id="tab-section-artists"
-            onClick={() => setActiveSection("artists")}
-            className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeSection === "artists"
-                ? "bg-white text-black shadow-sm font-bold"
-                : "text-neutral-400 hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Artistas</span>
-          </button>
+            <button
+              id="tab-section-artists"
+              onClick={() => setActiveSection("artists")}
+              className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeSection === "artists"
+                  ? "bg-white text-black shadow-sm font-bold"
+                  : "text-neutral-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Artistas</span>
+            </button>
 
-          <button
-            id="tab-section-albums"
-            onClick={() => setActiveSection("albums")}
-            className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeSection === "albums"
-                ? "bg-white text-black shadow-sm font-bold"
-                : "text-neutral-400 hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <Disc3 className="w-3.5 h-3.5" />
-            <span>Álbumes</span>
-          </button>
+            <button
+              id="tab-section-albums"
+              onClick={() => setActiveSection("albums")}
+              className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeSection === "albums"
+                  ? "bg-white text-black shadow-sm font-bold"
+                  : "text-neutral-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Disc3 className="w-3.5 h-3.5" />
+              <span>Álbumes</span>
+            </button>
 
-          <button
-            id="tab-section-folders"
-            onClick={() => setActiveSection("folders")}
-            className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeSection === "folders"
-                ? "bg-white text-black shadow-sm font-bold"
-                : "text-neutral-400 hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <Folder className="w-3.5 h-3.5" />
-            <span>Carpetas</span>
-          </button>
+            <button
+              id="tab-section-folders"
+              onClick={() => setActiveSection("folders")}
+              className={`px-3 sm:px-4 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeSection === "folders"
+                  ? "bg-white text-black shadow-sm font-bold"
+                  : "text-neutral-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Folder className="w-3.5 h-3.5" />
+              <span>Carpetas</span>
+            </button>
+          </div>
+
+          {/* Menú Desplegable de Ordenación */}
+          {activeSection === "songs" && renderSortDropdown()}
         </div>
       )}
 
       {/* Vista en detalle cuando se hace clic en un Artista, Álbum o Carpeta */}
       {(selectedArtist || selectedAlbum || selectedFolder) && (
         <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <button
               onClick={handleBackToSection}
               className="flex items-center gap-1.5 text-xs font-bold text-neutral-400 hover:text-white transition-colors cursor-pointer py-1 px-2 -ml-2 rounded-lg hover:bg-white/5"
@@ -335,14 +621,17 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
               </span>
             </button>
 
-            <button
-              onClick={() => handlePlayGroup(activeDetailTracks)}
-              className="px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 text-white shadow transition-transform hover:scale-105 cursor-pointer"
-              style={{ backgroundColor: "var(--color-accent, #7C3AED)" }}
-            >
-              <Play className="w-3.5 h-3.5 fill-white" />
-              <span>Reproducir Todo ({activeDetailTracks.length})</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {renderSortDropdown()}
+              <button
+                onClick={() => handlePlayGroup(sortedDetailTracks)}
+                className="px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 text-white shadow transition-transform hover:scale-105 cursor-pointer"
+                style={{ backgroundColor: "var(--color-accent, #7C3AED)" }}
+              >
+                <Play className="w-3.5 h-3.5 fill-white" />
+                <span>Reproducir Todo ({sortedDetailTracks.length})</span>
+              </button>
+            </div>
           </div>
 
           <div
@@ -374,15 +663,15 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
                 {selectedArtist || selectedAlbum || selectedFolder}
               </h2>
               <p className="text-xs text-neutral-400 mt-1">
-                {activeDetailTracks.length} {activeDetailTracks.length === 1 ? "canción" : "canciones"} · Duración total:{" "}
-                {formatDuration(activeDetailTracks.reduce((acc, cur) => acc + (cur.duration || 0), 0))}
+                {sortedDetailTracks.length} {sortedDetailTracks.length === 1 ? "canción" : "canciones"} · Duración total:{" "}
+                {formatDuration(sortedDetailTracks.reduce((acc, cur) => acc + (cur.duration || 0), 0))}
               </p>
             </div>
           </div>
 
           {/* Lista de pistas del grupo seleccionado */}
           <TrackList
-            tracks={activeDetailTracks}
+            tracks={sortedDetailTracks}
             currentTrackId={currentTrackId}
             isPlaying={isPlaying}
             onPlayTrack={onPlayTrack}
@@ -405,7 +694,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "songs" && (
         <TrackList
-          tracks={filteredTracks}
+          tracks={sortedTracks}
           currentTrackId={currentTrackId}
           isPlaying={isPlaying}
           onPlayTrack={onPlayTrack}

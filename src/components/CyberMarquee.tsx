@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 
 interface CyberMarqueeProps {
   text: string;
@@ -17,8 +17,10 @@ interface CyberMarqueeProps {
  * - Si el texto desborda, calcula la distancia exacta y activa un scroll horizontal fluido
  *   (ping-pong con pausa inicial y final para lectura óptima).
  * - Se activa en canciones en reproducción (active=true), al pasar el cursor o al tocar.
+ * - Optimización de alto rendimiento: Las pistas inactivas no instancian ResizeObservers ni
+ *   ejecutan mediciones sincrónicas en el hilo principal, reduciendo el consumo de CPU y memoria a 0.
  */
-export const CyberMarquee: React.FC<CyberMarqueeProps> = ({
+export const CyberMarquee: React.FC<CyberMarqueeProps> = React.memo(({
   text,
   className = "",
   active = false,
@@ -31,21 +33,27 @@ export const CyberMarquee: React.FC<CyberMarqueeProps> = ({
   const [overflowDist, setOverflowDist] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
 
-  // Medir desbordamiento cada vez que cambia el texto o el tamaño de la ventana
-  const measure = () => {
+  const shouldBeActive = alwaysAnimate || active || (animateOnHover && isHovered);
+
+  // Medir desbordamiento de forma eficiente cuando el elemento está activo o bajo hover
+  const measure = useCallback(() => {
     if (containerRef.current && textRef.current) {
       const cWidth = containerRef.current.clientWidth;
       const tWidth = textRef.current.scrollWidth;
       const diff = tWidth - cWidth;
       setOverflowDist(diff > 2 ? diff : 0);
     }
-  };
+  }, []);
 
-  useLayoutEffect(() => {
-    measure();
-  }, [text]);
-
+  // Solo medir y observar cuando el elemento realmente necesita animarse (ahorro de cientos de observers)
   useEffect(() => {
+    if (!shouldBeActive) {
+      if (overflowDist !== 0) setOverflowDist(0);
+      return;
+    }
+
+    measure();
+
     const handleResize = () => measure();
     window.addEventListener("resize", handleResize);
 
@@ -59,10 +67,10 @@ export const CyberMarquee: React.FC<CyberMarqueeProps> = ({
       window.removeEventListener("resize", handleResize);
       if (observer) observer.disconnect();
     };
-  }, [text]);
+  }, [shouldBeActive, text, measure]);
 
   const isOverflowing = overflowDist > 0;
-  const shouldAnimate = isOverflowing && (alwaysAnimate || active || (animateOnHover && isHovered));
+  const shouldAnimate = isOverflowing && shouldBeActive;
 
   // Velocidad constante legible: ~28px por segundo + pausas en extremos
   const durationSec = Math.max(3.5, overflowDist / 26) + 1.5;
@@ -88,7 +96,7 @@ export const CyberMarquee: React.FC<CyberMarqueeProps> = ({
       <span
         ref={textRef}
         className={`inline-block whitespace-nowrap will-change-transform ${
-          !isOverflowing ? "truncate" : ""
+          !shouldAnimate ? "truncate" : ""
         }`}
         style={
           shouldAnimate
@@ -102,4 +110,4 @@ export const CyberMarquee: React.FC<CyberMarqueeProps> = ({
       </span>
     </div>
   );
-};
+});

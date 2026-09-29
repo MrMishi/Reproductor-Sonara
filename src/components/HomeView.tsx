@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Play, HardDrive, Heart, Trash2 } from "lucide-react";
 import { Track } from "../types";
 import { CyberMarquee } from "./CyberMarquee";
@@ -14,7 +14,7 @@ interface HomeViewProps {
   onDeleteTrack?: (track: Track) => void;
 }
 
-export const HomeView: React.FC<HomeViewProps> = ({
+export const HomeView: React.FC<HomeViewProps> = React.memo(({
   tracks,
   currentTrackId,
   isPlaying,
@@ -23,23 +23,37 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onToggleFavorite,
   onDeleteTrack,
 }) => {
-  // Group albums
-  const albumsMap = new Map<string, Track[]>();
-  tracks.forEach((t) => {
-    const alb = t.album || "Álbum Desconocido";
-    if (!albumsMap.has(alb)) albumsMap.set(alb, []);
-    albumsMap.get(alb)!.push(t);
-  });
-  const albumsList = Array.from(albumsMap.entries()).slice(0, 8);
+  // Optimización con useMemo para evitar reagrupar cientos de canciones en cada render
+  const albumsList = useMemo(() => {
+    const albumsMap = new Map<string, Track[]>();
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      const alb = t.album || "Álbum Desconocido";
+      let list = albumsMap.get(alb);
+      if (!list) {
+        list = [];
+        albumsMap.set(alb, list);
+      }
+      list.push(t);
+    }
+    return Array.from(albumsMap.entries()).slice(0, 8);
+  }, [tracks]);
 
-  // Group artists
-  const artistsMap = new Map<string, Track[]>();
-  tracks.forEach((t) => {
-    const art = t.artist || "Artista Desconocido";
-    if (!artistsMap.has(art)) artistsMap.set(art, []);
-    artistsMap.get(art)!.push(t);
-  });
-  const artistsList = Array.from(artistsMap.entries()).slice(0, 8);
+  // Optimización con useMemo para artistas
+  const artistsList = useMemo(() => {
+    const artistsMap = new Map<string, Track[]>();
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      const art = t.artist || "Artista Desconocido";
+      let list = artistsMap.get(art);
+      if (!list) {
+        list = [];
+        artistsMap.set(art, list);
+      }
+      list.push(t);
+    }
+    return Array.from(artistsMap.entries()).slice(0, 8);
+  }, [tracks]);
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8 pb-8 sm:pb-12">
@@ -268,4 +282,4 @@ export const HomeView: React.FC<HomeViewProps> = ({
       )}
     </div>
   );
-};
+});

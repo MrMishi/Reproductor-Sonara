@@ -88,6 +88,16 @@ export interface Track {
 export type LibrarySection = "songs" | "artists" | "albums" | "folders";
 
 /**
+ * Criterios de ordenación para la lista de canciones en la Biblioteca
+ */
+export type LibrarySortOption = "title" | "artist" | "addedAt" | "duration";
+
+/**
+ * Dirección de ordenación (Ascendente o Descendente)
+ */
+export type SortDirection = "asc" | "desc";
+
+/**
  * Línea o verso individual de una letra sincronizada con formato .LRC
  * Estructura interlineal: { time: number, original: string, romaji?: string, spanish?: string }
  */

@@ -32,7 +32,7 @@
  *   páselo como prop a la vista o modal correspondiente.
  */
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { App } from "@capacitor/app";
 import {
   Track,
@@ -585,6 +585,9 @@ export function SonoraApp() {
 
   const currentTrack = activeQueue[currentTrackIndex] || visibleTracks[currentTrackIndex] || tracks[currentTrackIndex] || null;
 
+  // Cache de búsquedas fallidas de carátulas para evitar peticiones de red repetitivas
+  const failedCoverSearchesRef = useRef<Set<string>>(new Set());
+
   // Buscador automatizado de carátulas en línea (Deezer con respaldo en iTunes)
   useEffect(() => {
     let isMounted = true;
@@ -594,27 +597,37 @@ export function SonoraApp() {
       if (!buscarCaratulasOnline) return;
       if (!currentTrack || !currentTrack.artist || !currentTrack.title) return;
 
-      // Si la pista ya tiene carátula válida (local blob o imagen web), no la sobreescribimos
+      const trackId = currentTrack.id;
+      const currentCover = currentTrack.coverUrl || "";
+
+      // Si la pista ya tiene carátula descargada (http) o local incrustada (blob), no la sobreescribimos
       if (
-        currentTrack.cover &&
-        (currentTrack.cover.startsWith("blob:") ||
-          currentTrack.cover.startsWith("data:") ||
-          currentTrack.cover.startsWith("http"))
+        currentCover.startsWith("http://") ||
+        currentCover.startsWith("https://") ||
+        currentCover.startsWith("blob:")
       ) {
         return;
       }
 
-      const trackId = currentTrack.id;
+      // Si ya se buscó previamente en esta sesión y no se encontró, evitar llamadas repetitivas
+      if (failedCoverSearchesRef.current.has(trackId)) {
+        return;
+      }
+
       const trackToUpdate = currentTrack;
       const nuevaCaratula = await buscarYObtenerCaratula(currentTrack.artist, currentTrack.title);
 
-      if (nuevaCaratula && isMounted) {
+      if (!isMounted) return;
+
+      if (nuevaCaratula) {
         setTracks((prev) =>
-          prev.map((t) => (t.id === trackId ? { ...t, cover: nuevaCaratula } : t))
+          prev.map((t) => (t.id === trackId ? { ...t, coverUrl: nuevaCaratula } : t))
         );
-        updateTrackInDb({ ...trackToUpdate, cover: nuevaCaratula }).catch((err) =>
+        updateTrackInDb({ ...trackToUpdate, coverUrl: nuevaCaratula }).catch((err) =>
           console.warn("Error guardando carátula en base de datos:", err)
         );
+      } else {
+        failedCoverSearchesRef.current.add(trackId);
       }
     }
 
@@ -623,7 +636,7 @@ export function SonoraApp() {
     return () => {
       isMounted = false;
     };
-  }, [currentTrack?.id, currentTrack?.cover, buscarCaratulasOnline]);
+  }, [currentTrack?.id, currentTrack?.coverUrl, buscarCaratulasOnline]);
 
   // Refs estables para eventos de MediaSession y segundo plano en Android
   const isPlayingRef = useRef(isPlaying);
@@ -1533,6 +1546,47 @@ export function SonoraApp() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPlaying, duration, currentTrackIndex, tracks]);
 
+  // Callbacks memoizados para Navbar y LibraryView para evitar re-renderizados innecesarios durante la reproducción
+  const handleSelectTab = useCallback((tab: ActiveTab) => {
+    setActiveTab(tab);
+    if (tab === "library") {
+      setSelectedArtist(null);
+      setSelectedAlbum(null);
+      setSelectedFolder(null);
+      setLibrarySection("songs");
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  const handleOpenAddFiles = useCallback(async () => {
+    const hasPerm = await handleEnsureStoragePermissions();
+    if (hasPerm) {
+      localFilesInputRef.current?.click();
+    }
+  }, []);
+
+  const handleOpenAddFolder = useCallback(async () => {
+    const hasPerm = await handleEnsureStoragePermissions();
+    if (hasPerm) {
+      setIsScannerOpen(true);
+    }
+  }, []);
+
+  const handleOpenScanner = useCallback(async () => {
+    const hasPerm = await handleEnsureStoragePermissions();
+    if (hasPerm) {
+      setIsScannerOpen(true);
+    }
+  }, []);
+
+  const handleOpenEqualizer = useCallback(() => setIsEqualizerOpen(true), []);
+  const handleOpenTheme = useCallback(() => setIsThemeOpen(true), []);
+  const handleOpenHiddenTracks = useCallback(() => setIsHiddenTracksOpen(true), []);
+  const handleToggleMiniMode = useCallback(() => setIsMiniMode((prev) => !prev), []);
+  const handleOpenInstallModal = useCallback(() => setIsInstallModalOpen(true), []);
+  const handleOpenLyricsSearchForTrack = useCallback((track: Track) => setLyricsSearchTrack(track), []);
+  const handleOpenID3Editor = useCallback((track: Track) => setEditingTrack(track), []);
+
   return (
     <div
       id="ytm-app-root"
@@ -1654,48 +1708,24 @@ export function SonoraApp() {
       {/* Top Navigation */}
       <Navbar
         activeTab={activeTab}
-        onSelectTab={(tab) => {
-          setActiveTab(tab);
-          if (tab === "library") {
-            setSelectedArtist(null);
-            setSelectedAlbum(null);
-            setSelectedFolder(null);
-            setLibrarySection("songs");
-          }
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }}
+        onSelectTab={handleSelectTab}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        onOpenAddFiles={async () => {
-          const hasPerm = await handleEnsureStoragePermissions();
-          if (hasPerm) {
-            localFilesInputRef.current?.click();
-          }
-        }}
-        onOpenAddFolder={async () => {
-          const hasPerm = await handleEnsureStoragePermissions();
-          if (hasPerm) {
-            setIsScannerOpen(true);
-          }
-        }}
-        onOpenScanner={async () => {
-          const hasPerm = await handleEnsureStoragePermissions();
-          if (hasPerm) {
-            setIsScannerOpen(true);
-          }
-        }}
-        onOpenEqualizer={() => setIsEqualizerOpen(true)}
-        onOpenTheme={() => setIsThemeOpen(true)}
-        onOpenHiddenTracks={() => setIsHiddenTracksOpen(true)}
+        onOpenAddFiles={handleOpenAddFiles}
+        onOpenAddFolder={handleOpenAddFolder}
+        onOpenScanner={handleOpenScanner}
+        onOpenEqualizer={handleOpenEqualizer}
+        onOpenTheme={handleOpenTheme}
+        onOpenHiddenTracks={handleOpenHiddenTracks}
         hiddenCount={hiddenTracks.length}
         trackCount={visibleTracks.length}
         isMiniMode={isMiniMode}
-        onToggleMiniMode={() => setIsMiniMode((prev) => !prev)}
+        onToggleMiniMode={handleToggleMiniMode}
         filterShortAudios={filterShortAudios}
         onToggleFilterShortAudios={handleToggleFilterShortAudios}
         buscarCaratulasOnline={buscarCaratulasOnline}
         onToggleBuscarCaratulasOnline={handleToggleBuscarCaratulasOnline}
-        onOpenInstallModal={() => setIsInstallModalOpen(true)}
+        onOpenInstallModal={handleOpenInstallModal}
         onOpenWelcome={handleResetWelcome}
       />
 
@@ -1707,16 +1737,16 @@ export function SonoraApp() {
           isPlaying={isPlaying}
           onPlayTrack={handlePlayTrack}
           onToggleFavorite={handleToggleFavorite}
-          onOpenLyricsSearchForTrack={(track) => setLyricsSearchTrack(track)}
-          onOpenScanner={() => setIsScannerOpen(true)}
+          onOpenLyricsSearchForTrack={handleOpenLyricsSearchForTrack}
+          onOpenScanner={handleOpenScanner}
           onLoadDemos={handleLoadDemos}
           onHideTrack={handleHideTrack}
-          onOpenHiddenTracks={() => setIsHiddenTracksOpen(true)}
+          onOpenHiddenTracks={handleOpenHiddenTracks}
           hiddenCount={hiddenTracks.length}
           onDeleteTracks={handleDeleteTracks}
           searchQuery={searchQuery}
           isFavoritesView={activeTab === "favorites"}
-          onOpenID3Editor={(track) => setEditingTrack(track)}
+          onOpenID3Editor={handleOpenID3Editor}
           activeSection={librarySection}
           onSectionChange={setLibrarySection}
           selectedArtist={selectedArtist}
