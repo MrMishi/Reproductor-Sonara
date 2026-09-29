@@ -682,7 +682,14 @@ export async function autoScanStartup(
     await requestStoragePermissions();
 
     const existingMap = new Set(
-      existingTracks.map((t) => (t.nativePath || t.url || `${t.title}-${t.artist}`).toLowerCase())
+      existingTracks
+        .flatMap((t) => [
+          (t.nativePath || "").toLowerCase(),
+          (t.url || "").toLowerCase(),
+          `${t.title}-${t.artist}`.toLowerCase(),
+          `${t.artist}-${t.title}`.toLowerCase(),
+        ])
+        .filter(Boolean)
     );
 
     const { tracks } = await scanNativeMusicDirectories(

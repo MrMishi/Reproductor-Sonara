@@ -255,31 +255,48 @@ function parseID3v2(
  * Propósito: Limpia y descompone el nombre del archivo en título y artista legibles cuando faltan etiquetas ID3.
  * ¿Cómo funciona?:
  * 1. Elimina la extensión del archivo (.mp3, .flac, etc.).
- * 2. Reconoce separadores tipo "Artista - Título" o "01 - Artista - Título".
+ * 2. Reconoce separadores estándar de la industria: "Artista - Título" o "01 - Artista - Título".
  * 3. Remueve números de pista y prefijos de índice (ej: "01. ", "02_").
- * 4. Devuelve un objeto `{ title, artist }` con valores de respaldo claros.
+ * 4. Devuelve un objeto `{ title, artist }` asignando el nombre de la música a 'title' y el cantante a 'artist'.
  */
 export function cleanFilename(fileName: string): { title: string; artist: string } {
   // Remove extension
   const nameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
 
-  // Common patterns: "Artist - Title", "01 - Artist - Title", "01. Title", "Artist - 01 - Title"
-  const splitDash = nameWithoutExt.split(/\s+-\s+/);
+  // Formato estándar en archivos de audio: "Artista - Título", "01 - Artista - Título", "01. Artista - Título"
+  // Normalizar guiones bajos dobles o simples entre palabras clave si aplica
+  const normalized = nameWithoutExt.replace(/_+/g, " ");
+  const splitDash = normalized.split(/\s+-\s+/);
+
   if (splitDash.length >= 2) {
-    // Check if first is track number
-    if (/^\d+$/.test(splitDash[0].trim()) && splitDash.length >= 3) {
+    // Caso 1: Comienza con número de pista (ej: "01 - Artista - Título")
+    if (/^\d+$/.test(splitDash[0].trim())) {
+      if (splitDash.length >= 3) {
+        return {
+          artist: splitDash[1].trim() || "Artista Desconocido",
+          title: splitDash.slice(2).join(" - ").trim() || nameWithoutExt,
+        };
+      }
+      // Caso 2: Solo número y título sin artista (ej: "01 - Título")
       return {
-        artist: splitDash[1].trim(),
-        title: splitDash.slice(2).join(" - ").trim(),
+        title: splitDash[1].trim() || nameWithoutExt,
+        artist: "Artista Desconocido",
       };
     }
+
+    // Caso 3: "Artista - Título" o "01. Artista - Título"
+    // El primer segmento es el Artista / Cantante (limpiando números de prefijo si los hay)
+    // El segundo segmento (y sucesivos) es el Título de la Canción / Música
+    const parsedArtist = splitDash[0].replace(/^\d+[\s._-]+/, "").trim();
+    const parsedTitle = splitDash.slice(1).join(" - ").trim();
+
     return {
-      artist: splitDash[0].replace(/^\d+[\s._-]+/, "").trim(),
-      title: splitDash.slice(1).join(" - ").trim(),
+      artist: parsedArtist || "Artista Desconocido",
+      title: parsedTitle || nameWithoutExt,
     };
   }
 
-  // "01 Title" or "01. Title"
+  // Sin guion divisor: "01 Título" o "01. Título" o "Título"
   const cleanTitle = nameWithoutExt.replace(/^\d+[\s._-]+/, "").trim();
   return {
     title: cleanTitle || nameWithoutExt,
@@ -415,8 +432,19 @@ export async function parseAudioFile(
     return null;
   }
 
-  const finalTitle = id3.title || fallbackTitle;
-  const finalArtist = id3.artist || fallbackArtist;
+  let finalTitle = id3.title || fallbackTitle;
+  let finalArtist = id3.artist || fallbackArtist;
+
+  // Si el título contiene separador de guion (" - ") y el artista quedó como desconocido o vacío,
+  // descomponer el título en Artista (cantante) y Título (canción)
+  if ((!id3.artist || id3.artist === "Artista Desconocido") && finalTitle.includes(" - ")) {
+    const parsed = cleanFilename(finalTitle);
+    if (parsed.artist && parsed.artist !== "Artista Desconocido") {
+      finalArtist = parsed.artist;
+      finalTitle = parsed.title;
+    }
+  }
+
   const coverUrl = id3.coverUrl || generateCoverArt(finalTitle, finalArtist);
 
   // Extraer estructura de carpeta de origen

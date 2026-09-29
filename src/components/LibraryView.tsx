@@ -47,6 +47,7 @@ interface LibraryViewProps {
   hiddenCount?: number;
   onDeleteTracks?: (trackIds: string[]) => void;
   onOpenID3Editor?: (track: Track) => void;
+  onSwapTitleArtist?: (track: Track) => void;
   searchQuery?: string;
   isFavoritesView?: boolean;
   activeSection?: LibrarySection;
@@ -80,6 +81,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
   hiddenCount,
   onDeleteTracks,
   onOpenID3Editor,
+  onSwapTitleArtist,
   searchQuery = "",
   isFavoritesView = false,
   activeSection: propActiveSection,
@@ -393,6 +395,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
             hiddenCount={hiddenCount}
             onDeleteTracks={onDeleteTracks}
             onOpenID3Editor={onOpenID3Editor}
+            onSwapTitleArtist={onSwapTitleArtist}
           />
         </div>
       )}
@@ -415,6 +418,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
           hiddenCount={hiddenCount}
           onDeleteTracks={onDeleteTracks}
           onOpenID3Editor={onOpenID3Editor}
+          onSwapTitleArtist={onSwapTitleArtist}
         />
       )}
 

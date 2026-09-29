@@ -24,7 +24,7 @@
 
 import { Capacitor } from "@capacitor/core";
 import { Track, HiddenTrackRecord } from "../types";
-import { generateCoverArt } from "./metadataParser";
+import { generateCoverArt, cleanFilename } from "./metadataParser";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
 const DB_VERSION = 2; // Incrementar si se añaden nuevos ObjectStores
@@ -402,16 +402,59 @@ export async function loadTracksFromDB(): Promise<Track[]> {
           }
 
           if (finalUrl) {
+            let trackTitle = item.title || "Sin título";
+            let trackArtist = item.artist || "Artista desconocido";
+
+            // Corrección y alineación automática de pistas con nombres tipo "Artista - Título"
+            const rawFileName =
+              item.fileName ||
+              (item.nativePath ? item.nativePath.split("/").pop() : "") ||
+              (item.url ? item.url.split("/").pop() : "");
+
+            if (rawFileName) {
+              try {
+                const decodedName = decodeURIComponent(rawFileName);
+                const { title: parsedTitle, artist: parsedArtist } = cleanFilename(decodedName);
+                if (parsedTitle && parsedArtist && parsedArtist !== "Artista Desconocido") {
+                  const tLower = (item.title || "").trim().toLowerCase();
+                  const aLower = (item.artist || "").trim().toLowerCase();
+                  const pTLower = parsedTitle.trim().toLowerCase();
+                  const pALower = parsedArtist.trim().toLowerCase();
+
+                  // 1. Si la pista almacenada previamente tenía invertido el título y el artista (cantante en título y música en artista)
+                  const wasInverted = (tLower === pALower && aLower === pTLower);
+                  // 2. Si el título almacenado era el nombre de archivo completo en bruto sin separar
+                  const wasRawName = item.title === rawFileName || item.title === decodedName || item.title === decodedName.replace(/\.[^/.]+$/, "");
+                  // 3. Si el artista estaba como desconocido pero el nombre de archivo contiene el artista
+                  const hadUnknownArtist = (!item.artist || aLower.includes("desconocido") || aLower === "") && parsedArtist !== "Artista Desconocido";
+
+                  if (wasInverted || wasRawName || hadUnknownArtist) {
+                    trackTitle = parsedTitle;
+                    trackArtist = parsedArtist;
+                    item.title = parsedTitle;
+                    item.artist = parsedArtist;
+                    try {
+                      store.put(item);
+                    } catch {
+                      // ignore
+                    }
+                  }
+                }
+              } catch {
+                // ignore
+              }
+            }
+
             // Carga diferida / portada vectorial ultraligera si no hay carátula o si era base64 pesado
             const safeCoverUrl =
               item.coverUrl && !item.coverUrl.startsWith("data:image/") && !item.coverUrl.startsWith("data:")
                 ? item.coverUrl
-                : generateCoverArt(item.title || "Sin título", item.artist || "Artista desconocido");
+                : generateCoverArt(trackTitle, trackArtist);
 
             const trackObj: Track = {
               id: item.id,
-              title: item.title || "Sin título",
-              artist: item.artist || "Artista desconocido",
+              title: trackTitle,
+              artist: trackArtist,
               album: item.album || "Álbum desconocido",
               duration: item.duration || 0,
               url: finalUrl,

@@ -17,7 +17,7 @@
  */
 
 import React, { useState, useRef } from "react";
-import { X, Tag, Image as ImageIcon, Upload, Save, RotateCcw, Music, Disc3, User, Calendar, FileAudio } from "lucide-react";
+import { X, Tag, Image as ImageIcon, Upload, Save, RotateCcw, Music, Disc3, User, Calendar, FileAudio, ArrowUpDown } from "lucide-react";
 import { Track } from "../types";
 
 interface ID3EditorModalProps {
@@ -202,9 +202,25 @@ export const ID3EditorModal: React.FC<ID3EditorModalProps> = ({
           <div className="flex flex-col gap-3">
             {/* Título */}
             <div>
-              <label className="text-xs font-bold uppercase tracking-wider opacity-70 mb-1 flex items-center gap-1.5">
-                <Music className="w-3.5 h-3.5 text-purple-400" /> Título de la canción *
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold uppercase tracking-wider opacity-70 flex items-center gap-1.5">
+                  <Music className="w-3.5 h-3.5 text-purple-400" /> Título de la canción *
+                </label>
+                <button
+                  type="button"
+                  id="id3-swap-title-artist-btn"
+                  onClick={() => {
+                    const temp = title;
+                    setTitle(artist);
+                    setArtist(temp);
+                  }}
+                  title="Intercambiar Título y Artista"
+                  className="text-[11px] font-mono text-fuchsia-400 hover:text-fuchsia-300 flex items-center gap-1 px-2 py-0.5 rounded-lg bg-fuchsia-500/10 hover:bg-fuchsia-500/20 transition-all cursor-pointer"
+                >
+                  <ArrowUpDown className="w-3 h-3" />
+                  <span>Intercambiar con Artista</span>
+                </button>
+              </div>
               <input
                 id="id3-input-title"
                 type="text"

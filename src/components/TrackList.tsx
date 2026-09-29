@@ -37,6 +37,7 @@ import {
   X,
   MoreVertical,
   Tag,
+  ArrowUpDown,
 } from "lucide-react";
 import { Track } from "../types";
 import { CyberMarquee } from "./CyberMarquee";
@@ -55,6 +56,7 @@ interface TrackListProps {
   hiddenCount?: number;
   onDeleteTracks?: (trackIds: string[]) => void;
   onOpenID3Editor?: (track: Track) => void;
+  onSwapTitleArtist?: (track: Track) => void;
 }
 
 function formatDuration(sec: number): string {
@@ -80,6 +82,7 @@ interface TrackRowProps {
   onOpenID3Editor?: (track: Track) => void;
   onHideTrack?: (track: Track) => void;
   onStartDelete: (track: Track) => void;
+  onSwapTitleArtist?: (track: Track) => void;
 }
 
 /**
@@ -103,6 +106,7 @@ const TrackRow = React.memo<TrackRowProps>(
     onOpenID3Editor,
     onHideTrack,
     onStartDelete,
+    onSwapTitleArtist,
   }) => {
     const [openUpward, setOpenUpward] = useState(false);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -307,6 +311,21 @@ const TrackRow = React.memo<TrackRowProps>(
                     </button>
                   )}
 
+                  {/* Invertir Título / Cantante */}
+                  {onSwapTitleArtist && (
+                    <button
+                      onClick={() => {
+                        onCloseMenu();
+                        onSwapTitleArtist(track);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-fuchsia-300 hover:text-white"
+                      title="Intercambiar el nombre de la canción y el cantante"
+                    >
+                      <ArrowUpDown className="w-3.5 h-3.5 text-fuchsia-400" />
+                      <span>Invertir Título / Cantante</span>
+                    </button>
+                  )}
+
                   {/* Ocultar */}
                   {onHideTrack && (
                     <button
@@ -371,6 +390,7 @@ export const TrackList: React.FC<TrackListProps> = ({
   hiddenCount,
   onDeleteTracks,
   onOpenID3Editor,
+  onSwapTitleArtist,
 }) => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -581,6 +601,7 @@ export const TrackList: React.FC<TrackListProps> = ({
             onOpenID3Editor={onOpenID3Editor}
             onHideTrack={onHideTrack}
             onStartDelete={handleStartDeleteSingle}
+            onSwapTitleArtist={onSwapTitleArtist}
           />
         ))}
       </div>
