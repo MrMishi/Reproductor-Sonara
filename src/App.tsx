@@ -137,14 +137,14 @@ export function SonoraApp() {
     }
   });
 
-  const handleToggleBuscarCaratulasOnline = (enabled: boolean) => {
+  const handleToggleBuscarCaratulasOnline = useCallback((enabled: boolean) => {
     setBuscarCaratulasOnline(enabled);
     try {
       localStorage.setItem("buscar_caratulas_online", JSON.stringify(enabled));
     } catch {
       // ignore
     }
-  };
+  }, []);
   
   
   // Hidden File and Folder Input Refs for '+' menu
@@ -185,7 +185,7 @@ export function SonoraApp() {
    * "Se requiere acceso a tus archivos de audio para importar música"
    * con un botón que abre directamente los Ajustes de la App en Android.
    */
-  const handleEnsureStoragePermissions = async (): Promise<boolean> => {
+  const handleEnsureStoragePermissions = useCallback(async (): Promise<boolean> => {
     if (!Capacitor.isNativePlatform()) return true;
 
     const granted = await checkNativeStoragePermissions();
@@ -198,9 +198,9 @@ export function SonoraApp() {
     // Si sigue denegado, mostrar diálogo flotante con botón directo a Ajustes
     setShowPermissionDialog(true);
     return false;
-  };
+  }, []);
 
-  const handleToggleFilterShortAudios = (enabled: boolean) => {
+  const handleToggleFilterShortAudios = useCallback((enabled: boolean) => {
     setFilterShortAudios(enabled);
     try {
       localStorage.setItem("sonora_filter_short_audios", String(enabled));
@@ -208,15 +208,15 @@ export function SonoraApp() {
       // ignore
     }
     setToastMessage(enabled ? "Filtro activo: audios < 30s ocultos" : "Filtro desactivado: mostrando todos los audios");
-  };
+  }, []);
 
   // Guardar cambios del editor de etiquetas ID3
-  const handleSaveEditedTrack = async (updatedTrack: Track) => {
+  const handleSaveEditedTrack = useCallback(async (updatedTrack: Track) => {
     setTracks((prev) => prev.map((t) => (t.id === updatedTrack.id ? updatedTrack : t)));
     await updateTrackInDb(updatedTrack);
     setEditingTrack(null);
     setToastMessage(`Etiquetas ID3 guardadas: "${updatedTrack.title}"`);
-  };
+  }, []);
 
   // Hidden Tracks & Mobile PWA / APK installation
   const [isHiddenTracksOpen, setIsHiddenTracksOpen] = useState(false);
@@ -238,23 +238,23 @@ export function SonoraApp() {
     }
   });
 
-  const handleCloseWelcome = () => {
+  const handleCloseWelcome = useCallback(() => {
     try {
       localStorage.setItem("hasSeenWelcome", "true");
     } catch {
       // ignore
     }
     setShowWelcome(false);
-  };
+  }, []);
 
-  const handleResetWelcome = () => {
+  const handleResetWelcome = useCallback(() => {
     try {
       localStorage.removeItem("hasSeenWelcome");
     } catch {
       // ignore
     }
     setShowWelcome(true);
-  };
+  }, []);
 
   // Auto-dismiss toast notification
   useEffect(() => {
@@ -825,12 +825,12 @@ export function SonoraApp() {
   };
 
   // Seek
-  const handleSeek = (time: number) => {
+  const handleSeek = useCallback((time: number) => {
     if (audioRef.current) {
       audioRef.current.currentTime = time;
       setCurrentTime(time);
     }
-  };
+  }, []);
 
   // Mantener los handlers actualizados para invocaciones externas de MediaSession
   useEffect(() => {
@@ -1056,15 +1056,15 @@ export function SonoraApp() {
   }, [isPlaying, duration, currentTrack?.id]);
 
   // Volume
-  const handleVolumeChange = (vol: number) => {
+  const handleVolumeChange = useCallback((vol: number) => {
     setVolume(vol);
     setIsMuted(vol === 0);
     if (audioRef.current) {
       audioRef.current.volume = vol;
     }
-  };
+  }, []);
 
-  const handleToggleMute = () => {
+  const handleToggleMute = useCallback(() => {
     if (!audioRef.current) return;
     if (isMuted) {
       audioRef.current.volume = volume;
@@ -1073,7 +1073,7 @@ export function SonoraApp() {
       audioRef.current.volume = 0;
       setIsMuted(true);
     }
-  };
+  }, [isMuted, volume]);
 
   // Cycle playback mode con reordenamiento físico real de la cola en Shuffle
   const handleCyclePlaybackMode = () => {
@@ -1107,7 +1107,7 @@ export function SonoraApp() {
   };
 
   // Direct play from list
-  const handlePlayTrack = (track: Track, _index: number) => {
+  const handlePlayTrack = useCallback((track: Track, _index: number) => {
     if (isTrackCorrupted(track)) {
       handleCorruptedTrack(track);
       return;
@@ -1160,17 +1160,19 @@ export function SonoraApp() {
           syncMediaSessionPlaybackState("paused");
         });
     }
-  };
+  }, [visibleTracks, tracks, playbackMode, activeQueue, currentTrackIndex, isPlaying]);
 
   // Toggle favorite
-  const handleToggleFavorite = (id: string) => {
-    const updated = tracks.map((t) => (t.id === id ? { ...t, isFavorite: !t.isFavorite } : t));
-    setTracks(updated);
-    saveTracksToDB(updated);
-  };
+  const handleToggleFavorite = useCallback((id: string) => {
+    setTracks((prev) => {
+      const updated = prev.map((t) => (t.id === id ? { ...t, isFavorite: !t.isFavorite } : t));
+      saveTracksToDB(updated);
+      return updated;
+    });
+  }, []);
 
   // Import newly scanned tracks from device
-  const handleTracksImported = (newTracks: Track[]) => {
+  const handleTracksImported = useCallback((newTracks: Track[]) => {
     setTracks((prev) => {
       // Append unique by title + artist
       const existing = new Set(prev.map((t) => `${t.title.toLowerCase()}-${t.artist.toLowerCase()}`));
@@ -1182,14 +1184,17 @@ export function SonoraApp() {
       return combined;
     });
 
-    if (newTracks.length > 0 && tracks.length === 0) {
-      setCurrentTrackIndex(0);
-      setIsPlaying(true);
-    }
-  };
+    setTracks((prev) => {
+      if (newTracks.length > 0 && prev.length === newTracks.length) {
+        setCurrentTrackIndex(0);
+        setIsPlaying(true);
+      }
+      return prev;
+    });
+  }, []);
 
   // Handle local files selected directly from "+" menu
-  const handleLocalFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLocalFilesSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -1210,7 +1215,7 @@ export function SonoraApp() {
       setToastMessage(`Se añadieron ${imported.length} canción(es) a tu biblioteca`);
     }
     e.target.value = "";
-  };
+  }, [handleTracksImported]);
 
   // Handle local folder selected directly from "+" menu
   const handleLocalFolderSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1260,45 +1265,49 @@ export function SonoraApp() {
   };
 
   // Load demos helper
-  const handleLoadDemos = async () => {
+  const handleLoadDemos = useCallback(async () => {
     const demos = await getInitialDemoTracks();
     handleTracksImported(demos);
-  };
+  }, [handleTracksImported]);
 
   // Lyrics applied from search
-  const handleLyricsApplied = (trackId: string, lyrics: Track["lyrics"], album?: string) => {
-    const updated = tracks.map((t) => {
-      if (t.id === trackId) {
-        return {
-          ...t,
-          lyrics,
-          album: t.album || album,
-        };
-      }
-      return t;
+  const handleLyricsApplied = useCallback((trackId: string, lyrics: Track["lyrics"], album?: string) => {
+    setTracks((prev) => {
+      const updated = prev.map((t) => {
+        if (t.id === trackId) {
+          return {
+            ...t,
+            lyrics,
+            album: t.album || album,
+          };
+        }
+        return t;
+      });
+      saveTracksToDB(updated);
+      return updated;
     });
-    setTracks(updated);
-    saveTracksToDB(updated);
-  };
+  }, []);
 
   // Eliminar o desvincular letras de una canción
-  const handleLyricsRemoved = (trackId: string) => {
-    const updated = tracks.map((t) => {
-      if (t.id === trackId) {
-        return {
-          ...t,
-          lyrics: undefined,
-        };
-      }
-      return t;
+  const handleLyricsRemoved = useCallback((trackId: string) => {
+    setTracks((prev) => {
+      const updated = prev.map((t) => {
+        if (t.id === trackId) {
+          return {
+            ...t,
+            lyrics: undefined,
+          };
+        }
+        return t;
+      });
+      saveTracksToDB(updated);
+      return updated;
     });
-    setTracks(updated);
-    saveTracksToDB(updated);
     setToastMessage("Letra eliminada de la canción");
-  };
+  }, []);
 
   // Ocultar canción (omitir permanentemente de la biblioteca y de futuros escaneos)
-  const handleHideTrack = (track: Track) => {
+  const handleHideTrack = useCallback((track: Track) => {
     addHiddenTrack(track);
     setHiddenTracks(getHiddenTracks());
     setTracks((prev) => {
@@ -1315,22 +1324,22 @@ export function SonoraApp() {
         setIsPlaying(false);
       }
     }
-  };
+  }, [currentTrack?.id, tracks.length]);
 
   // Restaurar canción oculta
-  const handleUnhideTrack = (idOrTitle: string) => {
+  const handleUnhideTrack = useCallback((idOrTitle: string) => {
     removeHiddenTrack(idOrTitle);
     setHiddenTracks(getHiddenTracks());
-  };
+  }, []);
 
   // Restaurar todas las canciones ocultas
-  const handleUnhideAll = () => {
+  const handleUnhideAll = useCallback(() => {
     clearAllHiddenTracks();
     setHiddenTracks([]);
-  };
+  }, []);
 
   // Eliminar canciones seleccionadas del reproductor y de la base de datos
-  const handleDeleteTracks = async (trackIds: string[]) => {
+  const handleDeleteTracks = useCallback(async (trackIds: string[]) => {
     if (!trackIds || trackIds.length === 0) return;
     const idSet = new Set(trackIds);
 
@@ -1365,7 +1374,7 @@ export function SonoraApp() {
         ? "Canción eliminada del reproductor"
         : `${trackIds.length} canciones eliminadas del reproductor`
     );
-  };
+  }, [currentTrack, tracks]);
 
   // =========================================================================
   // FUNCIONES DEL TEMPORIZADOR DE APAGADO (SLEEP TIMER)
@@ -1586,6 +1595,10 @@ export function SonoraApp() {
   const handleOpenInstallModal = useCallback(() => setIsInstallModalOpen(true), []);
   const handleOpenLyricsSearchForTrack = useCallback((track: Track) => setLyricsSearchTrack(track), []);
   const handleOpenID3Editor = useCallback((track: Track) => setEditingTrack(track), []);
+  const handleOpenExpandedCover = useCallback(() => {
+    setExpandedSubTab("cover");
+    setIsExpandedPlayerOpen(true);
+  }, []);
 
   return (
     <div
@@ -1767,24 +1780,11 @@ export function SonoraApp() {
           duration={duration}
           volume={volume}
           isMuted={isMuted}
-          playbackMode={playbackMode}
           onTogglePlay={handleTogglePlay}
           onPrev={handlePrev}
           onNext={handleNext}
           onSeek={handleSeek}
-          onVolumeChange={handleVolumeChange}
-          onToggleMute={handleToggleMute}
-          onCyclePlaybackMode={handleCyclePlaybackMode}
-          onToggleFavorite={handleToggleFavorite}
-          onOpenExpanded={() => {
-            setExpandedSubTab("cover");
-            setIsExpandedPlayerOpen(true);
-          }}
-          onOpenEqualizer={() => setIsEqualizerOpen(true)}
-          onOpenLyrics={() => {
-            setExpandedSubTab("lyrics");
-            setIsExpandedPlayerOpen(true);
-          }}
+          onOpenExpanded={handleOpenExpandedCover}
         />
       ) : (
         /* Floating Mini Gadget Player */

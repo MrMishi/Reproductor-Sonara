@@ -37,6 +37,7 @@ import {
   Calendar,
   Clock,
   User,
+  X,
 } from "lucide-react";
 import { Track, LibrarySection, LibrarySortOption, SortDirection } from "../types";
 import { TrackList } from "./TrackList";
@@ -165,6 +166,27 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
 
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Posicionamiento inteligente del menú desplegable: evita desbordes fuera de la pantalla en móviles
+  const [dropdownAlign, setDropdownAlign] = useState<"left" | "right">("left");
+
+  useEffect(() => {
+    if (!isSortMenuOpen || !sortMenuRef.current) return;
+    const updateAlign = () => {
+      if (!sortMenuRef.current) return;
+      const rect = sortMenuRef.current.getBoundingClientRect();
+      const spaceOnRight = window.innerWidth - rect.left;
+      // Si a la derecha no cabe el menú (260px) pero a la izquierda sí, alinear a la derecha
+      if (spaceOnRight < 260 && rect.right >= 260) {
+        setDropdownAlign("right");
+      } else {
+        setDropdownAlign("left");
+      }
+    };
+    updateAlign();
+    window.addEventListener("resize", updateAlign);
+    return () => window.removeEventListener("resize", updateAlign);
+  }, [isSortMenuOpen]);
 
   // Cerrar menú de ordenación al hacer clic afuera
   useEffect(() => {
@@ -411,7 +433,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
 
   const currentSortObj = SORT_OPTIONS.find((s) => s.id === sortBy) || SORT_OPTIONS[0];
 
-  // Componente del Menú Desplegable de Ordenación con diseño Cyberpunk HUD
+  // Componente del Menú Desplegable de Ordenación con diseño Cyberpunk HUD adaptado a teléfonos
   const renderSortDropdown = () => (
     <div className="relative" ref={sortMenuRef}>
       <div className="flex items-center gap-1.5">
@@ -424,11 +446,11 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
           aria-haspopup="true"
           aria-expanded={isSortMenuOpen}
         >
-          <ArrowUpDown className="w-3.5 h-3.5 text-violet-400" />
-          <span className="hidden xs:inline text-neutral-400 font-normal">Ordenar:</span>
+          <ArrowUpDown className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+          <span className="text-neutral-400 font-normal">Ordenar:</span>
           <span className="font-bold text-white">{currentSortObj.label}</span>
           <ChevronDown
-            className={`w-3.5 h-3.5 text-neutral-400 transition-transform duration-200 ${
+            className={`w-3.5 h-3.5 text-neutral-400 transition-transform duration-200 shrink-0 ${
               isSortMenuOpen ? "rotate-180" : ""
             }`}
           />
@@ -439,7 +461,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
           id="library-sort-dir-toggle-btn"
           type="button"
           onClick={handleToggleSortDirection}
-          className="p-1.5 rounded-full bg-white/[0.05] hover:bg-white/10 border border-white/10 text-neutral-300 hover:text-white transition-all cursor-pointer shadow-sm active:scale-90"
+          className="p-1.5 rounded-full bg-white/[0.05] hover:bg-white/10 border border-white/10 text-neutral-300 hover:text-white transition-all cursor-pointer shadow-sm active:scale-90 shrink-0"
           title={
             sortDirection === "asc"
               ? "Orden actual: Ascendente (A-Z / Menor). Clic para invertir a Descendente."
@@ -458,26 +480,53 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {isSortMenuOpen && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-transparent"
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] sm:bg-transparent sm:backdrop-blur-none transition-opacity duration-150"
             onClick={() => setIsSortMenuOpen(false)}
           />
           <div
             id="library-sort-dropdown-menu"
-            className="absolute right-0 mt-2 w-60 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-xl z-50 animate-in fade-in zoom-in-95 duration-150"
+            className={`absolute mt-2 w-64 max-w-[calc(100vw-24px)] rounded-2xl p-2 shadow-2xl border backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-150 ${
+              dropdownAlign === "right" ? "right-0 left-auto" : "left-0 right-auto"
+            }`}
             style={{
-              backgroundColor: "rgba(18, 18, 24, 0.96)",
-              borderColor: "rgba(255, 255, 255, 0.12)",
-              boxShadow: "0 12px 36px -4px rgba(0, 0, 0, 0.7), 0 0 16px rgba(124, 58, 237, 0.25)",
+              backgroundColor: "rgba(18, 18, 24, 0.98)",
+              borderColor: "rgba(255, 255, 255, 0.14)",
+              boxShadow: "0 16px 40px -4px rgba(0, 0, 0, 0.8), 0 0 20px rgba(124, 58, 237, 0.3)",
             }}
           >
-            <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-400 border-b border-white/5 mb-1 flex items-center justify-between">
-              <span>Criterio de orden</span>
-              <span className="text-violet-400 font-bold">
-                {sortDirection === "asc" ? "Ascendente" : "Descendente"}
-              </span>
+            <div className="px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider text-neutral-400 border-b border-white/10 mb-1.5 flex items-center justify-between">
+              <span className="font-semibold text-neutral-300">Criterio de orden</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleToggleSortDirection}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/5 hover:bg-white/10 text-violet-300 hover:text-violet-200 text-[10px] font-bold transition-colors cursor-pointer border border-white/10"
+                  title="Cambiar dirección de orden"
+                >
+                  {sortDirection === "asc" ? (
+                    <>
+                      <ArrowUpAZ className="w-3 h-3 text-fuchsia-400" />
+                      <span>Ascendente</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowDownAZ className="w-3 h-3 text-cyan-400" />
+                      <span>Descendente</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSortMenuOpen(false)}
+                  className="p-1 rounded-full text-neutral-400 hover:text-white hover:bg-white/10 transition-colors sm:hidden cursor-pointer"
+                  title="Cerrar"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-1">
               {SORT_OPTIONS.map((opt) => {
                 const isSelected = sortBy === opt.id;
                 const Icon = opt.icon;
@@ -487,21 +536,23 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
                     id={`sort-option-${opt.id}`}
                     type="button"
                     onClick={() => handleSelectSort(opt.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                       isSelected
-                        ? "bg-violet-600/25 text-violet-200 border border-violet-500/30"
+                        ? "bg-violet-600/30 text-violet-100 border border-violet-500/40 shadow-sm"
                         : "text-neutral-300 hover:text-white hover:bg-white/5"
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <Icon
-                        className={`w-4 h-4 shrink-0 ${
-                          isSelected ? "text-violet-400" : "text-neutral-400"
+                      <div
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                          isSelected ? "bg-violet-500/20 text-violet-300" : "bg-white/5 text-neutral-400"
                         }`}
-                      />
+                      >
+                        <Icon className="w-4 h-4" />
+                      </div>
                       <div className="flex flex-col text-left min-w-0">
-                        <span className="truncate">{opt.label}</span>
-                        <span className="text-[10px] opacity-60 font-normal truncate">
+                        <span className="truncate font-bold">{opt.label}</span>
+                        <span className="text-[10px] opacity-70 font-normal truncate">
                           {opt.description}
                         </span>
                       </div>
