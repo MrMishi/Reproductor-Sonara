@@ -35,14 +35,6 @@ export const SonoraLogo: React.FC<SonoraLogoProps> = ({
             >
               Sonora
             </span>
-            <span
-              className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-full text-cyan-300 border border-cyan-400/30"
-              style={{
-                background: "linear-gradient(90deg, rgba(124,58,237,0.3) 0%, rgba(6,182,212,0.3) 100%)",
-              }}
-            >
-              Hi-Fi
-            </span>
           </div>
           <span className="text-[10px] font-medium tracking-wide text-neutral-400">
             Music Player

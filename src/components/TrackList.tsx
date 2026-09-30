@@ -38,6 +38,7 @@ import {
   MoreVertical,
   Tag,
   ArrowUpDown,
+  ListMusic,
 } from "lucide-react";
 import { Track } from "../types";
 import { CyberMarquee } from "./CyberMarquee";
@@ -57,6 +58,7 @@ interface TrackListProps {
   onDeleteTracks?: (trackIds: string[]) => void;
   onOpenID3Editor?: (track: Track) => void;
   onSwapTitleArtist?: (track: Track) => void;
+  onAddToPlaylist?: (track: Track) => void;
 }
 
 function formatDuration(sec: number): string {
@@ -83,6 +85,7 @@ interface TrackRowProps {
   onHideTrack?: (track: Track) => void;
   onStartDelete: (track: Track) => void;
   onSwapTitleArtist?: (track: Track) => void;
+  onAddToPlaylist?: (track: Track) => void;
 }
 
 /**
@@ -107,6 +110,7 @@ const TrackRow = React.memo<TrackRowProps>(
     onHideTrack,
     onStartDelete,
     onSwapTitleArtist,
+    onAddToPlaylist,
   }) => {
     const [openUpward, setOpenUpward] = useState(false);
     const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -140,7 +144,7 @@ const TrackRow = React.memo<TrackRowProps>(
             isSelected
               ? "bg-violet-950/50 border border-violet-500/50 shadow-[0_0_12px_rgba(139,92,246,0.25)]"
               : isCurrent
-              ? "bg-purple-950/40 border border-fuchsia-500/50 shadow-[0_0_14px_rgba(236,72,153,0.25)]"
+              ? "bg-purple-950/40 border border-violet-500/50 shadow-[0_0_14px_rgba(124,58,237,0.25)]"
               : "bg-black/20 group-hover:bg-purple-950/20 border border-white/5 group-hover:border-purple-500/25"
           }`}
           style={{
@@ -152,7 +156,7 @@ const TrackRow = React.memo<TrackRowProps>(
           {/* Índice estilo consola futurista */}
           <span className="w-5 text-[10px] text-center font-mono text-purple-400/60 shrink-0 hidden xs:inline select-none">
             {isCurrent && isPlaying ? (
-              <span className="text-fuchsia-400 font-bold animate-pulse">▶</span>
+              <span className="text-violet-400 font-bold animate-pulse">▶</span>
             ) : (
               String(idx + 1).padStart(2, "0")
             )}
@@ -174,14 +178,14 @@ const TrackRow = React.memo<TrackRowProps>(
             </button>
           )}
 
-          {/* Portada pequeña con biselado 45° Cyberpunk HUD y resplandor neón */}
+          {/* Portada pequeña con biselado 45° */}
           <div
             style={{
               clipPath: "polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px)",
             }}
             className={`relative w-10 h-10 sm:w-11 sm:h-11 overflow-hidden shrink-0 bg-neutral-900 border transition-all ${
               isCurrent
-                ? "border-fuchsia-500/60 shadow-[0_0_12px_rgba(236,72,153,0.4)]"
+                ? "border-violet-500/60 shadow-[0_0_10px_rgba(124,58,237,0.35)]"
                 : "border-purple-500/30 group-hover:border-purple-500/60 shadow-[0_0_8px_rgba(168,85,247,0.2)]"
             }`}
           >
@@ -326,6 +330,20 @@ const TrackRow = React.memo<TrackRowProps>(
                     </button>
                   )}
 
+                  {/* Añadir a Lista de Reproducción */}
+                  {onAddToPlaylist && (
+                    <button
+                      onClick={() => {
+                        onCloseMenu();
+                        onAddToPlaylist(track);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-white/10 text-left transition-colors cursor-pointer text-purple-300 hover:text-white"
+                    >
+                      <ListMusic className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Añadir a Lista</span>
+                    </button>
+                  )}
+
                   {/* Ocultar */}
                   {onHideTrack && (
                     <button
@@ -392,6 +410,7 @@ export const TrackList: React.FC<TrackListProps> = React.memo(({
   onDeleteTracks,
   onOpenID3Editor,
   onSwapTitleArtist,
+  onAddToPlaylist,
 }) => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -636,6 +655,7 @@ export const TrackList: React.FC<TrackListProps> = React.memo(({
             onHideTrack={onHideTrack}
             onStartDelete={handleStartDeleteSingle}
             onSwapTitleArtist={onSwapTitleArtist}
+            onAddToPlaylist={onAddToPlaylist}
           />
         ))}
 

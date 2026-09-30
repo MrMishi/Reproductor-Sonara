@@ -38,8 +38,12 @@ import {
   Clock,
   User,
   X,
+  ListMusic,
+  History,
+  Flame,
+  Trash2,
 } from "lucide-react";
-import { Track, LibrarySection, LibrarySortOption, SortDirection } from "../types";
+import { Track, LibrarySection, LibrarySortOption, SortDirection, Playlist } from "../types";
 import { TrackList } from "./TrackList";
 
 const STORAGE_KEY_SORT_BY = "sonora_library_sort_by";
@@ -84,6 +88,11 @@ interface LibraryViewProps {
   onSelectAlbum?: (album: string | null) => void;
   selectedFolder?: string | null;
   onSelectFolder?: (folder: string | null) => void;
+  playlists?: Playlist[];
+  onCreatePlaylist?: () => void;
+  onSelectPlaylist?: (playlist: Playlist) => void;
+  onAddToPlaylist?: (track: Track) => void;
+  onDeletePlaylist?: (playlistId: string) => void;
 }
 
 function formatDuration(sec: number): string {
@@ -118,6 +127,11 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
   onSelectAlbum: propOnSelectAlbum,
   selectedFolder: propSelectedFolder,
   onSelectFolder: propOnSelectFolder,
+  playlists = [],
+  onCreatePlaylist,
+  onSelectPlaylist,
+  onAddToPlaylist,
+  onDeletePlaylist,
 }) => {
   // Pestaña activa dentro de la biblioteca: "songs" | "artists" | "albums" | "folders"
   const [internalSection, setInternalSection] = useState<LibrarySection>("songs");

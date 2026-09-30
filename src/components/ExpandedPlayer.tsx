@@ -403,24 +403,24 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
       return;
     }
 
-    // 2. Deslizar a la Derecha (Swipe Right): Avanza a la siguiente canción
-    if (deltaX > 45) {
-      setSlideAnimation("slide-right");
+    // 2. Deslizar a la Izquierda (Swipe Left): Regresa a la canción anterior (gesto invertido según preferencia)
+    if (deltaX < -45) {
+      setSlideAnimation("slide-left");
       setTimeout(() => {
-        onNext();
-        setSlideAnimation("enter-left");
+        onPrev();
+        setSlideAnimation("enter-right");
         setDragOffset(0);
         setTimeout(() => setSlideAnimation("idle"), 300);
       }, 180);
       return;
     }
 
-    // 3. Deslizar a la Izquierda (Swipe Left): Regresa a la canción anterior
-    if (deltaX < -45) {
-      setSlideAnimation("slide-left");
+    // 3. Deslizar a la Derecha (Swipe Right): Avanza a la siguiente canción (gesto invertido según preferencia)
+    if (deltaX > 45) {
+      setSlideAnimation("slide-right");
       setTimeout(() => {
-        onPrev();
-        setSlideAnimation("enter-right");
+        onNext();
+        setSlideAnimation("enter-left");
         setDragOffset(0);
         setTimeout(() => setSlideAnimation("idle"), 300);
       }, 180);
@@ -479,7 +479,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
             <Music2 className="w-3.5 h-3.5" />
             <span>Tema</span>
             {activeTab === "cover" && (
-              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
+              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-purple-500 rounded-full shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
             )}
           </button>
 
@@ -497,10 +497,10 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
             <FileText className="w-3.5 h-3.5" />
             <span>Letras</span>
             {currentTrack.lyrics && (
-              <span className="w-1.5 h-1.5 rounded-full bg-pink-500 shadow-[0_0_6px_rgba(236,72,153,0.8)]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(168,85,247,0.6)]" />
             )}
             {activeTab === "lyrics" && (
-              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
+              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-purple-500 rounded-full shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
             )}
           </button>
 
@@ -518,7 +518,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
             <ListMusic className="w-3.5 h-3.5" />
             <span>Cola</span>
             {activeTab === "queue" && (
-              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
+              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-purple-500 rounded-full shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
             )}
           </button>
 
@@ -536,7 +536,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
             <Sliders className="w-3.5 h-3.5" />
             <span>EQ</span>
             {activeTab === "details" && (
-              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full shadow-[0_0_8px_rgba(236,72,153,0.8)]" />
+              <span className="absolute bottom-0 inset-x-2 h-0.5 bg-purple-500 rounded-full shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
             )}
           </button>
         </div>
@@ -633,21 +633,10 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                 transition: isDragging
                   ? "none"
                   : "transform 0.28s cubic-bezier(0.2, 0, 0, 1), opacity 0.28s ease-out",
-                borderColor: "rgba(217, 70, 239, 0.4)",
                 backgroundColor: "var(--color-surface, #0d0d12)",
-                clipPath: "polygon(22px 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%, 0 22px)",
               }}
-              className="relative w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 overflow-hidden border border-fuchsia-500/40 shadow-[0_0_35px_rgba(168,85,247,0.35),0_0_80px_rgba(236,72,153,0.2)] flex items-center justify-center group mb-6 cursor-grab active:cursor-grabbing select-none"
+              className="relative w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 rounded-2xl sm:rounded-3xl overflow-hidden border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.65)] flex items-center justify-center group mb-6 cursor-grab active:cursor-grabbing select-none"
             >
-              {/* Tactical Cyberpunk HUD Corner Overlays */}
-              <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-fuchsia-400 z-10 pointer-events-none" />
-              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-cyan-400 z-10 pointer-events-none" />
-              <div className="absolute top-2 right-3 font-mono text-[9px] tracking-widest text-fuchsia-400/80 z-10 pointer-events-none select-none uppercase">
-                [ HUD // HI-FI 45° ]
-              </div>
-              <div className="absolute bottom-2 left-3 font-mono text-[9px] tracking-widest text-cyan-400/80 z-10 pointer-events-none select-none uppercase">
-                {currentTrack.format || "STEREO 24B"}
-              </div>
               {visualMode === "cover" ? (
                 <img
                   src={currentTrack.coverUrl}
@@ -677,16 +666,16 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
               )}
 
               {/* Swipe Direction Indicators (during drag) */}
-              {dragOffset > 25 && (
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/70 backdrop-blur-md px-3 py-2 rounded-full border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white shadow-lg pointer-events-none">
-                  <span>Siguiente</span>
-                  <SkipForward className="w-4 h-4" />
+              {dragOffset < -25 && (
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/75 backdrop-blur-md px-3.5 py-2 rounded-full border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white shadow-xl pointer-events-none animate-in fade-in duration-100">
+                  <SkipBack className="w-4 h-4 text-purple-400" />
+                  <span>Anterior</span>
                 </div>
               )}
-              {dragOffset < -25 && (
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/70 backdrop-blur-md px-3 py-2 rounded-full border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white shadow-lg pointer-events-none">
-                  <SkipBack className="w-4 h-4" />
-                  <span>Anterior</span>
+              {dragOffset > 25 && (
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/75 backdrop-blur-md px-3.5 py-2 rounded-full border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white shadow-xl pointer-events-none animate-in fade-in duration-100">
+                  <span>Siguiente</span>
+                  <SkipForward className="w-4 h-4 text-purple-400" />
                 </div>
               )}
             </div>
@@ -1180,14 +1169,14 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     }}
                     className={`flex items-center justify-between p-2.5 cursor-pointer transition-all border font-mono ${
                       isCurrent
-                        ? "bg-purple-950/60 border-fuchsia-500/60 shadow-[0_0_15px_rgba(236,72,153,0.3)] text-white"
+                        ? "bg-purple-950/60 border-violet-500/60 shadow-[0_0_15px_rgba(124,58,237,0.3)] text-white"
                         : "bg-black/40 hover:bg-purple-950/20 border-white/5 hover:border-purple-500/30 text-neutral-300 hover:text-white"
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <span className="w-6 text-[11px] text-center font-mono shrink-0">
                         {isCurrent && isPlaying ? (
-                          <span className="text-fuchsia-400 font-bold animate-pulse">▶</span>
+                          <span className="text-violet-400 font-bold animate-pulse">▶</span>
                         ) : (
                           <span className="opacity-50 text-[10px]">{String(idx + 1).padStart(2, "0")}</span>
                         )}
@@ -1198,7 +1187,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                           clipPath: "polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px)",
                         }}
                         className={`w-9 h-9 shrink-0 overflow-hidden border ${
-                          isCurrent ? "border-fuchsia-400 shadow-[0_0_8px_rgba(236,72,153,0.5)]" : "border-white/10"
+                          isCurrent ? "border-violet-500/60 shadow-[0_0_8px_rgba(124,58,237,0.35)]" : "border-white/10"
                         }`}
                       >
                         <img

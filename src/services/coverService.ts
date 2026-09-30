@@ -16,7 +16,9 @@
  * 4. Caché en memoria para evitar llamadas redundantes de red para la misma pista.
  */
 
-// Caché en memoria para búsquedas recientes
+import { getCoverFromCache, saveCoverToFile } from "./coverStorageService";
+
+// Caché en memoria para búsquedas recientes de la sesión activa
 const coverCache = new Map<string, string | null>();
 
 /**
@@ -33,13 +35,23 @@ function cleanQueryTerm(term: string): string {
 
 /**
  * Busca y obtiene la URL de la carátula en línea para una canción dada su artista y título.
+ * 1. Consulta primero el archivo persistente sonora_covers.json. Si ya existe, retorna en 0ms sin internet.
+ * 2. Si no existe, consulta Deezer e iTunes.
+ * 3. Al encontrarla, la guarda permanentemente en sonora_covers.json.
  */
-export async function buscarYObtenerCaratula(artist: string, title: string): Promise<string | null> {
+export async function buscarYObtenerCaratula(artist: string, title: string, fileName?: string): Promise<string | null> {
   const cleanArtist = cleanQueryTerm(artist);
   const cleanTitle = cleanQueryTerm(title);
 
   if (!cleanTitle && !cleanArtist) {
     return null;
+  }
+
+  // 0. VERIFICAR ARCHIVO PERMANENTE sonora_covers.json PRIMERO:
+  // Si la portada ya fue guardada en el archivo físico o caché permanente, retornar de inmediato
+  const savedCover = getCoverFromCache(artist, title, fileName);
+  if (savedCover) {
+    return savedCover;
   }
 
   const cacheKey = `${cleanArtist.toLowerCase()}:::${cleanTitle.toLowerCase()}`;
@@ -65,6 +77,8 @@ export async function buscarYObtenerCaratula(artist: string, title: string): Pro
         const coverUrl = album.cover_xl || album.cover_big || album.cover_medium || album.cover;
         if (coverUrl) {
           coverCache.set(cacheKey, coverUrl);
+          // Guardar permanentemente en sonora_covers.json
+          saveCoverToFile(artist, title, coverUrl, fileName, undefined, "online");
           return coverUrl;
         }
       }
@@ -94,6 +108,8 @@ export async function buscarYObtenerCaratula(artist: string, title: string): Pro
           // Escalar a resolución de 600x600 para máxima nitidez en reproductor expandido
           const highResCover = rawArtwork.replace(/100x100bb\.(jpg|png|webp)/i, "600x600bb.$1");
           coverCache.set(cacheKey, highResCover);
+          // Guardar permanentemente en sonora_covers.json
+          saveCoverToFile(artist, title, highResCover, fileName, undefined, "online");
           return highResCover;
         }
       }

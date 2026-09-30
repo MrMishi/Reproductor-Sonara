@@ -400,7 +400,7 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             {/* Anillo de cristal central tipo Dynamic Island */}
             <div className="absolute inset-0 m-auto w-2 h-2 rounded-full bg-neutral-950 border border-white/50" />
             {isPlaying && (
-              <span className="absolute inset-0 rounded-full border border-fuchsia-400 animate-ping opacity-60 pointer-events-none" />
+              <span className="absolute inset-0 rounded-full border border-violet-400 animate-ping opacity-30 pointer-events-none" />
             )}
           </div>
 
@@ -530,9 +530,9 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             title="Mantén presionado para mover"
           >
             <div className="flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-fuchsia-400 animate-pulse" />
-              <span className="font-mono text-[10px] tracking-wider uppercase font-bold text-fuchsia-300">
-                DYNAMIC GLASS // HUD
+              <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+              <span className="font-mono text-[10px] tracking-wider uppercase font-semibold text-white/80">
+                DYNAMIC GLASS
               </span>
             </div>
 
@@ -577,7 +577,7 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
                 style={{
                   clipPath: "polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px)",
                 }}
-                className="relative w-13 h-13 overflow-hidden shrink-0 border border-fuchsia-500/50 shadow-[0_0_12px_rgba(168,85,247,0.4)] cursor-pointer group bg-neutral-950"
+                className="relative w-13 h-13 overflow-hidden shrink-0 border border-white/10 shadow-[0_4px_16px_rgba(0,0,0,0.5)] cursor-pointer group bg-neutral-950"
                 onClick={onOpenExpanded}
                 title="Toca para pantalla completa"
               >

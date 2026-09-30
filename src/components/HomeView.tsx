@@ -92,7 +92,7 @@ export const HomeView: React.FC<HomeViewProps> = React.memo(({
                 }}
                 className={`flex items-center gap-3 sm:gap-3.5 p-3 sm:p-2.5 rounded-none cursor-pointer transition-all border group relative overflow-hidden font-mono ${
                   isCurrent
-                    ? "border-fuchsia-500/60 shadow-[0_0_15px_rgba(236,72,153,0.3)]"
+                    ? "border-violet-500/60 shadow-[0_0_15px_rgba(124,58,237,0.3)]"
                     : "hover:bg-purple-950/20 border-purple-500/20 hover:border-purple-500/50"
                 }`}
               >
@@ -103,7 +103,7 @@ export const HomeView: React.FC<HomeViewProps> = React.memo(({
                   }}
                   className={`relative w-14 h-14 sm:w-13 sm:h-13 overflow-hidden shrink-0 border transition-all ${
                     isCurrent
-                      ? "border-fuchsia-400 shadow-[0_0_10px_rgba(236,72,153,0.4)]"
+                      ? "border-violet-500/60 shadow-[0_0_10px_rgba(124,58,237,0.35)]"
                       : "border-purple-500/30 group-hover:border-purple-500/60 shadow-[0_0_8px_rgba(168,85,247,0.2)]"
                   }`}
                 >

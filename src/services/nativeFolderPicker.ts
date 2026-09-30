@@ -8,6 +8,7 @@ import {
   isVideoFilename,
   MAX_VIDEO_DURATION_SECONDS,
 } from "./metadataParser";
+import { getCoverFromCache } from "./coverStorageService";
 
 /**
  * Representa un archivo de audio descubierto en el árbol de documentos SAF de Android
@@ -227,7 +228,8 @@ export async function pickAndScanNativeSafFolder(
 
         // Obtener título y artista limpios a partir del nombre del archivo
         const { title, artist } = cleanFilename(fileItem.name);
-        const coverUrl = generateCoverArt(title, artist);
+        const cachedCover = getCoverFromCache(artist, title, fileItem.name);
+        const coverUrl = cachedCover || generateCoverArt(title, artist);
         const rawFormat = fileItem.name.split(".").pop()?.toUpperCase() || "AUDIO";
         const format = isVideo ? `${rawFormat} (Audio)` : rawFormat;
         const albumName = fileItem.relativePath || (isVideo ? "Videos (Audio)" : folderName);

@@ -45,6 +45,13 @@ import {
 } from "./types";
 import { audioEngine } from "./services/audioEngine";
 import { buscarYObtenerCaratula } from './services/coverService';
+import {
+  loadCoversFromFile,
+  enrichTracksWithCoversFromFile,
+  saveCoverToFile,
+  getCoversFileStats,
+} from "./services/coverStorageService";
+import { CoversManagerModal } from "./components/CoversManagerModal";
 import { getInitialDemoTracks } from "./services/demoTracks";
 import { loadSavedTheme, applyThemeToDocument } from "./services/themeEngine";
 import { Navbar } from "./components/Navbar";
@@ -214,9 +221,22 @@ export function SonoraApp() {
   const handleSaveEditedTrack = useCallback(async (updatedTrack: Track) => {
     setTracks((prev) => prev.map((t) => (t.id === updatedTrack.id ? updatedTrack : t)));
     await updateTrackInDb(updatedTrack);
+    if (updatedTrack.coverUrl) {
+      saveCoverToFile(
+        updatedTrack.artist,
+        updatedTrack.title,
+        updatedTrack.coverUrl,
+        updatedTrack.fileName,
+        updatedTrack.id,
+        "id3"
+      );
+    }
     setEditingTrack(null);
     setToastMessage(`Etiquetas ID3 guardadas: "${updatedTrack.title}"`);
   }, []);
+
+  // Modal del Gestor del Archivo Permanente de Carátulas (sonora_covers.json)
+  const [isCoversManagerOpen, setIsCoversManagerOpen] = useState(false);
 
   // Hidden Tracks & Mobile PWA / APK installation
   const [isHiddenTracksOpen, setIsHiddenTracksOpen] = useState(false);
@@ -461,11 +481,19 @@ export function SonoraApp() {
     applyThemeToDocument(currentTheme);
 
     async function initLibrary() {
-      const savedTracks = await loadTracksFromDB();
-      let currentList = savedTracks;
+      // 1. Cargar archivo permanente de carátulas (sonora_covers.json)
+      try {
+        await loadCoversFromFile();
+      } catch (covErr) {
+        console.warn("[App] Error cargando archivo sonora_covers.json:", covErr);
+      }
 
-      if (savedTracks.length > 0) {
-        setTracks(savedTracks);
+      const savedTracks = await loadTracksFromDB();
+      const enrichedSaved = enrichTracksWithCoversFromFile(savedTracks);
+      let currentList = enrichedSaved;
+
+      if (enrichedSaved.length > 0) {
+        setTracks(enrichedSaved);
       } else {
         // En entorno web, cargar pistas de demostración iniciales
         if (!Capacitor.isNativePlatform()) {
@@ -587,6 +615,7 @@ export function SonoraApp() {
 
   // Cache de búsquedas fallidas de carátulas para evitar peticiones de red repetitivas
   const failedCoverSearchesRef = useRef<Set<string>>(new Set());
+  const checkedEmbeddedCoversRef = useRef<Set<string>>(new Set());
 
   // Buscador automatizado de carátulas en línea (Deezer con respaldo en iTunes)
   useEffect(() => {
@@ -615,11 +644,23 @@ export function SonoraApp() {
       }
 
       const trackToUpdate = currentTrack;
-      const nuevaCaratula = await buscarYObtenerCaratula(currentTrack.artist, currentTrack.title);
+      const nuevaCaratula = await buscarYObtenerCaratula(
+        currentTrack.artist,
+        currentTrack.title,
+        currentTrack.fileName
+      );
 
       if (!isMounted) return;
 
       if (nuevaCaratula) {
+        saveCoverToFile(
+          currentTrack.artist,
+          currentTrack.title,
+          nuevaCaratula,
+          currentTrack.fileName,
+          trackId,
+          "online"
+        );
         setTracks((prev) =>
           prev.map((t) => (t.id === trackId ? { ...t, coverUrl: nuevaCaratula } : t))
         );
@@ -685,25 +726,80 @@ export function SonoraApp() {
     }
   }, []);
 
+  // Helper para verificar si una pista es inválida
+  const isTrackCorrupted = (t?: Track | null): boolean => {
+    if (!t) return true;
+    if (!t.url && !t.nativePath) return true;
+    return false;
+  };
+
+  const handleCorruptedTrack = (corruptedTrack: Track) => {
+    setToastMessage(`"${corruptedTrack.title}" no se puede reproducir. Saltando a la siguiente...`);
+    setTimeout(() => {
+      handleNextRef.current();
+    }, 1200);
+  };
+
+  // Reproductor centralizado con auto-recuperación y sin race conditions
+  const startPlayback = useCallback(async (track: Track, startTime: number = 0) => {
+    if (!audioRef.current) return;
+
+    if (isTrackCorrupted(track)) {
+      handleCorruptedTrack(track);
+      return;
+    }
+
+    try {
+      // 1. Reanudar AudioContext si el navegador o sistema lo suspendió
+      audioEngine.resumeContext();
+
+      // 2. Asignar ruta sin llamar a .load() innecesario para no abortar promesas activas
+      if (audioRef.current.src !== track.url) {
+        audioRef.current.src = track.url;
+      }
+      if (startTime > 0) {
+        audioRef.current.currentTime = startTime;
+      }
+
+      isPlayingRef.current = true;
+      setIsPlaying(true);
+      audioEngine.setPlaybackState(true);
+
+      await audioRef.current.play();
+      syncMediaSessionPlaybackState("playing");
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        // Interrupción normal al cambiar de canción
+        return;
+      }
+      console.warn("Playback error on track:", track.title, err);
+      // Auto-recuperación: si la pista falló, saltar automáticamente a la siguiente para no congelar la app
+      setToastMessage(`No se pudo reproducir "${track.title}". Saltando a la siguiente...`);
+      setTimeout(() => {
+        handleNextRef.current();
+      }, 1200);
+    }
+  }, []);
+
   // Update audio source and lazy-load embedded cover art when currentTrack changes
   useEffect(() => {
     if (!audioRef.current || !currentTrack) return;
 
-    audioRef.current.src = currentTrack.url;
-    audioRef.current.load();
-
-    if (isPlaying) {
-      audioEngine.resumeContext();
-      audioRef.current
-        .play()
-        .then(() => {
-          syncMediaSessionPlaybackState("playing");
-        })
-        .catch((err) => console.warn("Audio play prevented:", err?.message || "playback blocked"));
+    if (isPlayingRef.current) {
+      startPlayback(currentTrack);
+    } else {
+      if (audioRef.current.src !== currentTrack.url) {
+        audioRef.current.src = currentTrack.url;
+      }
     }
 
     // Lazy loading de portada incrustada bajo demanda solo para la canción activa
-    if (currentTrack && (!currentTrack.coverUrl || currentTrack.coverUrl.includes("data:image/svg+xml"))) {
+    if (
+      currentTrack &&
+      !checkedEmbeddedCoversRef.current.has(currentTrack.id) &&
+      (!currentTrack.coverUrl || currentTrack.coverUrl.includes("data:image/svg+xml"))
+    ) {
+      checkedEmbeddedCoversRef.current.add(currentTrack.id);
       extractCoverArtFromTrack(currentTrack).then((extractedCover) => {
         if (extractedCover) {
           // Solo se actualiza en memoria para la sesión activa; no se persiste Base64 en IndexedDB
@@ -713,31 +809,7 @@ export function SonoraApp() {
         }
       });
     }
-  }, [currentTrack?.id]);
-
-  // Helper para verificar si una pista es inválida
-  const isTrackCorrupted = (t?: Track | null): boolean => {
-    if (!t) return true;
-    if (!t.url && !t.nativePath) return true;
-    return false;
-  };
-
-  const handleCorruptedTrack = (corruptedTrack: Track) => {
-    setToastMessage("No se pudo reproducir este archivo de audio.");
-    setTimeout(() => {
-      setToastMessage((curr) =>
-        curr === "No se pudo reproducir este archivo de audio." ? null : curr
-      );
-    }, 4500);
-
-    const damagedId = corruptedTrack.id;
-    if (currentTrack?.id === damagedId) {
-      setIsPlaying(false);
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-    }
-  };
+  }, [currentTrack?.id, startPlayback]);
 
   // Handle Play/Pause
   const handleTogglePlay = () => {
@@ -760,29 +832,12 @@ export function SonoraApp() {
 
     if (isPlaying) {
       audioRef.current.pause();
+      isPlayingRef.current = false;
       setIsPlaying(false);
+      audioEngine.setPlaybackState(false);
       syncMediaSessionPlaybackState("paused");
     } else {
-      audioRef.current
-        .play()
-        .then(() => {
-          setIsPlaying(true);
-          syncMediaSessionPlaybackState("playing");
-        })
-        .catch((e) => {
-          // Si el audio ya empezó a sonar o fue una interrupción inocua (ej. abort/pause rápido), ignorar
-          if (audioRef.current && !audioRef.current.paused) {
-            setIsPlaying(true);
-            syncMediaSessionPlaybackState("playing");
-            return;
-          }
-          if (e?.name === "AbortError") {
-            return;
-          }
-          console.warn("Error playing audio:", e?.message || "playback failed");
-          setIsPlaying(false);
-          syncMediaSessionPlaybackState("paused");
-        });
+      startPlayback(currentTrack);
     }
   };
 
@@ -791,18 +846,21 @@ export function SonoraApp() {
     const activeList = activeQueue.length > 0 ? activeQueue : (visibleTracks.length > 0 ? visibleTracks : tracks);
     if (activeList.length === 0) return;
 
-    if (playbackMode === "repeat-one") {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(() => {});
-      }
-    } else {
-      // Tanto en normal, repeat-all, como en shuffle (que ya está ordenado físicamente):
-      const nextIdx = (currentTrackIndex + 1) % activeList.length;
-      setCurrentTrackIndex(nextIdx);
-    }
     isPlayingRef.current = true;
     setIsPlaying(true);
+
+    if (playbackMode === "repeat-one") {
+      if (currentTrack) {
+        startPlayback(currentTrack, 0);
+      }
+    } else {
+      const nextIdx = (currentTrackIndex + 1) % activeList.length;
+      setCurrentTrackIndex(nextIdx);
+      const nextTrack = activeList[nextIdx];
+      if (nextTrack) {
+        startPlayback(nextTrack, 0);
+      }
+    }
   };
 
   // Previous Track
@@ -818,10 +876,15 @@ export function SonoraApp() {
       return;
     }
 
-    const prevIdx = (currentTrackIndex - 1 + activeList.length) % activeList.length;
-    setCurrentTrackIndex(prevIdx);
     isPlayingRef.current = true;
     setIsPlaying(true);
+
+    const prevIdx = (currentTrackIndex - 1 + activeList.length) % activeList.length;
+    setCurrentTrackIndex(prevIdx);
+    const prevTrack = activeList[prevIdx];
+    if (prevTrack) {
+      startPlayback(prevTrack, 0);
+    }
   };
 
   // Seek
@@ -1122,7 +1185,7 @@ export function SonoraApp() {
     } else {
       const foundIndex = activeQueue.findIndex((t) => t.id === track.id);
       if (foundIndex !== -1) {
-        if (foundIndex === currentTrackIndex && isPlaying) {
+        if (foundIndex === currentTrackIndex && isPlayingRef.current) {
           handleTogglePlay();
           return;
         }
@@ -1135,32 +1198,10 @@ export function SonoraApp() {
       }
     }
 
+    isPlayingRef.current = true;
     setIsPlaying(true);
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.src = track.url;
-      audioRef.current
-        .play()
-        .then(() => {
-          setIsPlaying(true);
-          syncMediaSessionPlaybackState("playing");
-        })
-        .catch((err) => {
-          // Si el audio está sonando o fue una interrupción transitoria/abort, no mostrar toast falso
-          if (audioRef.current && !audioRef.current.paused) {
-            setIsPlaying(true);
-            syncMediaSessionPlaybackState("playing");
-            return;
-          }
-          if (err?.name === "AbortError") {
-            return;
-          }
-          console.warn("Playback error:", err);
-          setIsPlaying(false);
-          syncMediaSessionPlaybackState("paused");
-        });
-    }
-  }, [visibleTracks, tracks, playbackMode, activeQueue, currentTrackIndex, isPlaying]);
+    startPlayback(track, 0);
+  }, [visibleTracks, tracks, playbackMode, activeQueue, currentTrackIndex, startPlayback]);
 
   // Toggle favorite
   const handleToggleFavorite = useCallback((id: string) => {
@@ -1173,10 +1214,12 @@ export function SonoraApp() {
 
   // Import newly scanned tracks from device
   const handleTracksImported = useCallback((newTracks: Track[]) => {
+    const enrichedNewTracks = enrichTracksWithCoversFromFile(newTracks);
+
     setTracks((prev) => {
       // Append unique by title + artist
       const existing = new Set(prev.map((t) => `${t.title.toLowerCase()}-${t.artist.toLowerCase()}`));
-      const filtered = newTracks.filter(
+      const filtered = enrichedNewTracks.filter(
         (t) => !existing.has(`${t.title.toLowerCase()}-${t.artist.toLowerCase()}`)
       );
       const combined = [...prev, ...filtered];
@@ -1185,7 +1228,7 @@ export function SonoraApp() {
     });
 
     setTracks((prev) => {
-      if (newTracks.length > 0 && prev.length === newTracks.length) {
+      if (enrichedNewTracks.length > 0 && prev.length === enrichedNewTracks.length) {
         setCurrentTrackIndex(0);
         setIsPlaying(true);
       }
@@ -1615,7 +1658,6 @@ export function SonoraApp() {
       <audio
         ref={audioRef}
         id="native-audio-element"
-        crossOrigin="anonymous"
         playsInline
         onTimeUpdate={() => {
           if (audioRef.current) {
@@ -1670,25 +1712,23 @@ export function SonoraApp() {
                 return;
               }
 
-              // Actualizar duración de la pista si era 0
-              setTracks((prev) => {
-                const target = prev[currentTrackIndex];
-                if (target && (!target.duration || target.duration <= 0)) {
-                  const updated = prev.map((t, idx) => (idx === currentTrackIndex ? { ...t, duration: realDuration } : t));
-                  saveTracksToDB(updated);
-                  return updated;
-                }
-                return prev;
-              });
+              // Actualizar duración de la pista si era 0 (solo la pista individual para no saturar IndexedDB)
+              if (currentTrack && (!currentTrack.duration || currentTrack.duration <= 0)) {
+                const trackId = currentTrack.id;
+                setTracks((prev) =>
+                  prev.map((t) => (t.id === trackId ? { ...t, duration: realDuration } : t))
+                );
+                updateTrackInDb({ ...currentTrack, duration: realDuration }).catch(() => {});
+              }
             }
           }
         }}
         onEnded={() => {
-          isPlayingRef.current = false;
-          setIsPlaying(false);
-          audioEngine.setPlaybackState(false);
           syncMediaSessionPlaybackState("paused");
           if (sleepTimer.isActive && sleepTimer.mode === "end-of-song") {
+            isPlayingRef.current = false;
+            setIsPlaying(false);
+            audioEngine.setPlaybackState(false);
             handleExecuteSleepTimer();
           } else {
             handleNext();
@@ -1707,14 +1747,18 @@ export function SonoraApp() {
           syncMediaSessionPlaybackState("paused");
         }}
         onError={() => {
-          isPlayingRef.current = false;
           const mediaErr = audioRef.current?.error;
-          if (mediaErr) {
-            console.warn(`Audio playback issue (code ${mediaErr.code}): ${mediaErr.message || "media load failed"}`);
+          console.warn(`Audio playback issue (code ${mediaErr?.code}): ${mediaErr?.message || "media load failed"}`);
+          if (isPlayingRef.current) {
+            setToastMessage("Formato no compatible o archivo inaccesible. Pasando a la siguiente canción...");
+            setTimeout(() => {
+              handleNextRef.current();
+            }, 1000);
+          } else {
+            isPlayingRef.current = false;
+            setIsPlaying(false);
+            syncMediaSessionPlaybackState("paused");
           }
-          setToastMessage("No se pudo cargar el archivo de audio.");
-          setIsPlaying(false);
-          syncMediaSessionPlaybackState("paused");
         }}
       />
 
@@ -1738,6 +1782,8 @@ export function SonoraApp() {
         onToggleFilterShortAudios={handleToggleFilterShortAudios}
         buscarCaratulasOnline={buscarCaratulasOnline}
         onToggleBuscarCaratulasOnline={handleToggleBuscarCaratulasOnline}
+        onOpenCoversManager={() => setIsCoversManagerOpen(true)}
+        coversCount={getCoversFileStats().totalCovers}
         onOpenInstallModal={handleOpenInstallModal}
         onOpenWelcome={handleResetWelcome}
       />
@@ -1987,6 +2033,18 @@ export function SonoraApp() {
             }
           }
         }}
+      />
+
+      {/* Gestor del Archivo Permanente de Carátulas (sonora_covers.json) */}
+      <CoversManagerModal
+        isOpen={isCoversManagerOpen}
+        onClose={() => setIsCoversManagerOpen(false)}
+        tracks={tracks}
+        onTracksUpdated={(updated) => {
+          setTracks(updated);
+          saveTracksToDB(updated);
+        }}
+        onShowToast={(msg) => setToastMessage(msg)}
       />
 
       {/* Pantalla de Carga Inicial (Splash Screen tipo Lark Player) */}

@@ -132,7 +132,7 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = React.memo(({
             style={{
               clipPath: "polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px)",
             }}
-            className="relative w-11 h-11 sm:w-12 sm:h-12 overflow-hidden shrink-0 shadow-[0_0_12px_rgba(168,85,247,0.35)] border border-purple-500/40 bg-neutral-900 transition-transform group-hover:scale-105 active:scale-95"
+            className="relative w-11 h-11 sm:w-12 sm:h-12 overflow-hidden shrink-0 shadow-md border border-white/10 bg-neutral-900 transition-transform group-hover:scale-105 active:scale-95"
           >
             {currentTrack.coverUrl ? (
               <img

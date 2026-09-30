@@ -28,6 +28,7 @@ import {
   isVideoFilename,
   MAX_VIDEO_DURATION_SECONDS,
 } from "./metadataParser";
+import { getCoverFromCache } from "./coverStorageService";
 import { isTrackHidden, addSingleTrackToDB } from "./db";
 import {
   checkNativeStoragePermissions,
@@ -608,7 +609,8 @@ export async function scanNativeMusicDirectories(
 
         // Obtener título y artista limpios a partir del nombre del archivo
         const { title, artist } = cleanFilename(item.fileName);
-        const coverUrl = generateCoverArt(title, artist);
+        const cachedCover = getCoverFromCache(artist, title, item.fileName);
+        const coverUrl = cachedCover || generateCoverArt(title, artist);
         const rawFormat = item.fileName.split(".").pop()?.toUpperCase() || "AUDIO";
         const format = isVideo ? `${rawFormat} (Audio)` : rawFormat;
 
@@ -851,7 +853,8 @@ export async function scanSpecificNativeDirectory(
         }
 
         const { title, artist } = cleanFilename(item.fileName);
-        const coverUrl = generateCoverArt(title, artist);
+        const cachedCover = getCoverFromCache(artist, title, item.fileName);
+        const coverUrl = cachedCover || generateCoverArt(title, artist);
         const rawFormat = item.fileName.split(".").pop()?.toUpperCase() || "AUDIO";
         const format = isVideo ? `${rawFormat} (Audio)` : rawFormat;
 

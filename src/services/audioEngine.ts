@@ -22,7 +22,7 @@
  * - Pausa con rampa de desvanecimiento suave (Fade Out de 2s) para el temporizador de sueño.
  */
 
-import { EqualizerBand, EqualizerPreset } from "../types";
+import { EqualizerBand, EqualizerPreset, AudioEffectMode } from "../types";
 
 /**
  * Configuración predeterminada de las 10 bandas del ecualizador.
@@ -80,6 +80,16 @@ class AudioEngine {
   private isEnabled: boolean = true;
   private isAudioPlaying: boolean = false;
   private isSleepTimerActive: boolean = false;
+  private crossfadeDuration: number = (() => {
+    try {
+      const saved = localStorage.getItem("sonora_crossfade_duration");
+      return saved ? parseFloat(saved) : 0;
+    } catch {
+      return 0;
+    }
+  })();
+  private playbackSpeed: number = 1.0;
+  private audioEffect: AudioEffectMode = "normal";
 
   /**
    * Conecta e inicializa el grafo de Web Audio API al elemento <audio> principal.
@@ -376,6 +386,129 @@ class AudioEngine {
       this.isAudioPlaying = false;
       this.isSleepTimerActive = false;
       onPaused?.();
+    }
+  }
+
+  /**
+   * Obtiene la duración configurada del fundido cruzado (en segundos: 0, 2, 3, 5)
+   */
+  public getCrossfadeDuration(): number {
+    return this.crossfadeDuration;
+  }
+
+  /**
+   * Configura la duración del fundido cruzado (crossfade) y la persiste en localStorage
+   */
+  public setCrossfadeDuration(sec: number) {
+    this.crossfadeDuration = Math.max(0, Math.min(10, sec));
+    try {
+      localStorage.setItem("sonora_crossfade_duration", String(this.crossfadeDuration));
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Obtiene la velocidad actual de reproducción
+   */
+  public getPlaybackSpeed(): number {
+    return this.playbackSpeed;
+  }
+
+  /**
+   * Aplica la velocidad de reproducción al elemento HTMLAudioElement (0.5x a 2.0x)
+   */
+  public setPlaybackSpeed(speed: number, audioElement: HTMLAudioElement | null) {
+    this.playbackSpeed = speed;
+    if (audioElement) {
+      try {
+        audioElement.playbackRate = speed;
+        (audioElement as any).preservesPitch = this.audioEffect !== "nightcore";
+      } catch (err) {
+        console.warn("Error setting playback rate:", err);
+      }
+    }
+  }
+
+  /**
+   * Obtiene el modo de efecto de audio activo ('normal' | 'slowed' | 'nightcore')
+   */
+  public getAudioEffect(): AudioEffectMode {
+    return this.audioEffect;
+  }
+
+  /**
+   * Aplica efectos acústicos especiales combinando velocidad y ecualización
+   */
+  public setAudioEffect(effect: AudioEffectMode, audioElement: HTMLAudioElement | null) {
+    this.audioEffect = effect;
+
+    if (effect === "slowed") {
+      // Slowed & Reverb: Velocidad suave 0.85x con calidez acústica (bajos envolventes)
+      this.setPlaybackSpeed(0.85, audioElement);
+      this.setBassBoost(6);
+      this.setPreamp(1.5);
+    } else if (effect === "nightcore") {
+      // Nightcore: Velocidad acelerada 1.25x con alteración de tono y agudos vivos
+      if (audioElement) {
+        (audioElement as any).preservesPitch = false;
+      }
+      this.setPlaybackSpeed(1.25, audioElement);
+      this.setBassBoost(2);
+      this.setPreamp(0.5);
+    } else {
+      // Normal: 1.0x sin alteraciones
+      if (audioElement) {
+        (audioElement as any).preservesPitch = true;
+      }
+      this.setPlaybackSpeed(1.0, audioElement);
+      this.setBassBoost(0);
+      this.setPreamp(0);
+    }
+  }
+
+  /**
+   * Rampa de entrada suave (Fade In) para transiciones de canciones
+   */
+  public fadeVolumeIn(audioElement: HTMLAudioElement | null, targetVol: number = 1.0, durationSec: number = 1.2) {
+    if (!audioElement) return;
+
+    if (this.preampGainNode && this.ctx && this.ctx.state === "running") {
+      const now = this.ctx.currentTime;
+      this.preampGainNode.gain.cancelScheduledValues(now);
+      this.preampGainNode.gain.setValueAtTime(0.01, now);
+      this.preampGainNode.gain.linearRampToValueAtTime(Math.pow(10, this.currentPreamp / 20), now + durationSec);
+    } else {
+      audioElement.volume = targetVol;
+    }
+  }
+
+  /**
+   * Rampa de salida suave (Fade Out) para transiciones de canciones
+   */
+  public fadeVolumeOut(audioElement: HTMLAudioElement | null, durationSec: number = 1.5, onComplete?: () => void) {
+    if (!audioElement) {
+      onComplete?.();
+      return;
+    }
+
+    if (this.preampGainNode && this.ctx && this.ctx.state === "running") {
+      const now = this.ctx.currentTime;
+      const currentVal = this.preampGainNode.gain.value;
+      this.preampGainNode.gain.cancelScheduledValues(now);
+      this.preampGainNode.gain.setValueAtTime(currentVal, now);
+      this.preampGainNode.gain.linearRampToValueAtTime(0.001, now + durationSec);
+
+      setTimeout(() => {
+        onComplete?.();
+        if (this.preampGainNode && this.ctx) {
+          const original = Math.pow(10, this.currentPreamp / 20);
+          this.preampGainNode.gain.cancelScheduledValues(this.ctx.currentTime);
+          this.preampGainNode.gain.setValueAtTime(original, this.ctx.currentTime + 0.05);
+        }
+      }, Math.round(durationSec * 1000));
+    } else {
+      onComplete?.();
     }
   }
 }

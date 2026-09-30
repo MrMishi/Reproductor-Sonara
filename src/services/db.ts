@@ -23,8 +23,9 @@
  */
 
 import { Capacitor } from "@capacitor/core";
-import { Track, HiddenTrackRecord } from "../types";
+import { Track, HiddenTrackRecord, Playlist } from "../types";
 import { generateCoverArt, cleanFilename } from "./metadataParser";
+import { getCoverFromCache, saveCoverToFile } from "./coverStorageService";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
 const DB_VERSION = 2; // Incrementar si se añaden nuevos ObjectStores
@@ -224,6 +225,16 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
     for (const track of tracks) {
       const nativePath = track.nativePath || (track.url?.startsWith("file://") ? track.url : undefined);
 
+      // Si la pista tiene carátula online o legítima, garantizar que quede respaldada en sonora_covers.json
+      if (
+        track.coverUrl &&
+        (track.coverUrl.startsWith("http://") ||
+          track.coverUrl.startsWith("https://") ||
+          track.coverUrl.startsWith("blob:"))
+      ) {
+        saveCoverToFile(track.artist, track.title, track.coverUrl, track.fileName || track.file?.name, track.id);
+      }
+
       const record: any = {
         id: track.id,
         title: track.title,
@@ -237,6 +248,8 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
         size: track.size || 0,
         addedAt: track.addedAt || Date.now(),
         isFavorite: track.isFavorite || false,
+        playCount: track.playCount || 0,
+        lastPlayedAt: track.lastPlayedAt,
         folderPath: track.folderPath,
         fileName: track.fileName || track.file?.name,
         lyrics: track.lyrics,
@@ -345,6 +358,8 @@ export async function addSingleTrackToDB(track: Track): Promise<void> {
       size: track.size || 0,
       addedAt: track.addedAt || Date.now(),
       isFavorite: track.isFavorite || false,
+      playCount: track.playCount || 0,
+      lastPlayedAt: track.lastPlayedAt,
       folderPath: track.folderPath,
       fileName: track.fileName || track.file?.name,
       lyrics: track.lyrics,
@@ -446,10 +461,13 @@ export async function loadTracksFromDB(): Promise<Track[]> {
             }
 
             // Carga diferida / portada vectorial ultraligera si no hay carátula o si era base64 pesado
+            // Consulta sonora_covers.json primero para cargar la portada guardada instantáneamente
+            const cachedFromFile = getCoverFromCache(trackTitle, trackArtist, rawFileName, item.id);
             const safeCoverUrl =
-              item.coverUrl && !item.coverUrl.startsWith("data:image/") && !item.coverUrl.startsWith("data:")
+              cachedFromFile ||
+              (item.coverUrl && !item.coverUrl.startsWith("data:image/") && !item.coverUrl.startsWith("data:")
                 ? item.coverUrl
-                : generateCoverArt(trackTitle, trackArtist);
+                : generateCoverArt(trackTitle, trackArtist));
 
             const trackObj: Track = {
               id: item.id,
@@ -466,6 +484,8 @@ export async function loadTracksFromDB(): Promise<Track[]> {
               size: item.size || 0,
               addedAt: item.addedAt || Date.now(),
               isFavorite: item.isFavorite || false,
+              playCount: item.playCount || 0,
+              lastPlayedAt: item.lastPlayedAt,
               lyrics: item.lyrics,
               folderPath: item.folderPath,
               fileName: item.fileName,
@@ -541,5 +561,144 @@ export async function clearTracksDB(): Promise<void> {
  */
 export async function updateTrackInDb(track: Track): Promise<void> {
   return saveTracksToDB([track]);
+}
+
+/**
+ * Función: recordTrackPlay
+ * Propósito: Incrementa el contador de reproducciones y registra la marca de tiempo de reproducción
+ */
+export async function recordTrackPlay(trackId: string): Promise<{ playCount: number; lastPlayedAt: number } | null> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_TRACKS, "readwrite");
+    const store = tx.objectStore(STORE_TRACKS);
+    const getReq = store.get(trackId);
+
+    return new Promise((resolve) => {
+      getReq.onsuccess = () => {
+        const item = getReq.result;
+        if (!item) return resolve(null);
+
+        const newCount = (item.playCount || 0) + 1;
+        const now = Date.now();
+        item.playCount = newCount;
+        item.lastPlayedAt = now;
+        store.put(item);
+
+        tx.oncomplete = () => resolve({ playCount: newCount, lastPlayedAt: now });
+        tx.onerror = () => resolve(null);
+      };
+      getReq.onerror = () => resolve(null);
+    });
+  } catch (err) {
+    console.warn("Error recording track play in DB:", err);
+    return null;
+  }
+}
+
+/**
+ * ============================================================================
+ * GESTIÓN DE LISTAS DE REPRODUCCIÓN (PLAYLISTS) EN INDEXEDDB
+ * ============================================================================
+ */
+
+export async function loadPlaylistsFromDB(): Promise<Playlist[]> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_PLAYLISTS, "readonly");
+    const store = tx.objectStore(STORE_PLAYLISTS);
+    const request = store.getAll();
+
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => {
+        const result = (request.result as Playlist[]) || [];
+        resolve(result.sort((a, b) => b.createdAt - a.createdAt));
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.warn("Error loading playlists from IndexedDB:", err);
+    return [];
+  }
+}
+
+export async function savePlaylistToDB(playlist: Playlist): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_PLAYLISTS, "readwrite");
+    const store = tx.objectStore(STORE_PLAYLISTS);
+    store.put(playlist);
+
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn("Error saving playlist to IndexedDB:", err);
+  }
+}
+
+export async function deletePlaylistFromDB(id: string): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_PLAYLISTS, "readwrite");
+    const store = tx.objectStore(STORE_PLAYLISTS);
+    store.delete(id);
+
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn("Error deleting playlist from IndexedDB:", err);
+  }
+}
+
+export async function addTrackToPlaylist(playlistId: string, trackId: string): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_PLAYLISTS, "readwrite");
+    const store = tx.objectStore(STORE_PLAYLISTS);
+    const req = store.get(playlistId);
+
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => {
+        const playlist: Playlist = req.result;
+        if (playlist) {
+          if (!playlist.trackIds.includes(trackId)) {
+            playlist.trackIds.push(trackId);
+            store.put(playlist);
+          }
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn("Error adding track to playlist:", err);
+  }
+}
+
+export async function removeTrackFromPlaylist(playlistId: string, trackId: string): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_PLAYLISTS, "readwrite");
+    const store = tx.objectStore(STORE_PLAYLISTS);
+    const req = store.get(playlistId);
+
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => {
+        const playlist: Playlist = req.result;
+        if (playlist) {
+          playlist.trackIds = playlist.trackIds.filter((id) => id !== trackId);
+          store.put(playlist);
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn("Error removing track from playlist:", err);
+  }
 }
 

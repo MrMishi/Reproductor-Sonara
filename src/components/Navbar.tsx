@@ -27,6 +27,7 @@ import {
   Check,
   Filter,
   Sparkles,
+  FileJson,
 } from "lucide-react";
 import { ActiveTab } from "../types";
 import { SonoraLogo } from "./SonoraLogo";
@@ -50,6 +51,8 @@ interface NavbarProps {
   onToggleFilterShortAudios?: (enabled: boolean) => void;
   buscarCaratulasOnline?: boolean;
   onToggleBuscarCaratulasOnline?: (enabled: boolean) => void;
+  onOpenCoversManager?: () => void;
+  coversCount?: number;
   onOpenInstallModal?: () => void;
   onOpenWelcome?: () => void;
 }
@@ -73,6 +76,8 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
   onToggleFilterShortAudios,
   buscarCaratulasOnline = true,
   onToggleBuscarCaratulasOnline,
+  onOpenCoversManager,
+  coversCount,
   onOpenInstallModal,
   onOpenWelcome,
 }) => {
@@ -350,6 +355,34 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
                     />
                   </button>
                 </div>
+
+                {/* Archivo de Carátulas Permanente (sonora_covers.json) */}
+                {onOpenCoversManager && (
+                  <button
+                    type="button"
+                    id="settings-covers-manager-btn"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onOpenCoversManager();
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition-colors cursor-pointer text-left"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 pr-2">
+                      <div className="p-2 rounded-lg bg-indigo-500/15 text-indigo-400 shrink-0">
+                        <FileJson className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white font-medium text-xs truncate">Archivo de Carátulas</div>
+                        <div className="text-[10px] opacity-60 truncate">sonora_covers.json (Guardar/Exportar)</div>
+                      </div>
+                    </div>
+                    {typeof coversCount === "number" && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono font-medium shrink-0">
+                        {coversCount}
+                      </span>
+                    )}
+                  </button>
+                )}
       
                 
                 {/* Toggle Filtrar Audios Cortos (< 30 segundos) */}

@@ -59,6 +59,10 @@ export interface Track {
   folderPath?: string;
   /** Nombre completo del archivo físico (ej. "cancion.mp3") */
   fileName?: string;
+  /** Contador de veces reproducida */
+  playCount?: number;
+  /** Marca de tiempo Unix de la última vez que fue reproducida */
+  lastPlayedAt?: number;
   /** Archivo binario .lrc guardado si se descargó manualmente */
   lrcBlob?: Blob;
   /** Nombre del archivo .lrc asociado */
@@ -85,7 +89,12 @@ export interface Track {
 /**
  * Secciones disponibles dentro de la vista de Biblioteca
  */
-export type LibrarySection = "songs" | "artists" | "albums" | "folders";
+export type LibrarySection = "songs" | "artists" | "albums" | "folders" | "playlists" | "history";
+
+/**
+ * Modos de efectos de audio especiales (Velocidad y Acústica)
+ */
+export type AudioEffectMode = "normal" | "slowed" | "nightcore";
 
 /**
  * Criterios de ordenación para la lista de canciones en la Biblioteca

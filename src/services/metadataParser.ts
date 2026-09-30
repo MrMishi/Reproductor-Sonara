@@ -330,7 +330,8 @@ export function getAudioDuration(url: string, fileSize?: number): Promise<number
       audio.ondurationchange = null;
       audio.onerror = null;
       try {
-        audio.src = "";
+        audio.removeAttribute("src");
+        audio.load();
       } catch {
         // ignore
       }
