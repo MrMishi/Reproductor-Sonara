@@ -4,8 +4,11 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Log;
 
@@ -60,6 +63,96 @@ public class NativeFolderPickerPlugin extends Plugin {
         add(".webm");
         add(".3gp");
     }};
+
+    /**
+     * Escanea todo el sistema del teléfono mediante la API nativa MediaStore de Android.
+     * Recupera de forma ultrarrápida (en milisegundos) todas las canciones del almacenamiento interno y tarjetas SD,
+     * obteniendo título, artista, álbum, duración exacta y ruta del archivo sin depender de escaneos lentos de carpetas.
+     */
+    @PluginMethod
+    public void scanAllMusic(PluginCall call) {
+        new Thread(() -> {
+            JSArray tracksArray = new JSArray();
+            try {
+                Uri contentUri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+                String[] projection = new String[]{
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.TITLE,
+                    MediaStore.Audio.Media.ARTIST,
+                    MediaStore.Audio.Media.ALBUM,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.SIZE,
+                    MediaStore.Audio.Media.DISPLAY_NAME
+                };
+
+                // Descartar audios breves / notas de voz (< 30s)
+                String selection = MediaStore.Audio.Media.DURATION + " >= 30000";
+
+                Cursor cursor = getContext().getContentResolver().query(
+                    contentUri,
+                    projection,
+                    selection,
+                    null,
+                    MediaStore.Audio.Media.DATE_ADDED + " DESC"
+                );
+
+                if (cursor != null) {
+                    int idCol = cursor.getColumnIndex(MediaStore.Audio.Media._ID);
+                    int titleCol = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE);
+                    int artistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST);
+                    int albumCol = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM);
+                    int durCol = cursor.getColumnIndex(MediaStore.Audio.Media.DURATION);
+                    int dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA);
+                    int sizeCol = cursor.getColumnIndex(MediaStore.Audio.Media.SIZE);
+                    int nameCol = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
+
+                    while (cursor.moveToNext()) {
+                        String name = nameCol != -1 ? cursor.getString(nameCol) : "";
+                        if (name != null && name.toLowerCase(Locale.ROOT).startsWith("ptt-")) {
+                            continue; // Ignorar notas de voz WhatsApp
+                        }
+
+                        long id = idCol != -1 ? cursor.getLong(idCol) : 0;
+                        String title = titleCol != -1 ? cursor.getString(titleCol) : "";
+                        String artist = artistCol != -1 ? cursor.getString(artistCol) : "";
+                        String album = albumCol != -1 ? cursor.getString(albumCol) : "";
+                        long durationMs = durCol != -1 ? cursor.getLong(durCol) : 0;
+                        String dataPath = dataCol != -1 ? cursor.getString(dataCol) : "";
+                        long size = sizeCol != -1 ? cursor.getLong(sizeCol) : 0;
+
+                        Uri trackUri = Uri.withAppendedPath(contentUri, String.valueOf(id));
+
+                        JSObject item = new JSObject();
+                        item.put("id", "native_media_" + id);
+                        item.put("name", name != null && !name.isEmpty() ? name : (title + ".mp3"));
+                        item.put("title", title != null && !title.isEmpty() ? title : name);
+                        item.put("artist", artist != null && !artist.equals("<unknown>") ? artist : "Artista Desconocido");
+                        item.put("album", album != null && !album.equals("<unknown>") ? album : "Música");
+                        item.put("duration", durationMs > 0 ? (durationMs / 1000.0) : 0);
+                        item.put("path", dataPath != null && !dataPath.isEmpty() ? dataPath : trackUri.toString());
+                        item.put("uri", trackUri.toString());
+                        item.put("size", size);
+
+                        tracksArray.put(item);
+                    }
+                    cursor.close();
+                }
+
+                JSObject res = new JSObject();
+                res.put("tracks", tracksArray);
+                res.put("count", tracksArray.length());
+                call.resolve(res);
+            } catch (Exception e) {
+                Log.e(TAG, "Error en scanAllMusic:", e);
+                JSObject res = new JSObject();
+                res.put("tracks", new JSArray());
+                res.put("count", 0);
+                res.put("error", e.getMessage());
+                call.resolve(res);
+            }
+        }).start();
+    }
 
     /**
      * Invoca directamente el Intent oficial del sistema Android: ACTION_OPEN_DOCUMENT_TREE (SAF).
@@ -361,6 +454,38 @@ public class NativeFolderPickerPlugin extends Plugin {
                     item.put("lastModified", file.lastModified());
                     item.put("mimeType", file.getType() != null ? file.getType() : "audio/*");
                     item.put("relativePath", currentRelativePath);
+
+                    // Extracción ultrarrápida nativa de duración y metadatos ID3
+                    MediaMetadataRetriever mmr = null;
+                    try {
+                        mmr = new MediaMetadataRetriever();
+                        mmr.setDataSource(getContext(), file.getUri());
+                        String durStr = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+                        if (durStr != null) {
+                            long durMs = Long.parseLong(durStr);
+                            if (durMs > 0) {
+                                item.put("duration", durMs / 1000.0);
+                            }
+                        }
+                        String t = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE);
+                        if (t != null && !t.trim().isEmpty()) {
+                            item.put("title", t.trim());
+                        }
+                        String a = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST);
+                        if (a != null && !a.trim().isEmpty()) {
+                            item.put("artist", a.trim());
+                        }
+                        String alb = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM);
+                        if (alb != null && !alb.trim().isEmpty()) {
+                            item.put("album", alb.trim());
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (mmr != null) {
+                            try { mmr.release(); } catch (Exception ignored) {}
+                        }
+                    }
+
                     results.add(item);
                 }
             }

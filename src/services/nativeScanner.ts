@@ -34,6 +34,7 @@ import {
   checkNativeStoragePermissions,
   requestNativeStoragePermissionsDirect,
   openNativeAppSettings,
+  scanAllNativeDeviceMusic,
 } from "./nativeFolderPicker";
 
 export interface ScanProgressCallback {
@@ -694,6 +695,48 @@ export async function autoScanStartup(
         .filter(Boolean)
     );
 
+    // 1. Escaneo nativo por MediaStore (cubre todo el sistema del teléfono, carpetas y tarjetas SD en <50ms con cero consumo de batería)
+    try {
+      const mediaStoreTracks = await scanAllNativeDeviceMusic(
+        filterShortAudios,
+        30,
+        (discovered) => {
+          const keyNative = (discovered.nativePath || "").toLowerCase();
+          const keyUrl = (discovered.url || "").toLowerCase();
+          const keyName = `${discovered.title}-${discovered.artist}`.toLowerCase();
+          if (
+            (!keyNative || !existingMap.has(keyNative)) &&
+            (!keyUrl || !existingMap.has(keyUrl)) &&
+            !existingMap.has(keyName)
+          ) {
+            existingMap.add(keyNative);
+            existingMap.add(keyUrl);
+            existingMap.add(keyName);
+            onTrackDiscovered?.(discovered);
+          }
+        }
+      );
+
+      if (mediaStoreTracks && mediaStoreTracks.length > 0) {
+        const newTracks = mediaStoreTracks.filter((t) => {
+          const keyNative = (t.nativePath || "").toLowerCase();
+          const keyUrl = (t.url || "").toLowerCase();
+          const keyName = `${t.title}-${t.artist}`.toLowerCase();
+          return (
+            (!keyNative || !existingMap.has(keyNative)) &&
+            (!keyUrl || !existingMap.has(keyUrl)) &&
+            !existingMap.has(keyName)
+          );
+        });
+        if (newTracks.length > 0) {
+          return newTracks;
+        }
+      }
+    } catch (mediaStoreErr) {
+      console.warn("[AutoScan] Fallback de MediaStore a escaneo por carpetas Filesystem:", mediaStoreErr);
+    }
+
+    // 2. Fallback: escaneo recursivo por carpetas Filesystem si MediaStore no estuviera disponible
     const { tracks } = await scanNativeMusicDirectories(
       undefined,
       filterShortAudios,

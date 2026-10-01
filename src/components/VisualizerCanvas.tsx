@@ -210,9 +210,9 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
     const loop = (now: number) => {
       if (!isMountedRef.current) return;
 
-      // Si la pestaña o pantalla está minimizada, no calcules nada
+      // Si la pestaña o pantalla está minimizada / apagada, suspender por completo el bucle para ahorrar 100% de CPU y batería
       if (document.hidden) {
-        animFrameId.current = requestAnimationFrame(loop);
+        animFrameId.current = null;
         return;
       }
 

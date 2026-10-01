@@ -31,13 +31,25 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) {
         }
 
-        // Mantener la CPU activa (PARTIAL_WAKE_LOCK) para que la música no se congele al suspender la pantalla
+        // Preparar WakeLock parcial para activarlo ÚNICAMENTE cuando la pantalla se suspenda
+        // evitando consumo innecesario de batería mientras la pantalla esté encendida
         try {
             PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
             if (powerManager != null) {
                 wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Sonora:AudioPlaybackWakeLock");
                 wakeLock.setReferenceCounted(false);
-                wakeLock.acquire();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        // Liberar WakeLock en primer plano con pantalla encendida para máximo ahorro de batería
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
             }
         } catch (Exception ignored) {
         }
@@ -51,6 +63,14 @@ public class MainActivity extends BridgeActivity {
             if (getBridge() != null && getBridge().getWebView() != null) {
                 getBridge().getWebView().resumeTimers();
                 getBridge().getWebView().onResume();
+            }
+        } catch (Exception ignored) {
+        }
+
+        // Adquirir WakeLock con límite de seguridad (30 minutos) SOLO al suspender pantalla para no agotar la batería
+        try {
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(30 * 60 * 1000L);
             }
         } catch (Exception ignored) {
         }

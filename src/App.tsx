@@ -516,15 +516,15 @@ export function SonoraApp() {
           requestNativeNotificationPermission().catch(console.warn);
 
           // 2. Comprobar permisos de almacenamiento ('READ_MEDIA_AUDIO' / 'READ_EXTERNAL_STORAGE')
-          const hasPerms = await checkNativeStoragePermissions();
+          let hasPerms = await checkNativeStoragePermissions();
           if (!hasPerms) {
-            const requested = await requestStoragePermissions();
-            if (!requested) {
-              setShowPermissionDialog(true);
-            }
+            await requestStoragePermissions();
+            // Espera asíncrona breve para procesar la respuesta si el usuario ya los tenía concedidos
+            await new Promise((r) => setTimeout(r, 600));
+            hasPerms = await checkNativeStoragePermissions();
           }
 
-          if (await checkNativeStoragePermissions()) {
+          if (hasPerms) {
             const newDiscovered = await autoScanStartup(
               currentList,
               filterShortAudios,
@@ -551,12 +551,16 @@ export function SonoraApp() {
                 const existingIds = new Set(prev.map((t) => t.id));
                 const filteredNew = newDiscovered.filter((t) => !existingIds.has(t.id));
                 if (filteredNew.length === 0) return prev;
-                const merged = [...prev, ...filteredNew];
+                // Si la biblioteca contenía únicamente demos sintéticos y detectamos música real del usuario, reemplazar demos
+                const isOnlyDemos = prev.length > 0 && prev.every((t) => t.id.startsWith("demo_"));
+                const merged = isOnlyDemos ? filteredNew : [...prev, ...filteredNew];
                 saveTracksToDB(merged);
                 return merged;
               });
               setToastMessage(`Biblioteca actualizada: ${newDiscovered.length} canción(es) detectada(s)`);
             }
+          } else {
+            setShowPermissionDialog(true);
           }
         } catch (scanErr) {
           console.warn("Auto-escaneo al inicio falló:", scanErr);
@@ -931,7 +935,11 @@ export function SonoraApp() {
           audioRef.current.play().catch(() => {});
         }
       } else {
-        // App restaurada al primer plano mientras estaba reproduciendo
+        // App restaurada al primer plano:
+        // Sincronizar de inmediato el tiempo exacto en React para que la barra esté al día sin haber gastado batería en reposo
+        if (audioRef.current) {
+          setCurrentTime(audioRef.current.currentTime);
+        }
         audioEngine.resumeContext();
         if (audioRef.current && audioRef.current.paused && isPlayingRef.current) {
           audioRef.current.play().catch(() => {});
@@ -1758,14 +1766,19 @@ export function SonoraApp() {
             const curTime = audioRef.current.currentTime;
             const now = performance.now();
 
-            // 1. Throttle de setCurrentTime (~250ms) para evitar re-renders excesivos en React
-            if (now - lastProgressUpdateRef.current >= 250 || Math.abs(curTime - currentTime) > 0.5) {
-              lastProgressUpdateRef.current = now;
-              setCurrentTime(curTime);
+            // 1. Throttle de setCurrentTime (~350ms): Únicamente cuando la pantalla está encendida (!document.hidden).
+            // Si la pantalla está apagada o la app en segundo plano, omitir la actualización de estado en React
+            // para evitar cientos de re-renders innecesarios por minuto que agotan la batería del teléfono.
+            if (!document.hidden) {
+              if (now - lastProgressUpdateRef.current >= 350 || Math.abs(curTime - currentTime) > 0.5) {
+                lastProgressUpdateRef.current = now;
+                setCurrentTime(curTime);
+              }
             }
 
-            // 2. Throttle de mediaSession.setPositionState (máximo una vez por segundo) para no saturar el puente IPC nativo de Android
-            if (now - lastMediaSessionUpdateRef.current >= 1000) {
+            // 2. Throttle de mediaSession.setPositionState (máximo una vez cada 3.5 segundos)
+            // para no saturar el puente IPC nativo de Android ni consumir ciclos innecesarios de CPU.
+            if (now - lastMediaSessionUpdateRef.current >= 3500) {
               lastMediaSessionUpdateRef.current = now;
               if ("mediaSession" in navigator && "setPositionState" in navigator.mediaSession) {
                 const dur = audioRef.current.duration;
@@ -2144,7 +2157,8 @@ export function SonoraApp() {
                   const existingIds = new Set(prev.map((t) => t.id));
                   const filteredNew = newDiscovered.filter((t) => !existingIds.has(t.id));
                   if (filteredNew.length === 0) return prev;
-                  const merged = [...prev, ...filteredNew];
+                  const isOnlyDemos = prev.length > 0 && prev.every((t) => t.id.startsWith("demo_"));
+                  const merged = isOnlyDemos ? filteredNew : [...prev, ...filteredNew];
                   saveTracksToDB(merged);
                   return merged;
                 });
