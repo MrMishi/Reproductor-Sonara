@@ -681,6 +681,9 @@ export function SonoraApp() {
 
   // Refs estables para eventos de MediaSession y segundo plano en Android
   const isPlayingRef = useRef(isPlaying);
+  // Rastrea si la pausa fue una acción expresa del usuario (botón de UI, control de notificación, auriculares o temporizador)
+  // para evitar que el apagado / suspensión de pantalla del teléfono pause accidentalmente el reproductor.
+  const isUserIntentionalPauseRef = useRef<boolean>(false);
   const handleTogglePlayRef = useRef<() => void>(() => {});
   const handleNextRef = useRef<() => void>(() => {});
   const handlePrevRef = useRef<() => void>(() => {});
@@ -761,6 +764,7 @@ export function SonoraApp() {
         audioRef.current.currentTime = startTime;
       }
 
+      isUserIntentionalPauseRef.current = false;
       isPlayingRef.current = true;
       setIsPlaying(true);
       audioEngine.setPlaybackState(true);
@@ -831,12 +835,15 @@ export function SonoraApp() {
     audioEngine.resumeContext();
 
     if (isPlaying) {
+      // Pausa intencional requerida por el usuario
+      isUserIntentionalPauseRef.current = true;
       audioRef.current.pause();
       isPlayingRef.current = false;
       setIsPlaying(false);
       audioEngine.setPlaybackState(false);
       syncMediaSessionPlaybackState("paused");
     } else {
+      isUserIntentionalPauseRef.current = false;
       startPlayback(currentTrack);
     }
   };
@@ -914,19 +921,23 @@ export function SonoraApp() {
       }
 
       if (document.hidden) {
-        // App minimizada o pantalla bloqueada mientras ESTABA reproduciendo activamente:
-        // Mantener activo el contexto de audio nativo sin alterar el estado y reafirmar MediaSession
+        // App minimizada o pantalla apagada / suspendida mientras ESTABA reproduciendo activamente:
+        // Mantener activo el contexto de audio nativo y asegurar que el audio HTML5 continúe sonando
         audioEngine.resumeContext();
         if ("mediaSession" in navigator) {
           navigator.mediaSession.playbackState = "playing";
         }
+        if (audioRef.current && audioRef.current.paused) {
+          audioRef.current.play().catch(() => {});
+        }
       } else {
         // App restaurada al primer plano mientras estaba reproduciendo
-        if (audioRef.current && !audioRef.current.paused) {
-          audioEngine.resumeContext();
-          if ("mediaSession" in navigator) {
-            navigator.mediaSession.playbackState = "playing";
-          }
+        audioEngine.resumeContext();
+        if (audioRef.current && audioRef.current.paused && isPlayingRef.current) {
+          audioRef.current.play().catch(() => {});
+        }
+        if ("mediaSession" in navigator) {
+          navigator.mediaSession.playbackState = "playing";
         }
       }
     };
@@ -936,22 +947,16 @@ export function SonoraApp() {
     let appStateHandle: any = null;
     if (Capacitor.isNativePlatform()) {
       App.addListener("appStateChange", ({ isActive }) => {
-        // Si el reproductor estaba en PAUSA, conservar rigurosamente su estado
+        // Si el reproductor estaba en PAUSA por acción del usuario, conservar rigurosamente su estado
         if (!isPlayingRef.current) {
           return;
         }
-        if (isActive) {
-          if (audioRef.current && !audioRef.current.paused) {
-            audioEngine.resumeContext();
-            if ("mediaSession" in navigator) {
-              navigator.mediaSession.playbackState = "playing";
-            }
-          }
-        } else {
-          audioEngine.resumeContext();
-          if ("mediaSession" in navigator) {
-            navigator.mediaSession.playbackState = "playing";
-          }
+        audioEngine.resumeContext();
+        if (audioRef.current && audioRef.current.paused && isPlayingRef.current) {
+          audioRef.current.play().catch(() => {});
+        }
+        if ("mediaSession" in navigator) {
+          navigator.mediaSession.playbackState = "playing";
         }
       }).then((handle) => {
         appStateHandle = handle;
@@ -1017,6 +1022,7 @@ export function SonoraApp() {
     try {
       // Acción 'play': Ejecuta la función de reproducir
       navigator.mediaSession.setActionHandler("play", () => {
+        isUserIntentionalPauseRef.current = false;
         audioEngine.resumeContext();
         if (audioRef.current && audioRef.current.paused) {
           audioRef.current
@@ -1024,6 +1030,7 @@ export function SonoraApp() {
             .then(() => {
               isPlayingRef.current = true;
               setIsPlaying(true);
+              audioEngine.setPlaybackState(true);
               syncMediaSessionPlaybackState("playing");
             })
             .catch(console.warn);
@@ -1034,10 +1041,12 @@ export function SonoraApp() {
 
       // Acción 'pause': Ejecuta la función de pausar
       navigator.mediaSession.setActionHandler("pause", () => {
+        isUserIntentionalPauseRef.current = true;
         isPlayingRef.current = false;
         if (audioRef.current && !audioRef.current.paused) {
           audioRef.current.pause();
           setIsPlaying(false);
+          audioEngine.setPlaybackState(false);
           syncMediaSessionPlaybackState("paused");
         } else {
           handleTogglePlayRef.current();
@@ -1085,11 +1094,14 @@ export function SonoraApp() {
       });
 
       navigator.mediaSession.setActionHandler("stop", () => {
+        isUserIntentionalPauseRef.current = true;
+        isPlayingRef.current = false;
         if (audioRef.current) {
           audioRef.current.pause();
           audioRef.current.currentTime = 0;
         }
         setIsPlaying(false);
+        audioEngine.setPlaybackState(false);
         if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
       });
     } catch (err) {
@@ -1169,27 +1181,47 @@ export function SonoraApp() {
     }
   };
 
-  // Direct play from list
-  const handlePlayTrack = useCallback((track: Track, _index: number) => {
+  // Reproducción directa desde listas o desde la cola de reproducción
+  const handlePlayTrack = useCallback((track: Track, _index?: number) => {
     if (isTrackCorrupted(track)) {
       handleCorruptedTrack(track);
       return;
     }
 
     const baseList = visibleTracks.length > 0 ? visibleTracks : tracks;
-    if (playbackMode === "shuffle") {
-      // Si el usuario toca una pista mientras está en Shuffle, re-anclar la cola empezando por dicha canción
-      const newShuffled = createShuffledQueue(baseList, track);
-      setShuffledQueue(newShuffled);
-      setCurrentTrackIndex(0);
+
+    // 1. Identificar si la canción seleccionada ya forma parte de la cola activa actual (activeQueue).
+    // Si se pasó un índice directo válido que coincide con la pista, usarlo de inmediato O(1).
+    let foundIndex = -1;
+    if (typeof _index === "number" && _index >= 0 && _index < activeQueue.length && activeQueue[_index]?.id === track.id) {
+      foundIndex = _index;
     } else {
-      const foundIndex = activeQueue.findIndex((t) => t.id === track.id);
-      if (foundIndex !== -1) {
-        if (foundIndex === currentTrackIndex && isPlayingRef.current) {
-          handleTogglePlay();
-          return;
+      foundIndex = activeQueue.findIndex((t) => t.id === track.id);
+    }
+
+    if (foundIndex !== -1) {
+      // La pista ya existe en la cola activa (tanto si está en orden aleatorio 'shuffle' como en normal).
+      // REGLA CRÍTICA: NO re-barajar ni sobrescribir la cola existente si el usuario toca una canción desde la cola.
+      // Simplemente desplazamos el puntero actual a dicho índice conservando la cola completa de canciones.
+      if (foundIndex === currentTrackIndex && isPlayingRef.current) {
+        handleTogglePlay();
+        return;
+      }
+      setCurrentTrackIndex(foundIndex);
+    } else {
+      // La pista no estaba en la cola activa actual (ej: seleccionada desde otra vista o filtro distinto):
+      if (playbackMode === "shuffle") {
+        if (!shuffledQueue || shuffledQueue.length === 0) {
+          // Si no existía aún una cola aleatoria, crearla iniciando con la pista seleccionada
+          const newShuffled = createShuffledQueue(baseList, track);
+          setShuffledQueue(newShuffled);
+          setCurrentTrackIndex(0);
+        } else {
+          // Si ya existía una cola aleatoria pero la pista no estaba presente, añadirla al frente sin destruir el resto
+          const newShuffled = [track, ...shuffledQueue.filter((t) => t.id !== track.id)];
+          setShuffledQueue(newShuffled);
+          setCurrentTrackIndex(0);
         }
-        setCurrentTrackIndex(foundIndex);
       } else {
         const baseIndex = baseList.findIndex((t) => t.id === track.id);
         if (baseIndex !== -1) {
@@ -1198,10 +1230,11 @@ export function SonoraApp() {
       }
     }
 
+    isUserIntentionalPauseRef.current = false;
     isPlayingRef.current = true;
     setIsPlaying(true);
     startPlayback(track, 0);
-  }, [visibleTracks, tracks, playbackMode, activeQueue, currentTrackIndex, startPlayback]);
+  }, [visibleTracks, tracks, playbackMode, activeQueue, currentTrackIndex, startPlayback, shuffledQueue]);
 
   // Toggle favorite
   const handleToggleFavorite = useCallback((id: string) => {
@@ -1314,21 +1347,74 @@ export function SonoraApp() {
   }, [handleTracksImported]);
 
   // Lyrics applied from search
-  const handleLyricsApplied = useCallback((trackId: string, lyrics: Track["lyrics"], album?: string) => {
+  const handleLyricsApplied = useCallback((
+    trackId: string,
+    lyrics: Track["lyrics"],
+    album?: string,
+    newTitle?: string,
+    newArtist?: string
+  ) => {
+    let updatedTrackRef: Track | null = null;
+
     setTracks((prev) => {
       const updated = prev.map((t) => {
         if (t.id === trackId) {
-          return {
+          const finalTrack: Track = {
             ...t,
+            title: newTitle && newTitle.trim() ? newTitle.trim() : t.title,
+            artist: newArtist && newArtist.trim() ? newArtist.trim() : t.artist,
             lyrics,
-            album: t.album || album,
+            album: album || t.album,
           };
+          updatedTrackRef = finalTrack;
+          return finalTrack;
         }
         return t;
       });
       saveTracksToDB(updated);
       return updated;
     });
+
+    setShuffledQueue((prev) => {
+      if (!prev) return null;
+      return prev.map((t) => {
+        if (t.id === trackId) {
+          return {
+            ...t,
+            title: newTitle && newTitle.trim() ? newTitle.trim() : t.title,
+            artist: newArtist && newArtist.trim() ? newArtist.trim() : t.artist,
+            lyrics,
+            album: album || t.album,
+          };
+        }
+        return t;
+      });
+    });
+
+    if (updatedTrackRef) {
+      updateTrackInDb(updatedTrackRef).catch(() => {});
+    }
+
+    setToastMessage("¡Letra vinculada a la canción exitosamente!");
+  }, []);
+
+  // Intercambiar Título y Artista (cuando vienen invertidos del archivo)
+  const handleSwapTitleArtist = useCallback(async (track: Track) => {
+    const currentArtist = track.artist && track.artist !== "Artista Desconocido" ? track.artist : "";
+    const currentTitle = track.title;
+    const newTitle = currentArtist || "Sin Título";
+    const newArtist = currentTitle || "Artista Desconocido";
+
+    const swapped: Track = {
+      ...track,
+      title: newTitle,
+      artist: newArtist,
+    };
+
+    setTracks((prev) => prev.map((t) => (t.id === track.id ? swapped : t)));
+    setShuffledQueue((prev) => (prev ? prev.map((t) => (t.id === track.id ? swapped : t)) : null));
+    await updateTrackInDb(swapped);
+    setToastMessage(`Invertido: "${swapped.title}" - ${swapped.artist}`);
   }, []);
 
   // Eliminar o desvincular letras de una canción
@@ -1391,11 +1477,15 @@ export function SonoraApp() {
 
     if (updatedTracks.length === 0) {
       if (audioRef.current) {
+        isUserIntentionalPauseRef.current = true;
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
         audioRef.current.src = "";
       }
       setIsPlaying(false);
+      isPlayingRef.current = false;
+      audioEngine.setPlaybackState(false);
+      syncMediaSessionPlaybackState("paused");
       setCurrentTrackIndex(0);
     } else if (isCurrentDeleted) {
       const curIdx = tracks.findIndex((t) => t.id === currentTrack.id);
@@ -1425,6 +1515,7 @@ export function SonoraApp() {
 
   // Ejecuta la pausa del audio al expirar el temporizador
   const handleExecuteSleepTimer = () => {
+    isUserIntentionalPauseRef.current = true;
     setSleepTimer((prev) => ({
       ...prev,
       isActive: false,
@@ -1434,7 +1525,10 @@ export function SonoraApp() {
     audioEngine.setSleepTimerActive(false);
 
     audioEngine.pausePlayback(audioRef.current, sleepTimer.fadeOut, () => {
+      isPlayingRef.current = false;
       setIsPlaying(false);
+      audioEngine.setPlaybackState(false);
+      syncMediaSessionPlaybackState("paused");
       setToastMessage("💤 Temporizador de apagado: la música se ha pausado.");
     });
   };
@@ -1735,16 +1829,42 @@ export function SonoraApp() {
           }
         }}
         onPlay={() => {
+          isUserIntentionalPauseRef.current = false;
           isPlayingRef.current = true;
           setIsPlaying(true);
           audioEngine.setPlaybackState(true);
           syncMediaSessionPlaybackState("playing");
         }}
         onPause={() => {
-          isPlayingRef.current = false;
-          setIsPlaying(false);
-          audioEngine.setPlaybackState(false);
-          syncMediaSessionPlaybackState("paused");
+          // Si el usuario pausó intencionalmente (botón UI, barra de notificación, auriculares o temporizador):
+          if (isUserIntentionalPauseRef.current) {
+            isUserIntentionalPauseRef.current = false;
+            isPlayingRef.current = false;
+            setIsPlaying(false);
+            audioEngine.setPlaybackState(false);
+            syncMediaSessionPlaybackState("paused");
+            return;
+          }
+
+          // Si el evento de pausa fue disparado involuntariamente por el sistema (ej: suspensión / apagado de pantalla en Android):
+          if (isPlayingRef.current && currentTrack) {
+            console.log("[Audio] Suspensión involuntaria de pantalla detectada. Continuando reproducción en segundo plano...");
+            audioEngine.resumeContext();
+            audioEngine.setPlaybackState(true);
+            syncMediaSessionPlaybackState("playing");
+
+            // Reanudar inmediatamente para que el usuario no experimente ningún corte al apagar la pantalla
+            setTimeout(() => {
+              if (audioRef.current && isPlayingRef.current && audioRef.current.paused) {
+                audioRef.current.play().catch(() => {});
+              }
+            }, 50);
+          } else {
+            isPlayingRef.current = false;
+            setIsPlaying(false);
+            audioEngine.setPlaybackState(false);
+            syncMediaSessionPlaybackState("paused");
+          }
         }}
         onError={() => {
           const mediaErr = audioRef.current?.error;
@@ -1814,6 +1934,7 @@ export function SonoraApp() {
           onSelectAlbum={setSelectedAlbum}
           selectedFolder={selectedFolder}
           onSelectFolder={setSelectedFolder}
+          onSwapTitleArtist={handleSwapTitleArtist}
         />
       </main>
 
@@ -1888,6 +2009,7 @@ export function SonoraApp() {
         onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
         onLyricsApplied={handleLyricsApplied}
         onLyricsRemoved={handleLyricsRemoved}
+        onSwapTitleArtist={handleSwapTitleArtist}
       />
 
       {/* Floating Action Toast Notification */}

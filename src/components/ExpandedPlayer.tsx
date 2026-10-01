@@ -53,6 +53,7 @@ import {
   Sparkles,
   Tag,
   Loader2,
+  ArrowUpDown,
 } from "lucide-react";
 import { Track, PlaybackMode, SleepTimerConfig } from "../types";
 import {
@@ -92,6 +93,7 @@ export interface ExpandedPlayerProps {
   onOpenSleepTimer?: () => void;
   onLyricsApplied?: (trackId: string, lyrics: Track["lyrics"], album?: string) => void;
   onLyricsRemoved?: (trackId: string) => void;
+  onSwapTitleArtist?: (track: Track) => void;
 }
 
 function formatTime(seconds: number): string {
@@ -129,6 +131,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   onOpenSleepTimer,
   onLyricsApplied,
   onLyricsRemoved,
+  onSwapTitleArtist,
 }) => {
   const [activeTab, setActiveTab] = useState<"cover" | "queue" | "lyrics" | "details">(
     activeSubTab || "cover"
@@ -403,11 +406,11 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
       return;
     }
 
-    // 2. Deslizar a la Izquierda (Swipe Left): Regresa a la canción anterior (gesto invertido según preferencia)
+    // 2. Deslizar de Derecha a Izquierda (Swipe Left, deltaX < -45): Adelanta a la siguiente canción
     if (deltaX < -45) {
       setSlideAnimation("slide-left");
       setTimeout(() => {
-        onPrev();
+        onNext();
         setSlideAnimation("enter-right");
         setDragOffset(0);
         setTimeout(() => setSlideAnimation("idle"), 300);
@@ -415,11 +418,11 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
       return;
     }
 
-    // 3. Deslizar a la Derecha (Swipe Right): Avanza a la siguiente canción (gesto invertido según preferencia)
+    // 3. Deslizar de Izquierda a Derecha (Swipe Right, deltaX > 45): Regresa a la canción anterior
     if (deltaX > 45) {
       setSlideAnimation("slide-right");
       setTimeout(() => {
-        onNext();
+        onPrev();
         setSlideAnimation("enter-left");
         setDragOffset(0);
         setTimeout(() => setSlideAnimation("idle"), 300);
@@ -668,14 +671,14 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
               {/* Swipe Direction Indicators (during drag) */}
               {dragOffset < -25 && (
                 <div className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/75 backdrop-blur-md px-3.5 py-2 rounded-full border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white shadow-xl pointer-events-none animate-in fade-in duration-100">
-                  <SkipBack className="w-4 h-4 text-purple-400" />
-                  <span>Anterior</span>
+                  <span>Adelante</span>
+                  <SkipForward className="w-4 h-4 text-purple-400" />
                 </div>
               )}
               {dragOffset > 25 && (
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/75 backdrop-blur-md px-3.5 py-2 rounded-full border border-white/20 flex items-center gap-1.5 text-xs font-bold text-white shadow-xl pointer-events-none animate-in fade-in duration-100">
-                  <span>Siguiente</span>
-                  <SkipForward className="w-4 h-4 text-purple-400" />
+                  <SkipBack className="w-4 h-4 text-purple-400" />
+                  <span>Atrás</span>
                 </div>
               )}
             </div>
@@ -735,12 +738,26 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                   active={isPlaying}
                   className="text-xl sm:text-2xl font-extrabold tracking-wide text-white"
                 />
-                <div className="mt-1">
-                  <CyberMarquee
-                    text={`${currentTrack.artist || "Artista Desconocido"}${currentTrack.album ? ` • ${currentTrack.album}` : ""}`}
-                    active={isPlaying}
-                    className="text-xs sm:text-sm font-mono tracking-wider text-purple-300/80"
-                  />
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CyberMarquee
+                      text={`${currentTrack.artist || "Artista Desconocido"}${currentTrack.album ? ` • ${currentTrack.album}` : ""}`}
+                      active={isPlaying}
+                      className="text-xs sm:text-sm font-mono tracking-wider text-purple-300/80"
+                    />
+                  </div>
+                  {onSwapTitleArtist && (
+                    <button
+                      type="button"
+                      id="expanded-cover-swap-btn"
+                      onClick={() => onSwapTitleArtist(currentTrack)}
+                      className="text-[10px] font-mono flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/15 text-purple-300 hover:text-white transition-colors cursor-pointer shrink-0 border border-white/5 hover:border-purple-500/30"
+                      title="Intercambiar Título y Cantante si están al revés"
+                    >
+                      <ArrowUpDown className="w-3 h-3 text-purple-400" />
+                      <span className="hidden xs:inline">Invertir</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -855,8 +872,23 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                       </span>
                     ) : null}
                   </div>
-                  <div className="flex items-center gap-1.5 text-[11px] opacity-70 truncate">
+                  <div className="flex items-center gap-2 text-[11px] opacity-70 truncate">
                     <p className="truncate">{currentTrack.artist}</p>
+                    {onSwapTitleArtist && (
+                      <button
+                        type="button"
+                        id="expanded-lyrics-swap-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSwapTitleArtist(currentTrack);
+                        }}
+                        className="text-[9px] font-mono flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-purple-200 transition-colors cursor-pointer shrink-0"
+                        title="Invertir Título y Cantante"
+                      >
+                        <ArrowUpDown className="w-2.5 h-2.5 text-purple-400" />
+                        <span>Invertir</span>
+                      </button>
+                    )}
                     {syncedLyrics && syncedLyrics.length > 0 ? (
                       <span className="md:hidden inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 shrink-0">
                         <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />

@@ -996,15 +996,84 @@ async function postProcessLyricsResult(result: LyricsResult): Promise<LyricsResu
 }
 
 /**
+ * Consulta directa a la API de LRCLIB por endpoint /api/search
+ */
+async function queryLrclibSearch(query: string): Promise<LrclibSearchItem | null> {
+  if (!query || !query.trim()) return null;
+  try {
+    const lrclibUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query.trim())}`;
+    const res = await fetch(lrclibUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "SonaraMusicPlayer/1.0",
+      },
+    }).catch(() => null);
+
+    if (res && res.ok) {
+      const results: LrclibSearchItem[] = await res.json().catch(() => []);
+      if (Array.isArray(results) && results.length > 0) {
+        const best =
+          results.find((item: LrclibSearchItem) => item.syncedLyrics && item.syncedLyrics.trim().length > 0) ||
+          results.find((item: LrclibSearchItem) => item.plainLyrics && item.plainLyrics.trim().length > 0) ||
+          results[0];
+        if (best && (best.syncedLyrics || best.plainLyrics)) {
+          return best;
+        }
+      }
+    }
+  } catch (_e) {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * Consulta directa a la API de LRCLIB por endpoint /api/get
+ */
+async function queryLrclibGet(trackName: string, artistName?: string, duration?: number): Promise<LrclibSearchItem | null> {
+  if (!trackName || !trackName.trim()) return null;
+  try {
+    let url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(trackName.trim())}`;
+    if (artistName && artistName.trim() && artistName !== "Artista Desconocido") {
+      url += `&artist_name=${encodeURIComponent(artistName.trim())}`;
+    }
+    if (duration && duration > 0) {
+      url += `&duration=${Math.round(duration)}`;
+    }
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "SonaraMusicPlayer/1.0",
+      },
+    }).catch(() => null);
+
+    if (res && res.ok) {
+      const item: LrclibSearchItem = await res.json().catch(() => null);
+      if (item && (item.syncedLyrics || item.plainLyrics)) {
+        return item;
+      }
+    }
+  } catch (_e) {
+    // ignore
+  }
+  return null;
+}
+
+/**
  * Función: searchLyricsOnline
- * Propósito: Búsqueda automatizada de letras sincronizadas o planas en internet.
+ * Propósito: Búsqueda automatizada y resiliente de letras sincronizadas o planas en internet.
  * ¿Cómo funciona?:
  * 1. Limpia sufijos ruidosos del título (ej. "(Official Music Video)", "Remastered", etc.).
- * 2. Consulta en primer lugar la API pública de LRCLIB (GET https://lrclib.net/api/search?q=...).
- * 3. Si encuentra versos sincronizados (.syncedLyrics), los parsea con `parseLrc` y los retorna.
- * 4. Si falla o no hay conexión, recurre como respaldo al backend proxy `/api/lyrics/search`.
- * 5. Si detecta caracteres japoneses (Kanji/Kana), envía las líneas a 'https://sonara-backend-zpjn.onrender.com/api/transcribe'
- *    para obtener automáticamente la pronunciación en Romaji.
+ * 2. Realiza múltiples intentos ordenados:
+ *    - Intento 1: /api/get con Título y Artista
+ *    - Intento 2: /api/search con "Artista Título"
+ *    - Intento 3: /api/get invertido (por si el nombre del archivo tenía Título en Artista o viceversa)
+ *    - Intento 4: /api/search invertido con "Título Artista"
+ *    - Intento 5: /api/search solo con Título
+ * 3. Si falla la consulta directa, recurre al proxy de respaldo `/api/lyrics/search`.
+ * 4. Si detecta caracteres japoneses (Kanji/Kana), procesa automáticamente la pronunciación en Romaji.
  */
 export async function searchLyricsOnline(
   track: string,
@@ -1016,45 +1085,54 @@ export async function searchLyricsOnline(
     .replace(/\.(mp3|wav|flac|m4a|aac|ogg|opus|webm)$/i, "")
     .replace(/\s*[\(\[](official\s*(music\s*)?video|official\s*audio|video\s*oficial|audio\s*oficial|remastered\s*\d*|lyrics\s*video|letra|4k|hd)[\)\]]/gi, "")
     .trim();
-  const cleanArtist = (artist || "").trim();
-  const searchQuery = `${cleanArtist} ${cleanTrack}`.trim();
+  const rawArtist = (artist || "").trim();
+  const cleanArtist = rawArtist === "Artista Desconocido" ? "" : rawArtist;
 
-  // 1. Intento directo a la API pública de LRCLIB
+  // Intentos múltiples en LRCLIB directo
   try {
-    const lrclibUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`;
-    const lrcDirectRes = await fetch(lrclibUrl, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "SonaraMusicPlayer/1.0",
-      },
-    }).catch(() => null);
+    let bestMatch: LrclibSearchItem | null = null;
 
-    if (lrcDirectRes && lrcDirectRes.ok) {
-      const results: LrclibSearchItem[] = await lrcDirectRes.json().catch(() => []);
-      if (Array.isArray(results) && results.length > 0) {
-        // PRIORIZAR LETRAS SINCRONIZADAS (SYNCED LYRICS)
-        // Priorizar estrictamente canciones con 'syncedLyrics' sobre 'plainLyrics'
-        const best =
-          results.find((item: LrclibSearchItem) => item.syncedLyrics && item.syncedLyrics.trim().length > 0) ||
-          results.find((item: LrclibSearchItem) => item.plainLyrics && item.plainLyrics.trim().length > 0) ||
-          results[0];
+    // Pase 1: /api/get directo con (track, artist)
+    if (cleanArtist) {
+      bestMatch = await queryLrclibGet(cleanTrack, cleanArtist, duration);
+    }
 
-        if (best && (best.syncedLyrics || best.plainLyrics)) {
-          const rawLrc = best.syncedLyrics || null;
-          const parsed = rawLrc ? parseLrc(rawLrc) : null;
-          return await postProcessLyricsResult({
-            source: "lrclib-direct",
-            track: best.trackName || cleanTrack,
-            artist: best.artistName || cleanArtist,
-            album: best.albumName || undefined,
-            plainLyrics: best.plainLyrics || "",
-            syncedLyrics: parsed && parsed.length > 0 ? parsed : null,
-            rawLrc,
-            instrumental: Boolean(best.instrumental),
-          });
-        }
-      }
+    // Pase 2: /api/search con "${cleanArtist} ${cleanTrack}"
+    if (!bestMatch) {
+      const q1 = `${cleanArtist} ${cleanTrack}`.trim();
+      bestMatch = await queryLrclibSearch(q1);
+    }
+
+    // Pase 3: Invertido /api/get (por si la canción tenía invertido título y cantante)
+    if (!bestMatch && cleanArtist) {
+      bestMatch = await queryLrclibGet(cleanArtist, cleanTrack, duration);
+    }
+
+    // Pase 4: Invertido /api/search con "${cleanTrack} ${cleanArtist}"
+    if (!bestMatch && cleanArtist) {
+      const q2 = `${cleanTrack} ${cleanArtist}`.trim();
+      bestMatch = await queryLrclibSearch(q2);
+    }
+
+    // Pase 5: Búsqueda solo con el Título limpio
+    if (!bestMatch) {
+      bestMatch = await queryLrclibSearch(cleanTrack);
+    }
+
+    // Si se encontró coincidencia directa en cualquiera de los pases:
+    if (bestMatch && (bestMatch.syncedLyrics || bestMatch.plainLyrics)) {
+      const rawLrc = bestMatch.syncedLyrics || null;
+      const parsed = rawLrc ? parseLrc(rawLrc) : null;
+      return await postProcessLyricsResult({
+        source: "lrclib-direct",
+        track: bestMatch.trackName || cleanTrack,
+        artist: bestMatch.artistName || cleanArtist || "Artista Desconocido",
+        album: bestMatch.albumName || album || undefined,
+        plainLyrics: bestMatch.plainLyrics || "",
+        syncedLyrics: parsed && parsed.length > 0 ? parsed : null,
+        rawLrc,
+        instrumental: Boolean(bestMatch.instrumental),
+      });
     }
   } catch (directErr: unknown) {
     const errLog = directErr instanceof Error ? directErr.message : String(directErr);
@@ -1063,7 +1141,7 @@ export async function searchLyricsOnline(
 
   // 2. Respaldo a través del servidor API (/api/lyrics/search)
   try {
-    const response = await fetch("/api/lyrics/search", {
+    let response = await fetch("/api/lyrics/search", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1076,6 +1154,22 @@ export async function searchLyricsOnline(
       }),
     });
 
+    // Si el backend no encontró y había artista, probar invertido en el backend
+    if (!response.ok && cleanArtist) {
+      response = await fetch("/api/lyrics/search", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          track: cleanArtist,
+          artist: cleanTrack,
+          album,
+          duration,
+        }),
+      });
+    }
+
     if (!response.ok) {
       throw new Error(`Error en servidor: ${response.status}`);
     }
@@ -1087,7 +1181,7 @@ export async function searchLyricsOnline(
     return await postProcessLyricsResult({
       source: data.source || "lrclib",
       track: data.track || cleanTrack,
-      artist: data.artist || cleanArtist,
+      artist: data.artist || cleanArtist || "Artista Desconocido",
       album: data.album || undefined,
       plainLyrics: data.plainLyrics || "",
       syncedLyrics: synced && synced.length > 0 ? synced : null,

@@ -107,6 +107,13 @@ class AudioEngine {
         this.ctx = new AudioContextClass();
       }
 
+      // Reanudar automáticamente si el sistema suspende el contexto de audio durante el apagado de pantalla
+      this.ctx.onstatechange = () => {
+        if (this.ctx && this.ctx.state === "suspended" && this.isAudioPlaying) {
+          this.ctx.resume().catch(() => {});
+        }
+      };
+
       // Si el contexto fue suspendido por falta de interacción del usuario, reanudar en el primer toque
       if (this.ctx.state === "suspended") {
         const resume = () => {
@@ -175,7 +182,7 @@ class AudioEngine {
    */
   public resumeContext() {
     if (this.ctx && this.ctx.state === "suspended") {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => {});
     }
   }
 

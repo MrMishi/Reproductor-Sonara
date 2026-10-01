@@ -200,11 +200,11 @@ export const ID3EditorModal: React.FC<ID3EditorModalProps> = ({
 
           {/* Campos de texto */}
           <div className="flex flex-col gap-3">
-            {/* Título */}
+            {/* Título de la Canción */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-bold uppercase tracking-wider opacity-70 flex items-center gap-1.5">
-                  <Music className="w-3.5 h-3.5 text-purple-400" /> Título de la canción *
+                  <Music className="w-3.5 h-3.5 text-purple-400" /> Nombre de la Canción (Título) *
                 </label>
                 <button
                   type="button"
@@ -214,11 +214,11 @@ export const ID3EditorModal: React.FC<ID3EditorModalProps> = ({
                     setTitle(artist);
                     setArtist(temp);
                   }}
-                  title="Intercambiar Título y Artista"
-                  className="text-[11px] font-mono text-fuchsia-400 hover:text-fuchsia-300 flex items-center gap-1 px-2 py-0.5 rounded-lg bg-fuchsia-500/10 hover:bg-fuchsia-500/20 transition-all cursor-pointer"
+                  title="Intercambiar Nombre de Canción y Cantante si están al revés"
+                  className="text-[11px] font-mono text-violet-300 hover:text-white flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 transition-all cursor-pointer shadow-sm active:scale-95"
                 >
-                  <ArrowUpDown className="w-3 h-3" />
-                  <span>Intercambiar con Artista</span>
+                  <ArrowUpDown className="w-3 h-3 text-violet-400" />
+                  <span>Invertir Canción / Cantante</span>
                 </button>
               </div>
               <input
@@ -227,7 +227,7 @@ export const ID3EditorModal: React.FC<ID3EditorModalProps> = ({
                 required
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ej. Bohemian Rhapsody"
+                placeholder="Ej. Bohemian Rhapsody, Blinding Lights..."
                 className="w-full px-3.5 py-2 rounded-xl text-sm border bg-black/30 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
                 style={{
                   borderColor: "var(--color-border-subtle)",
@@ -236,10 +236,10 @@ export const ID3EditorModal: React.FC<ID3EditorModalProps> = ({
               />
             </div>
 
-            {/* Artista */}
+            {/* Cantante / Artista */}
             <div>
               <label className="text-xs font-bold uppercase tracking-wider opacity-70 mb-1 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-cyan-400" /> Artista (ID3) *
+                <User className="w-3.5 h-3.5 text-cyan-400" /> Cantante / Artista *
               </label>
               <input
                 id="id3-input-artist"
@@ -247,7 +247,7 @@ export const ID3EditorModal: React.FC<ID3EditorModalProps> = ({
                 required
                 value={artist}
                 onChange={(e) => setArtist(e.target.value)}
-                placeholder="Ej. Queen"
+                placeholder="Ej. Queen, The Weeknd, Luis Fonsi..."
                 className="w-full px-3.5 py-2 rounded-xl text-sm border bg-black/30 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
                 style={{
                   borderColor: "var(--color-border-subtle)",

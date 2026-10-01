@@ -20,7 +20,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { X, Search, FileText, Check, Loader2, Globe, Sparkles, Trash2 } from "lucide-react";
+import { X, Search, FileText, Check, Loader2, Globe, Sparkles, Trash2, ArrowUpDown } from "lucide-react";
 import { Track } from "../types";
 import { searchLyricsOnline, LyricsResult } from "../services/lyricsService";
 
@@ -28,7 +28,13 @@ interface LyricsSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   track: Track | null;
-  onLyricsApplied: (trackId: string, lyrics: Track["lyrics"], detectedAlbum?: string) => void;
+  onLyricsApplied: (
+    trackId: string,
+    lyrics: Track["lyrics"],
+    detectedAlbum?: string,
+    newTitle?: string,
+    newArtist?: string
+  ) => void;
   onLyricsRemoved?: (trackId: string) => void;
 }
 
@@ -86,11 +92,20 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
   };
 
   const handleApply = () => {
+    const finalTitle = songTitle.trim() || track.title;
+    const finalArtist = songArtist.trim() || track.artist;
+
     if (isEditingCustom) {
-      onLyricsApplied(track.id, {
-        plain: customText,
-        source: "Personalizada por el usuario",
-      });
+      onLyricsApplied(
+        track.id,
+        {
+          plain: customText,
+          source: "Personalizada por el usuario",
+        },
+        undefined,
+        finalTitle,
+        finalArtist
+      );
     } else if (result) {
       onLyricsApplied(
         track.id,
@@ -107,13 +122,21 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
               ? "Google Gemini AI"
               : "Web Lyrics",
         },
-        result.album || undefined
+        result.album || undefined,
+        finalTitle,
+        finalArtist
       );
     } else if (customText) {
-      onLyricsApplied(track.id, {
-        plain: customText,
-        source: "Manual",
-      });
+      onLyricsApplied(
+        track.id,
+        {
+          plain: customText,
+          source: "Manual",
+        },
+        undefined,
+        finalTitle,
+        finalArtist
+      );
     }
     onClose();
   };
@@ -146,7 +169,7 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
             <div>
               <h2 className="text-xl font-bold tracking-tight">Buscar Letras en Internet</h2>
               <p className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
-                Encuentra letras sincronizadas y versos oficiales para "{track.title}"
+                Encuentra letras sincronizadas y versos oficiales para "{songTitle || track.title}"
               </p>
             </div>
           </div>
@@ -163,10 +186,31 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
 
         {/* Search Form */}
         <form onSubmit={handleSearch} className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider opacity-70">
+              Datos de la canción
+            </span>
+            {/* Botón para Invertir Título y Cantante */}
+            <button
+              type="button"
+              id="lyrics-swap-title-artist-btn"
+              onClick={() => {
+                const temp = songTitle;
+                setSongTitle(songArtist);
+                setSongArtist(temp);
+              }}
+              title="Intercambiar Canción y Cantante si están al revés"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-semibold bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 hover:text-white border border-violet-500/30 transition-all cursor-pointer shadow-sm active:scale-95"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5 text-violet-400" />
+              <span>Invertir Canción y Cantante</span>
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
-                Título de la canción:
+                Nombre de la Canción (Título):
               </label>
               <input
                 id="lyrics-search-input-title"
@@ -185,7 +229,7 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold" style={{ color: "var(--color-text-secondary)" }}>
-                Artista (recomendado):
+                Nombre del Cantante / Artista:
               </label>
               <input
                 id="lyrics-search-input-artist"
@@ -270,9 +314,22 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
             }}
           >
             <div className="flex items-center justify-between border-b pb-2 sticky top-0 bg-neutral-900/90 backdrop-blur-sm z-10">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold">{result.track}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-white">{result.track}</span>
                 {result.artist && <span className="text-xs opacity-60">· {result.artist}</span>}
+                {(result.track !== songTitle || result.artist !== songArtist) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (result.track) setSongTitle(result.track);
+                      if (result.artist) setSongArtist(result.artist);
+                    }}
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-violet-600/30 hover:bg-violet-600/40 text-violet-300 border border-violet-500/30 cursor-pointer transition-colors"
+                    title="Asignar estos nombres oficiales a la canción"
+                  >
+                    Usar estos nombres oficiales
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {result.syncedLyrics && result.syncedLyrics.length > 0 && (

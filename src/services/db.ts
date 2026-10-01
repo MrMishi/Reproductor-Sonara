@@ -436,14 +436,12 @@ export async function loadTracksFromDB(): Promise<Track[]> {
                   const pTLower = parsedTitle.trim().toLowerCase();
                   const pALower = parsedArtist.trim().toLowerCase();
 
-                  // 1. Si la pista almacenada previamente tenía invertido el título y el artista (cantante en título y música en artista)
-                  const wasInverted = (tLower === pALower && aLower === pTLower);
-                  // 2. Si el título almacenado era el nombre de archivo completo en bruto sin separar
+                  // 1. Si el título almacenado era el nombre de archivo completo en bruto sin separar
                   const wasRawName = item.title === rawFileName || item.title === decodedName || item.title === decodedName.replace(/\.[^/.]+$/, "");
-                  // 3. Si el artista estaba como desconocido pero el nombre de archivo contiene el artista
+                  // 2. Si el artista estaba como desconocido pero el nombre de archivo contiene el artista
                   const hadUnknownArtist = (!item.artist || aLower.includes("desconocido") || aLower === "") && parsedArtist !== "Artista Desconocido";
 
-                  if (wasInverted || wasRawName || hadUnknownArtist) {
+                  if (wasRawName || hadUnknownArtist) {
                     trackTitle = parsedTitle;
                     trackArtist = parsedArtist;
                     item.title = parsedTitle;
