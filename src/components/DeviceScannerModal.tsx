@@ -639,12 +639,7 @@ export const DeviceScannerModal: React.FC<DeviceScannerModalProps> = ({
     const isNative = Capacitor.isNativePlatform();
 
     if (!isNative) {
-      setIsScanning(true);
-      setStatusType("info");
-      setProgressStatus("El escaneo nativo directo se ejecuta en Android con Capacitor. Abriendo selector de carpetas...");
-      setTimeout(() => {
-        handleScanDeviceDirectory();
-      }, 600);
+      handleScanDeviceDirectory();
       return;
     }
 

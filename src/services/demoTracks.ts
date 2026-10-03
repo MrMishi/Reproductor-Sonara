@@ -250,6 +250,52 @@ async function synthesizeSong(
   return URL.createObjectURL(wavBlob);
 }
 
+// Caché en memoria para URLs de audio demo activas en esta sesión
+const activeDemoUrls = new Map<string, string>();
+
+/**
+ * Función: getFreshDemoAudioUrl
+ * Propósito: Retorna o genera bajo demanda la URL de audio WAV sintetizada
+ * para una pista de demostración específica si la URL anterior expiró.
+ */
+export async function getFreshDemoAudioUrl(trackId: string): Promise<string> {
+  if (activeDemoUrls.has(trackId)) {
+    return activeDemoUrls.get(trackId)!;
+  }
+  let url = "";
+  if (trackId === "demo-neon-nights") {
+    url = await synthesizeSong("synthwave", 120, 48);
+  } else if (trackId === "demo-lofi-coffee") {
+    url = await synthesizeSong("lofi", 85, 52);
+  } else {
+    url = await synthesizeSong("acoustic", 95, 45);
+  }
+  activeDemoUrls.set(trackId, url);
+  return url;
+}
+
+/**
+ * Función: ensureDemoTracksPlayable
+ * Propósito: Revisa las pistas cargadas desde IndexedDB en entorno web.
+ * Si alguna es una pista demo y su blob URL expiró en una sesión anterior,
+ * le regenera de inmediato una URL de audio fresca para que se pueda reproducir al 100%.
+ */
+export async function ensureDemoTracksPlayable(tracks: Track[]): Promise<Track[]> {
+  const updated = await Promise.all(
+    tracks.map(async (t) => {
+      if (t.id.startsWith("demo-") || t.id.startsWith("demo_")) {
+        const freshUrl = await getFreshDemoAudioUrl(t.id);
+        return {
+          ...t,
+          url: freshUrl,
+        };
+      }
+      return t;
+    })
+  );
+  return updated;
+}
+
 /**
  * Función: getInitialDemoTracks
  * Propósito: Proporciona las canciones iniciales de prueba con portadas, audio y letras sincronizadas.
@@ -267,6 +313,10 @@ export async function getInitialDemoTracks(): Promise<Track[]> {
       synthesizeSong("lofi", 85, 52),
       synthesizeSong("acoustic", 95, 45),
     ]);
+
+    activeDemoUrls.set("demo-neon-nights", url1);
+    activeDemoUrls.set("demo-lofi-coffee", url2);
+    activeDemoUrls.set("demo-sunset-groove", url3);
 
     const track1: Track = {
       id: "demo-neon-nights",

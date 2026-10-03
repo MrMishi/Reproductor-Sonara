@@ -16,15 +16,30 @@
  * 4. Caché en memoria para evitar llamadas redundantes de red para la misma pista.
  */
 
-import { getCoverFromCache, saveCoverToFile } from "./coverStorageService";
+import { getCoverFromCache, saveCoverToFile, isCoverExplicitlyRemoved } from "./coverStorageService";
 
 // Caché en memoria para búsquedas recientes de la sesión activa
 const coverCache = new Map<string, string | null>();
 
 /**
+ * Interfaz para los resultados visuales de selección de carátulas (Estilo Poweramp)
+ */
+export interface CandidateCover {
+  id: string;
+  url: string;
+  thumbnailUrl: string;
+  title: string;
+  artist: string;
+  album: string;
+  source: string;
+  resolution: string;
+  year?: string;
+}
+
+/**
  * Limpia el título y artista para maximizar la probabilidad de acierto en APIs públicas
  */
-function cleanQueryTerm(term: string): string {
+export function cleanQueryTerm(term: string): string {
   if (!term) return "";
   return term
     .replace(/\.[a-zA-Z0-9]{2,4}$/, "") // Quitar extensión .mp3, .flac, etc.
@@ -35,15 +50,21 @@ function cleanQueryTerm(term: string): string {
 
 /**
  * Busca y obtiene la URL de la carátula en línea para una canción dada su artista y título.
- * 1. Consulta primero el archivo persistente sonora_covers.json. Si ya existe, retorna en 0ms sin internet.
- * 2. Si no existe, consulta Deezer e iTunes.
- * 3. Al encontrarla, la guarda permanentemente en sonora_covers.json.
+ * 1. Verifica si fue eliminada explícitamente por el usuario (si fue eliminada, no sobreescribe).
+ * 2. Consulta primero el archivo persistente sonora_covers.json. Si ya existe, retorna en 0ms sin internet.
+ * 3. Si no existe, consulta Deezer e iTunes.
+ * 4. Al encontrarla, la guarda permanentemente en sonora_covers.json.
  */
 export async function buscarYObtenerCaratula(artist: string, title: string, fileName?: string): Promise<string | null> {
   const cleanArtist = cleanQueryTerm(artist);
   const cleanTitle = cleanQueryTerm(title);
 
   if (!cleanTitle && !cleanArtist) {
+    return null;
+  }
+
+  // Si el usuario eliminó expresamente la carátula de esta canción, no buscar automáticamente
+  if (isCoverExplicitlyRemoved(artist, title)) {
     return null;
   }
 
@@ -121,4 +142,181 @@ export async function buscarYObtenerCaratula(artist: string, title: string, file
   // Si no se encontró en ninguno, guardamos null en caché para evitar reintentos continuos
   coverCache.set(cacheKey, null);
   return null;
+}
+
+/**
+ * Función: buscarMultiplesCaratulas (Selector estilo Poweramp)
+ * Propósito: Busca y devuelve una lista de carátulas candidatas en alta resolución (600x600)
+ * para que el usuario pueda ver todas las opciones en pantalla y elegir la portada exacta deseada.
+ */
+export async function buscarMultiplesCaratulas(
+  artist: string,
+  title: string,
+  customQuery?: string
+): Promise<CandidateCover[]> {
+  const cleanA = cleanQueryTerm(artist);
+  const cleanT = cleanQueryTerm(title);
+  
+  // Construir término de búsqueda efectivo
+  let searchTerm = "";
+  if (customQuery && customQuery.trim().length > 0) {
+    searchTerm = customQuery.trim();
+  } else if (cleanA && cleanT) {
+    searchTerm = `${cleanA} ${cleanT}`;
+  } else {
+    searchTerm = cleanT || cleanA || "";
+  }
+
+  if (!searchTerm) {
+    return [];
+  }
+
+  const resultsMap = new Map<string, CandidateCover>();
+
+  // 1. Intento principal: Servidor Backend Proxy (/api/covers/search) - Sin bloqueos CORS
+  try {
+    const proxyRes = await fetch(`/api/covers/search?q=${encodeURIComponent(searchTerm)}`);
+    if (proxyRes.ok) {
+      const pData = await proxyRes.json();
+      if (pData && Array.isArray(pData.results) && pData.results.length > 0) {
+        for (const item of pData.results) {
+          if (item && item.url && !resultsMap.has(item.url)) {
+            resultsMap.set(item.url, item);
+          }
+        }
+      }
+    }
+  } catch (_proxyErr) {
+    // Si no está disponible el proxy, continuar a consultas directas
+  }
+
+  // 2. Consulta directa a iTunes (Canciones y Álbumes con soporte CORS total)
+  if (resultsMap.size === 0) {
+    try {
+      const encodedTerm = encodeURIComponent(searchTerm);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6500);
+
+      const [songsRes, albumsRes] = await Promise.allSettled([
+        fetch(`https://itunes.apple.com/search?term=${encodedTerm}&entity=song&limit=30`, {
+          signal: controller.signal,
+        }),
+        fetch(`https://itunes.apple.com/search?term=${encodedTerm}&entity=album&limit=20`, {
+          signal: controller.signal,
+        }),
+      ]);
+      clearTimeout(timeoutId);
+
+      // Procesar canciones de iTunes
+      if (songsRes.status === "fulfilled" && songsRes.value.ok) {
+        const data = await songsRes.value.json();
+        if (data && Array.isArray(data.results)) {
+          for (const item of data.results) {
+            const rawArt = item.artworkUrl100 || item.artworkUrl60;
+            if (!rawArt) continue;
+
+            const highRes = rawArt.replace(/100x100bb\.(jpg|png|webp)/i, "600x600bb.$1");
+            const thumb = rawArt.replace(/100x100bb\.(jpg|png|webp)/i, "240x240bb.$1");
+
+            if (!resultsMap.has(highRes)) {
+              resultsMap.set(highRes, {
+                id: `itunes-track-${item.trackId || Math.random().toString(36).substring(7)}`,
+                url: highRes,
+                thumbnailUrl: thumb,
+                title: item.trackName || item.collectionName || searchTerm,
+                artist: item.artistName || "Desconocido",
+                album: item.collectionName || item.collectionCensoredName || "Sencillo / Álbum",
+                source: "iTunes / Apple Music",
+                resolution: "600 × 600",
+                year: item.releaseDate ? item.releaseDate.slice(0, 4) : undefined,
+              });
+            }
+          }
+        }
+      }
+
+      // Procesar álbumes de iTunes
+      if (albumsRes.status === "fulfilled" && albumsRes.value.ok) {
+        const data = await albumsRes.value.json();
+        if (data && Array.isArray(data.results)) {
+          for (const item of data.results) {
+            const rawArt = item.artworkUrl100 || item.artworkUrl60;
+            if (!rawArt) continue;
+
+            const highRes = rawArt.replace(/100x100bb\.(jpg|png|webp)/i, "600x600bb.$1");
+            const thumb = rawArt.replace(/100x100bb\.(jpg|png|webp)/i, "240x240bb.$1");
+
+            if (!resultsMap.has(highRes)) {
+              resultsMap.set(highRes, {
+                id: `itunes-album-${item.collectionId || Math.random().toString(36).substring(7)}`,
+                url: highRes,
+                thumbnailUrl: thumb,
+                title: item.collectionName || item.collectionCensoredName || searchTerm,
+                artist: item.artistName || "Desconocido",
+                album: item.collectionName || "Álbum",
+                source: "iTunes / Apple Music",
+                resolution: "600 × 600",
+                year: item.releaseDate ? item.releaseDate.slice(0, 4) : undefined,
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[coverService] Error buscando carátulas en iTunes:", err);
+    }
+  }
+
+  // 2. Búsqueda en Deezer como fuente adicional
+  try {
+    const encodedDeezer = encodeURIComponent(searchTerm);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const deezerRes = await fetch(`https://api.deezer.com/search?q=${encodedDeezer}&limit=15`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (deezerRes.ok) {
+      const data = await deezerRes.json();
+      if (data && Array.isArray(data.data)) {
+        for (const item of data.data) {
+          if (!item.album) continue;
+          const coverUrl =
+            item.album.cover_xl || item.album.cover_big || item.album.cover_medium || item.album.cover;
+          if (!coverUrl || resultsMap.has(coverUrl)) continue;
+
+          resultsMap.set(coverUrl, {
+            id: `deezer-${item.id || Math.random().toString(36).substring(7)}`,
+            url: coverUrl,
+            thumbnailUrl: item.album.cover_medium || coverUrl,
+            title: item.title || searchTerm,
+            artist: item.artist?.name || "Desconocido",
+            album: item.album.title || "Álbum",
+            source: "Deezer",
+            resolution: "HD (1000 × 1000)",
+          });
+        }
+      }
+    }
+  } catch (_deezerErr) {
+    // Deezer puede bloquear CORS en navegadores, se omite silenciosamente
+  }
+
+  const allResults = Array.from(resultsMap.values());
+
+  // Priorizar resultados que coincidan de manera más exacta con el artista buscado
+  if (cleanA) {
+    const lowerArtist = cleanA.toLowerCase();
+    allResults.sort((a, b) => {
+      const aMatches = a.artist.toLowerCase().includes(lowerArtist);
+      const bMatches = b.artist.toLowerCase().includes(lowerArtist);
+      if (aMatches && !bMatches) return -1;
+      if (!aMatches && bMatches) return 1;
+      return 0;
+    });
+  }
+
+  return allResults;
 }

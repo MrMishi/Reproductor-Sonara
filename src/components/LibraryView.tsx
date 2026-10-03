@@ -49,6 +49,19 @@ import { TrackList } from "./TrackList";
 const STORAGE_KEY_SORT_BY = "sonora_library_sort_by";
 const STORAGE_KEY_SORT_DIR = "sonora_library_sort_direction";
 
+// Instancia única y compartida de Collator para ordenamiento ultra-rápido sin crear instancias en bucle
+const standardCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
+// Función de normalización de cadenas de búsqueda estilo Lark Player / Poweramp
+// Remueve acentos, tildes (á->a, é->e, etc.), caracteres diacríticos y pasa a minúsculas
+function normalizeSearchText(str: string): string {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 interface SortConfigOption {
   id: LibrarySortOption;
   label: string;
@@ -243,33 +256,86 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
     } catch {}
   };
 
-  // Filtrar según búsqueda inteligente y profunda (Título, Artista ID3, Álbum, Nombre de archivo .mp3 y Carpetas)
-  const filteredTracks = useMemo(() => {
-    if (!searchQuery.trim()) return tracks;
-    const q = searchQuery.toLowerCase().trim();
-    const terms = q.split(/\s+/).filter(Boolean);
+  // Índice de búsqueda optimizado estilo Lark Player / Poweramp:
+  // Pre-normaliza título, artista, álbum, archivo y ruta en minúsculas y sin acentos.
+  // Se calcula únicamente cuando la colección de pistas cambia, nunca en cada pulsación.
+  const indexedTracks = useMemo(() => {
+    return tracks.map((t) => {
+      const rawFileName = t.fileName || t.file?.name || (t.url ? t.url.split("/").pop() : "") || "";
+      const normTitle = normalizeSearchText(t.title || "");
+      const normArtist = normalizeSearchText(t.artist || "");
+      const normAlbum = normalizeSearchText(t.album || "");
+      const normFile = normalizeSearchText(rawFileName);
+      const normFolder = normalizeSearchText(t.folderPath || "");
+      const fullSearchKey = `${normTitle} ${normArtist} ${normAlbum} ${normFile} ${normFolder}`;
 
-    return tracks.filter((t) => {
-      const title = (t.title || "").toLowerCase();
-      const artist = (t.artist || "").toLowerCase();
-      const album = (t.album || "").toLowerCase();
-      const fileName = (t.fileName || t.file?.name || (t.url ? t.url.split("/").pop() : "") || "").toLowerCase();
-      const folder = (t.folderPath || "").toLowerCase();
-
-      // Debe coincidir cada término de búsqueda simultáneamente en cualquiera de las propiedades ID3 / archivo
-      return terms.every(
-        (term) =>
-          title.includes(term) ||
-          artist.includes(term) ||
-          album.includes(term) ||
-          fileName.includes(term) ||
-          folder.includes(term)
-      );
+      return {
+        track: t,
+        normTitle,
+        normArtist,
+        normAlbum,
+        fullSearchKey,
+      };
     });
-  }, [tracks, searchQuery]);
+  }, [tracks]);
 
-  // 1. Agrupación por Artista
+  // Filtrar según búsqueda inteligente, instantánea y tolerante a tildes estilo Lark Player
+  const filteredTracks = useMemo(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return tracks;
+
+    const normQuery = normalizeSearchText(trimmed);
+    const terms = normQuery.split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return tracks;
+
+    // Recorrido de alto rendimiento en un solo pase O(N) sin crear cadenas temporales
+    const matchesWithScore: { track: Track; score: number }[] = [];
+
+    for (let i = 0; i < indexedTracks.length; i++) {
+      const item = indexedTracks[i];
+      let allMatched = true;
+
+      for (let j = 0; j < terms.length; j++) {
+        if (!item.fullSearchKey.includes(terms[j])) {
+          allMatched = false;
+          break;
+        }
+      }
+
+      if (allMatched) {
+        // Puntuación de relevancia estilo Lark Player:
+        // Prioriza si el título o artista empieza con el término buscado
+        let score = 0;
+        if (item.normTitle.startsWith(normQuery)) score += 100;
+        else if (item.normTitle.includes(normQuery)) score += 50;
+
+        if (item.normArtist.startsWith(normQuery)) score += 80;
+        else if (item.normArtist.includes(normQuery)) score += 40;
+
+        matchesWithScore.push({ track: item.track, score });
+      }
+    }
+
+    matchesWithScore.sort((a, b) => b.score - a.score);
+    return matchesWithScore.map((m) => m.track);
+  }, [tracks, indexedTracks, searchQuery]);
+
+  // Estadísticas globales de biblioteca (Artistas y Álbumes) calculadas únicamente cuando cambia `tracks`
+  // Evita re-calcular Maps y bucles en cada tecla escrita
+  const totalStats = useMemo(() => {
+    const artSet = new Set<string>();
+    const albSet = new Set<string>();
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      if (t.artist && t.artist.trim()) artSet.add(t.artist.trim());
+      if (t.album && t.album.trim()) albSet.add(`${t.album.trim()}:::${t.artist || ""}`);
+    }
+    return { artists: artSet.size, albums: albSet.size };
+  }, [tracks]);
+
+  // 1. Agrupación por Artista (Calculado únicamente si la pestaña 'artists' está activa)
   const artistsMap = useMemo(() => {
+    if (activeSection !== "artists") return [];
     const map = new Map<string, { artist: string; tracks: Track[]; coverUrl?: string }>();
     filteredTracks.forEach((t) => {
       const art = t.artist && t.artist.trim() ? t.artist.trim() : "Artista Desconocido";
@@ -282,11 +348,12 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
         entry.coverUrl = t.coverUrl;
       }
     });
-    return Array.from(map.values()).sort((a, b) => a.artist.localeCompare(b.artist));
-  }, [filteredTracks]);
+    return Array.from(map.values()).sort((a, b) => standardCollator.compare(a.artist, b.artist));
+  }, [filteredTracks, activeSection]);
 
-  // 2. Agrupación por Álbum
+  // 2. Agrupación por Álbum (Calculado únicamente si la pestaña 'albums' está activa)
   const albumsMap = useMemo(() => {
+    if (activeSection !== "albums") return [];
     const map = new Map<
       string,
       { album: string; artist: string; tracks: Track[]; coverUrl?: string; year?: string }
@@ -309,11 +376,12 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
         entry.coverUrl = t.coverUrl;
       }
     });
-    return Array.from(map.values()).sort((a, b) => a.album.localeCompare(b.album));
-  }, [filteredTracks]);
+    return Array.from(map.values()).sort((a, b) => standardCollator.compare(a.album, b.album));
+  }, [filteredTracks, activeSection]);
 
-  // 3. Agrupación por Carpetas del Dispositivo
+  // 3. Agrupación por Carpetas del Dispositivo (Calculado únicamente si la pestaña 'folders' está activa)
   const foldersMap = useMemo(() => {
+    if (activeSection !== "folders") return [];
     const map = new Map<string, { folderName: string; path: string; tracks: Track[] }>();
     filteredTracks.forEach((t) => {
       let path = t.folderPath;
@@ -333,8 +401,8 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       }
       map.get(finalPath)!.tracks.push(t);
     });
-    return Array.from(map.values()).sort((a, b) => a.path.localeCompare(b.path));
-  }, [filteredTracks]);
+    return Array.from(map.values()).sort((a, b) => standardCollator.compare(a.path, b.path));
+  }, [filteredTracks, activeSection]);
 
   // Función para reproducir la primera canción de una lista
   const handlePlayGroup = (groupTracks: Track[]) => {
@@ -370,6 +438,11 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
 
   // Canciones filtradas y ordenadas según la preferencia del usuario (Nombre, Artista, Fecha, Duración)
   const sortedTracks = useMemo(() => {
+    // Si hay una búsqueda activa, filteredTracks ya viene ordenado por relevancia de búsqueda estilo Lark Player
+    if (searchQuery.trim()) {
+      return filteredTracks;
+    }
+
     const list = [...filteredTracks];
     const isAsc = sortDirection === "asc";
 
@@ -378,23 +451,14 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
 
       switch (sortBy) {
         case "title":
-          comparison = (a.title || "").localeCompare(b.title || "", undefined, {
-            sensitivity: "base",
-            numeric: true,
-          });
+          comparison = standardCollator.compare(a.title || "", b.title || "");
           break;
         case "artist": {
           const artA = a.artist || "Artista Desconocido";
           const artB = b.artist || "Artista Desconocido";
-          comparison = artA.localeCompare(artB, undefined, {
-            sensitivity: "base",
-            numeric: true,
-          });
+          comparison = standardCollator.compare(artA, artB);
           if (comparison === 0) {
-            comparison = (a.title || "").localeCompare(b.title || "", undefined, {
-              sensitivity: "base",
-              numeric: true,
-            });
+            comparison = standardCollator.compare(a.title || "", b.title || "");
           }
           break;
         }
@@ -410,7 +474,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
     });
 
     return list;
-  }, [filteredTracks, sortBy, sortDirection]);
+  }, [filteredTracks, sortBy, sortDirection, searchQuery]);
 
   // Canciones de la vista en detalle ordenadas
   const sortedDetailTracks = useMemo(() => {
@@ -421,16 +485,10 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       let comparison = 0;
       switch (sortBy) {
         case "title":
-          comparison = (a.title || "").localeCompare(b.title || "", undefined, {
-            sensitivity: "base",
-            numeric: true,
-          });
+          comparison = standardCollator.compare(a.title || "", b.title || "");
           break;
         case "artist":
-          comparison = (a.artist || "").localeCompare(b.artist || "", undefined, {
-            sensitivity: "base",
-            numeric: true,
-          });
+          comparison = standardCollator.compare(a.artist || "", b.artist || "");
           break;
         case "addedAt":
           comparison = (a.addedAt || 0) - (b.addedAt || 0);
@@ -603,14 +661,17 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
             {isFavoritesView && <Heart className="w-5 h-5 text-red-500 fill-red-500" />}
           </div>
           <p className="text-xs opacity-65 mt-1 font-medium" style={{ color: "var(--color-text-secondary)" }}>
-            {tracks.length} {tracks.length === 1 ? "canción" : "canciones"} · {artistsMap.length} artistas ·{" "}
-            {albumsMap.length} álbumes
+            {searchQuery ? (
+              `${filteredTracks.length} ${filteredTracks.length === 1 ? "canción encontrada" : "canciones encontradas"}`
+            ) : (
+              `${tracks.length} ${tracks.length === 1 ? "canción" : "canciones"} · ${totalStats.artists} artistas · ${totalStats.albums} álbumes`
+            )}
           </p>
         </div>
       </div>
 
       {/* Pestañas / Filtros Superiores de Biblioteca: Pequeñas, Limpias y Minimalistas */}
-      {!selectedArtist && !selectedAlbum && !selectedFolder && (
+      {((!selectedArtist && !selectedAlbum && !selectedFolder) || searchQuery.trim()) && (
         <div className="flex flex-wrap items-center justify-between gap-3 select-none">
           <div className="flex items-center gap-1 sm:gap-2 p-1 rounded-full bg-white/[0.04] border border-white/5 max-w-fit select-none">
             <button
@@ -672,7 +733,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       )}
 
       {/* Vista en detalle cuando se hace clic en un Artista, Álbum o Carpeta */}
-      {(selectedArtist || selectedAlbum || selectedFolder) && (
+      {(selectedArtist || selectedAlbum || selectedFolder) && !searchQuery.trim() && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <button
@@ -757,7 +818,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {/* 1. SECCIÓN: CANCIONES (Lista General de Reproducción) */}
       {/* ========================================================================= */}
-      {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "songs" && (
+      {((!selectedArtist && !selectedAlbum && !selectedFolder) || Boolean(searchQuery.trim())) && activeSection === "songs" && (
         <TrackList
           tracks={sortedTracks}
           currentTrackId={currentTrackId}
@@ -779,7 +840,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {/* 2. SECCIÓN: ARTISTAS (Cuadrícula agrupada por Artista) */}
       {/* ========================================================================= */}
-      {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "artists" && (
+      {((!selectedArtist && !selectedAlbum && !selectedFolder) || Boolean(searchQuery.trim())) && activeSection === "artists" && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
           {artistsMap.map((entry) => (
             <div
@@ -832,7 +893,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {/* 3. SECCIÓN: ÁLBUMES (Cuadrícula agrupada por Álbum) */}
       {/* ========================================================================= */}
-      {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "albums" && (
+      {((!selectedArtist && !selectedAlbum && !selectedFolder) || Boolean(searchQuery.trim())) && activeSection === "albums" && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
           {albumsMap.map((entry) => (
             <div
@@ -889,7 +950,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {/* 4. SECCIÓN: CARPETAS (Directorios de Origen del Dispositivo) */}
       {/* ========================================================================= */}
-      {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "folders" && (
+      {((!selectedArtist && !selectedAlbum && !selectedFolder) || Boolean(searchQuery.trim())) && activeSection === "folders" && (
         <div className="flex flex-col gap-2">
           {foldersMap.map((entry) => (
             <div

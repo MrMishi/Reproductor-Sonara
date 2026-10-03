@@ -26,6 +26,11 @@ import { Capacitor } from "@capacitor/core";
 import { Track, HiddenTrackRecord, Playlist } from "../types";
 import { generateCoverArt, cleanFilename } from "./metadataParser";
 import { getCoverFromCache, saveCoverToFile } from "./coverStorageService";
+import {
+  saveLyricsToFile,
+  enrichTracksWithLyricsFromFile,
+  getLyricsFromCache,
+} from "./lyricsStorageService";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
 const DB_VERSION = 2; // Incrementar si se añaden nuevos ObjectStores
@@ -235,6 +240,19 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
         saveCoverToFile(track.artist, track.title, track.coverUrl, track.fileName || track.file?.name, track.id);
       }
 
+      // Si la pista tiene letras, garantizar respaldo permanente en sonora_lyrics.json
+      let finalLyrics = track.lyrics;
+      if (finalLyrics && (finalLyrics.plain || (finalLyrics.synced && finalLyrics.synced.length > 0))) {
+        saveLyricsToFile(track.artist, track.title, finalLyrics, track.fileName || track.file?.name, track.id);
+      } else {
+        // Si la pista no trae letras pero ya existían en el archivo permanente sonora_lyrics.json, recuperarlas
+        const cachedLyrics = getLyricsFromCache(track.artist, track.title, track.fileName || track.file?.name, track.id);
+        if (cachedLyrics) {
+          finalLyrics = cachedLyrics;
+          track.lyrics = cachedLyrics;
+        }
+      }
+
       const record: any = {
         id: track.id,
         title: track.title,
@@ -252,9 +270,10 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
         lastPlayedAt: track.lastPlayedAt,
         folderPath: track.folderPath,
         fileName: track.fileName || track.file?.name,
-        lyrics: track.lyrics,
+        lyrics: finalLyrics,
         nativePath: nativePath || track.nativePath,
         url: track.url,
+        file: track.file instanceof Blob ? track.file : undefined,
       };
 
       store.put(record);
@@ -345,6 +364,17 @@ export async function addSingleTrackToDB(track: Track): Promise<void> {
 
     const nativePath = track.nativePath || (track.url?.startsWith("file://") ? track.url : undefined);
 
+    let finalLyrics = track.lyrics;
+    if (finalLyrics && (finalLyrics.plain || (finalLyrics.synced && finalLyrics.synced.length > 0))) {
+      saveLyricsToFile(track.artist, track.title, finalLyrics, track.fileName || track.file?.name, track.id);
+    } else {
+      const cachedLyrics = getLyricsFromCache(track.artist, track.title, track.fileName || track.file?.name, track.id);
+      if (cachedLyrics) {
+        finalLyrics = cachedLyrics;
+        track.lyrics = cachedLyrics;
+      }
+    }
+
     const record: any = {
       id: track.id,
       title: track.title,
@@ -362,9 +392,10 @@ export async function addSingleTrackToDB(track: Track): Promise<void> {
       lastPlayedAt: track.lastPlayedAt,
       folderPath: track.folderPath,
       fileName: track.fileName || track.file?.name,
-      lyrics: track.lyrics,
+      lyrics: finalLyrics,
       nativePath: nativePath || track.nativePath,
       url: track.url,
+      file: track.file instanceof Blob ? track.file : undefined,
     };
 
     store.put(record);
@@ -414,6 +445,8 @@ export async function loadTracksFromDB(): Promise<Track[]> {
             finalUrl = Capacitor.convertFileSrc(nativePath);
           } else if (isNative && finalUrl && (finalUrl.startsWith("file://") || finalUrl.startsWith("/storage/"))) {
             finalUrl = Capacitor.convertFileSrc(finalUrl);
+          } else if (!isNative && item.file instanceof Blob) {
+            finalUrl = URL.createObjectURL(item.file);
           }
 
           if (finalUrl) {
@@ -487,13 +520,15 @@ export async function loadTracksFromDB(): Promise<Track[]> {
               lyrics: item.lyrics,
               folderPath: item.folderPath,
               fileName: item.fileName,
+              file: item.file instanceof Blob ? item.file : undefined,
             };
 
             loaded.push(trackObj);
           }
         }
 
-        resolve(loaded);
+        const enrichedWithLyrics = enrichTracksWithLyricsFromFile(loaded);
+        resolve(enrichedWithLyrics);
       };
       request.onerror = () => reject(request.error);
     });

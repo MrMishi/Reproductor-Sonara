@@ -62,6 +62,92 @@ app.get("/api/health", (_req, res) => {
 const serverLyricsCache = new Map<string, any>();
 
 /**
+ * ============================================================================
+ * ENDPOINT: /api/covers/search
+ * ============================================================================
+ * Propósito: Búsqueda centralizada de carátulas en iTunes y Deezer en alta resolución
+ * ejecutada en el servidor backend para evitar cualquier bloqueo de política CORS en el navegador.
+ */
+app.get("/api/covers/search", async (req, res) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  const query = ((req.query.q as string) || (req.query.term as string) || "").trim();
+  if (!query) {
+    res.json({ results: [] });
+    return;
+  }
+
+  const results: any[] = [];
+  const seenUrls = new Set<string>();
+
+  // 1. Consultar iTunes Search API
+  try {
+    const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=25`;
+    const itRes = await fetch(itunesUrl, { headers: { "User-Agent": "SonaraMusicPlayer/1.0" } });
+    if (itRes.ok) {
+      const itData: any = await itRes.json();
+      if (itData && Array.isArray(itData.results)) {
+        for (const item of itData.results) {
+          const rawArt = item.artworkUrl100 || item.artworkUrl60;
+          if (!rawArt) continue;
+          const highRes = rawArt.replace(/100x100bb\.(jpg|png|webp)/i, "600x600bb.$1");
+          const thumb = rawArt.replace(/100x100bb\.(jpg|png|webp)/i, "240x240bb.$1");
+          if (!seenUrls.has(highRes)) {
+            seenUrls.add(highRes);
+            results.push({
+              id: `itunes-${item.trackId || Math.random().toString(36).substring(7)}`,
+              url: highRes,
+              thumbnailUrl: thumb,
+              title: item.trackName || item.collectionName || query,
+              artist: item.artistName || "Desconocido",
+              album: item.collectionName || "Álbum",
+              source: "iTunes / Apple Music",
+              resolution: "600 × 600",
+              year: item.releaseDate ? item.releaseDate.slice(0, 4) : undefined,
+            });
+          }
+        }
+      }
+    }
+  } catch (itErr) {
+    console.warn("[Server Covers] Error en iTunes search:", itErr);
+  }
+
+  // 2. Consultar Deezer API (desde Node.js sin restricciones CORS)
+  try {
+    const deezerUrl = `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=15`;
+    const dzRes = await fetch(deezerUrl, { headers: { "User-Agent": "SonaraMusicPlayer/1.0" } });
+    if (dzRes.ok) {
+      const dzData: any = await dzRes.json();
+      if (dzData && Array.isArray(dzData.data)) {
+        for (const item of dzData.data) {
+          const album = item.album;
+          if (!album) continue;
+          const highRes = album.cover_xl || album.cover_big || album.cover_medium;
+          const thumb = album.cover_medium || album.cover_small || highRes;
+          if (highRes && !seenUrls.has(highRes)) {
+            seenUrls.add(highRes);
+            results.push({
+              id: `deezer-${item.id || Math.random().toString(36).substring(7)}`,
+              url: highRes,
+              thumbnailUrl: thumb,
+              title: item.title || query,
+              artist: item.artist?.name || "Desconocido",
+              album: album.title || "Álbum",
+              source: "Deezer Music",
+              resolution: "1000 × 1000",
+            });
+          }
+        }
+      }
+    }
+  } catch (dzErr) {
+    console.warn("[Server Covers] Error en Deezer search:", dzErr);
+  }
+
+  res.json({ results });
+});
+
+/**
  * Función: fetchGeminiLyrics
  * Propósito: Consulta a Gemini AI para transcribir la letra fiel de una canción.
  * ¿Cómo funciona?:

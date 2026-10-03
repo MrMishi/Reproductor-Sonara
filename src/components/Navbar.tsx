@@ -9,7 +9,7 @@
  * el conmutador a modo mini-reproductor Flotante.
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Search,
   Sliders,
@@ -85,6 +85,35 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
+
+  // Estado local para respuesta instantánea de escritura (0ms latencia)
+  const [localQuery, setLocalQuery] = useState(searchQuery);
+
+  // Sincronizar si el estado exterior cambia (por botón de retroceso o reseteo)
+  useEffect(() => {
+    setLocalQuery(searchQuery);
+  }, [searchQuery]);
+
+  // Debounce ultra-rápido de 120ms para filtrar biblioteca sin congelar el hilo principal estilo Lark Player
+  useEffect(() => {
+    if (localQuery === searchQuery) return;
+
+    if (!localQuery.trim()) {
+      onSearchChange("");
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      onSearchChange(localQuery);
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [localQuery, searchQuery, onSearchChange]);
+
+  const handleClearSearch = useCallback(() => {
+    setLocalQuery("");
+    onSearchChange("");
+  }, [onSearchChange]);
 
   // Close dropdowns when clicking or touching outside
   useEffect(() => {
@@ -180,17 +209,27 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
             <input
               id="navbar-search-input"
               type="text"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
+              value={localQuery}
+              onChange={(e) => setLocalQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  onSearchChange(localQuery);
+                } else if (e.key === "Escape") {
+                  handleClearSearch();
+                  (e.target as HTMLElement).blur();
+                }
+              }}
               placeholder="Buscar música, artistas..."
               className="w-full bg-transparent text-xs sm:text-sm pl-2 sm:pl-2.5 pr-1 sm:pr-2 focus:outline-none placeholder:opacity-50 min-w-0"
               style={{ color: "var(--color-text-primary)" }}
             />
-            {searchQuery && (
+            {localQuery && (
               <button
                 id="navbar-search-clear-btn"
-                onClick={() => onSearchChange("")}
-                className="p-1 rounded-full hover:bg-white/10 opacity-60 hover:opacity-100 shrink-0"
+                type="button"
+                onClick={handleClearSearch}
+                className="p-1 rounded-full hover:bg-white/10 opacity-60 hover:opacity-100 shrink-0 cursor-pointer"
+                title="Borrar búsqueda"
               >
                 <X className="w-3.5 h-3.5" />
               </button>

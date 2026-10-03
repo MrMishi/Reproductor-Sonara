@@ -51,9 +51,14 @@ import {
   FileText,
   Volume2,
   Sparkles,
-  Tag,
   Loader2,
   ArrowUpDown,
+  MoreVertical,
+  BarChart2,
+  Activity,
+  Disc3,
+  Check,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Track, PlaybackMode, SleepTimerConfig } from "../types";
 import {
@@ -88,6 +93,7 @@ export interface ExpandedPlayerProps {
   onHideTrack?: (track: Track) => void;
   onDeleteTracks?: (trackIds: string[]) => void;
   onOpenID3Editor?: (track: Track) => void;
+  onOpenCoverPicker?: (track: Track) => void;
   activeSubTab?: "cover" | "queue" | "lyrics" | "details";
   sleepTimer?: SleepTimerConfig;
   onOpenSleepTimer?: () => void;
@@ -126,6 +132,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   onHideTrack,
   onDeleteTracks,
   onOpenID3Editor,
+  onOpenCoverPicker,
   activeSubTab = "cover",
   sleepTimer,
   onOpenSleepTimer,
@@ -137,6 +144,23 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
     activeSubTab || "cover"
   );
   const [visualMode, setVisualMode] = useState<"cover" | "bars" | "wave" | "circle">("cover");
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState<boolean>(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Cerrar menú de 3 puntos al hacer clic fuera
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setIsMoreMenuOpen(false);
+      }
+    };
+    if (isMoreMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isMoreMenuOpen]);
 
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledLyricIndexRef = useRef<number>(-1);
@@ -546,35 +570,6 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
 
         {/* Right Header Actions */}
         <div className="flex items-center gap-1.5">
-          {/* Botón de Temporizador de Apagado (Símbolo 💤) */}
-          {onOpenSleepTimer && (
-            <button
-              id="expanded-sleep-timer-btn"
-              onClick={onOpenSleepTimer}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 text-xs font-semibold border ${
-                sleepTimer?.isActive
-                  ? "bg-indigo-500/25 text-indigo-200 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.35)] animate-pulse"
-                  : "hover:bg-white/10 text-neutral-300 hover:text-white border-white/10"
-              }`}
-              title={
-                sleepTimer?.isActive
-                  ? `Temporizador de apagado activo (${Math.floor(sleepTimer.remainingSeconds / 60)}m restantes)`
-                  : "Temporizador de apagado (Dormir)"
-              }
-              aria-label="Temporizador de apagado"
-            >
-              <span className="text-base leading-none select-none">💤</span>
-              {sleepTimer?.isActive ? (
-                <span className="font-mono text-[11px] font-bold text-indigo-300">
-                  {Math.floor(sleepTimer.remainingSeconds / 60)}:
-                  {(sleepTimer.remainingSeconds % 60).toString().padStart(2, "0")}
-                </span>
-              ) : (
-                <span className="hidden sm:inline">Dormir</span>
-              )}
-            </button>
-          )}
-
           {onToggleMiniMode && (
             <button
               id="expanded-mini-mode-btn"
@@ -683,53 +678,6 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
               )}
             </div>
 
-            {/* Selector de Modo Visual: Carátula | Barras | Ondas | Círculos */}
-            <div
-              className="flex items-center gap-1 p-1 rounded-full border bg-black/30 backdrop-blur-md mb-4 text-[11px]"
-              style={{ borderColor: "var(--color-border-subtle)" }}
-            >
-              <button
-                type="button"
-                id="visual-mode-cover-btn"
-                onClick={() => setVisualMode("cover")}
-                className={`px-3 py-1 rounded-full transition-all font-semibold cursor-pointer ${
-                  visualMode === "cover" ? "bg-white text-black shadow-sm" : "text-neutral-400 hover:text-white"
-                }`}
-              >
-                Carátula
-              </button>
-              <button
-                type="button"
-                id="visual-mode-bars-btn"
-                onClick={() => setVisualMode("bars")}
-                className={`px-3 py-1 rounded-full transition-all font-semibold cursor-pointer ${
-                  visualMode === "bars" ? "bg-white text-black shadow-sm" : "text-neutral-400 hover:text-white"
-                }`}
-              >
-                Barras
-              </button>
-              <button
-                type="button"
-                id="visual-mode-wave-btn"
-                onClick={() => setVisualMode("wave")}
-                className={`px-3 py-1 rounded-full transition-all font-semibold cursor-pointer ${
-                  visualMode === "wave" ? "bg-white text-black shadow-sm" : "text-neutral-400 hover:text-white"
-                }`}
-              >
-                Ondas
-              </button>
-              <button
-                type="button"
-                id="visual-mode-circle-btn"
-                onClick={() => setVisualMode("circle")}
-                className={`px-3 py-1 rounded-full transition-all font-semibold cursor-pointer ${
-                  visualMode === "circle" ? "bg-white text-black shadow-sm" : "text-neutral-400 hover:text-white"
-                }`}
-              >
-                Círculos
-              </button>
-            </div>
-
             {/* Track Info & Actions */}
             <div className="w-full flex items-center justify-between mb-4">
               <div className="min-w-0 pr-4 flex-1">
@@ -762,18 +710,6 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
-                {/* Toggle Visualizer / Cover Art */}
-                <button
-                  id="expanded-toggle-visual-btn"
-                  onClick={() => setVisualMode(visualMode === "cover" ? "spectrum" : "cover")}
-                  className={`p-3 rounded-full hover:bg-white/10 transition-all active:scale-90 ${
-                    visualMode === "spectrum" ? "text-red-400 bg-white/10" : "text-neutral-400 hover:text-white"
-                  }`}
-                  title={visualMode === "cover" ? "Ver Espectro de Audio" : "Ver Portada de Álbum"}
-                >
-                  <Music2 className="w-5 h-5" />
-                </button>
-
                 <button
                   id="expanded-like-btn"
                   onClick={() => onToggleFavorite(currentTrack.id)}
@@ -788,17 +724,6 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     }`}
                   />
                 </button>
-
-                {onOpenID3Editor && (
-                  <button
-                    id="expanded-edit-id3-btn"
-                    onClick={() => onOpenID3Editor(currentTrack)}
-                    className="p-3 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-transform active:scale-90"
-                    title="Editar etiquetas ID3 y carátula"
-                  >
-                    <Tag className="w-5 h-5 text-purple-400" />
-                  </button>
-                )}
 
                 {/* Botón de Temporizador de Apagado (Símbolo 💤) en barra de acciones */}
                 {onOpenSleepTimer && (
@@ -823,6 +748,166 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
                     )}
                   </button>
                 )}
+
+                {/* Menú de Tres Puntos (Opciones de carátula y modos visuales) */}
+                <div className="relative" ref={moreMenuRef}>
+                  <button
+                    id="expanded-more-menu-btn"
+                    type="button"
+                    onClick={() => setIsMoreMenuOpen((prev) => !prev)}
+                    className={`p-3 rounded-full transition-all active:scale-90 ${
+                      isMoreMenuOpen
+                        ? "bg-white/20 text-white"
+                        : "hover:bg-white/10 text-neutral-400 hover:text-white"
+                    }`}
+                    title="Más opciones del reproductor"
+                    aria-label="Más opciones"
+                  >
+                    <MoreVertical className="w-5 h-5" />
+                  </button>
+
+                  {/* Menú Desplegable Flotante */}
+                  {isMoreMenuOpen && (
+                    <div
+                      id="expanded-more-dropdown"
+                      className="absolute right-0 bottom-full mb-2 w-64 rounded-2xl border shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-2xl"
+                      style={{
+                        backgroundColor: "rgba(18, 18, 24, 0.96)",
+                        borderColor: "var(--color-border-subtle, rgba(255,255,255,0.14))",
+                      }}
+                    >
+                      {/* SECCIÓN 1: LOS 4 MODOS VISUALES ESCONDIDOS EN LOS 3 PUNTOS */}
+                      <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-400 font-bold">
+                        Modo de visualización
+                      </div>
+
+                      {/* 1. Carátula */}
+                      <button
+                        type="button"
+                        id="menu-mode-cover-btn"
+                        onClick={() => {
+                          setVisualMode("cover");
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                          visualMode === "cover"
+                            ? "bg-purple-600/20 text-purple-300 font-bold"
+                            : "text-neutral-300 hover:bg-white/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <ImageIcon className="w-4 h-4 text-purple-400" />
+                          <span>Carátula</span>
+                        </div>
+                        {visualMode === "cover" && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                      </button>
+
+                      {/* 2. Barras */}
+                      <button
+                        type="button"
+                        id="menu-mode-bars-btn"
+                        onClick={() => {
+                          setVisualMode("bars");
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                          visualMode === "bars"
+                            ? "bg-purple-600/20 text-purple-300 font-bold"
+                            : "text-neutral-300 hover:bg-white/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <BarChart2 className="w-4 h-4 text-blue-400" />
+                          <span>Barras</span>
+                        </div>
+                        {visualMode === "bars" && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                      </button>
+
+                      {/* 3. Ondas */}
+                      <button
+                        type="button"
+                        id="menu-mode-wave-btn"
+                        onClick={() => {
+                          setVisualMode("wave");
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                          visualMode === "wave"
+                            ? "bg-purple-600/20 text-purple-300 font-bold"
+                            : "text-neutral-300 hover:bg-white/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Activity className="w-4 h-4 text-emerald-400" />
+                          <span>Ondas</span>
+                        </div>
+                        {visualMode === "wave" && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                      </button>
+
+                      {/* 4. Círculos */}
+                      <button
+                        type="button"
+                        id="menu-mode-circle-btn"
+                        onClick={() => {
+                          setVisualMode("circle");
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                          visualMode === "circle"
+                            ? "bg-purple-600/20 text-purple-300 font-bold"
+                            : "text-neutral-300 hover:bg-white/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Disc3 className="w-4 h-4 text-pink-400" />
+                          <span>Círculos</span>
+                        </div>
+                        {visualMode === "circle" && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                      </button>
+
+                      <div className="my-1.5 border-t border-white/10" />
+
+                      {/* SECCIÓN 2: GESTIÓN DE CARÁTULA */}
+                      <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-400 font-bold">
+                        Carátula
+                      </div>
+
+                      {/* Botón 1: Eliminar carátula */}
+                      <button
+                        type="button"
+                        id="expanded-menu-remove-cover-btn"
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          if (onOpenCoverPicker && currentTrack) {
+                            onOpenCoverPicker(currentTrack);
+                          }
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-red-300 hover:bg-red-500/15 hover:text-red-200 transition-colors text-left cursor-pointer"
+                        title="Eliminar carátula actual o elegir la correcta"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-400" />
+                        <span>Eliminar carátula</span>
+                      </button>
+
+                      {/* Botón 2: Elegir Carátula */}
+                      <button
+                        type="button"
+                        id="expanded-menu-search-cover-btn"
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          if (onOpenCoverPicker && currentTrack) {
+                            onOpenCoverPicker(currentTrack);
+                          }
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-purple-300 hover:bg-purple-500/15 transition-colors text-left cursor-pointer"
+                        title="Buscar y elegir carátula oficial en línea"
+                      >
+                        <Sparkles className="w-4 h-4 text-purple-400" />
+                        <span>Elegir Carátula</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

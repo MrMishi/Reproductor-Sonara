@@ -191,6 +191,55 @@ export function saveCoverToFile(
 }
 
 /**
+ * Función: removeCoverFromFile
+ * Propósito: Elimina la portada del archivo persistente sonora_covers.json
+ * y de la memoria RAM. Registra una marca para evitar que el buscador automático
+ * vuelva a colocar una carátula no deseada (ej: portadas erróneas de otras pistas).
+ */
+export function removeCoverFromFile(
+  artist?: string,
+  title?: string,
+  fileName?: string,
+  trackId?: string
+): void {
+  const normKey = artist && title ? normalizeCoverKey(artist, title) : null;
+  const fKey = fileName ? fileCoverKey(fileName) : null;
+  const idKey = trackId ? idCoverKey(trackId) : null;
+  const soloTitleKey = title ? `:::${(title || "").toLowerCase().trim()}` : null;
+
+  if (normKey) inMemoryCoversMap.delete(normKey);
+  if (fKey) inMemoryCoversMap.delete(fKey);
+  if (idKey) inMemoryCoversMap.delete(idKey);
+  if (soloTitleKey) inMemoryCoversMap.delete(soloTitleKey);
+
+  // Registrar registro con url vacía para evitar que el buscador en línea
+  // vuelva a descargar automáticamente la portada rechazada por el usuario
+  if (normKey) {
+    inMemoryCoversMap.set(normKey, {
+      url: "",
+      artist: artist || "",
+      title: title || "",
+      fileName,
+      trackId,
+      updatedAt: Date.now(),
+      source: "custom",
+    });
+  }
+
+  scheduleDiskWrite();
+}
+
+/**
+ * Función: isCoverExplicitlyRemoved
+ * Retorna true si el usuario eliminó intencionalmente la portada de esta canción.
+ */
+export function isCoverExplicitlyRemoved(artist?: string, title?: string): boolean {
+  if (!artist || !title) return false;
+  const entry = inMemoryCoversMap.get(normalizeCoverKey(artist, title));
+  return entry !== undefined && entry.url === "";
+}
+
+/**
  * Convierte una URL remota de carátula en una miniatura WebP ultraligera (~8KB)
  * codificada en Data URI para que la portada funcione 100% offline sin conexión a internet.
  */

@@ -423,6 +423,12 @@ export const TrackList: React.FC<TrackListProps> = React.memo(({
   const [displayLimit, setDisplayLimit] = useState(60);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
+  // Reiniciar el límite de visualización cuando cambia la lista de pistas (ej. al escribir en búsqueda)
+  // para garantizar que la interfaz responda al instante en 60 FPS sin sobrecargar el DOM
+  useEffect(() => {
+    setDisplayLimit(60);
+  }, [tracks]);
+
   // Cargar más canciones automáticamente al aproximarse al final del scroll
   useEffect(() => {
     if (displayLimit >= tracks.length) return;

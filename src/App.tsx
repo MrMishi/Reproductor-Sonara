@@ -51,8 +51,18 @@ import {
   saveCoverToFile,
   getCoversFileStats,
 } from "./services/coverStorageService";
+import {
+  loadLyricsFromFile,
+  enrichTracksWithLyricsFromFile,
+  saveLyricsToFile,
+  removeLyricsFromFile,
+} from "./services/lyricsStorageService";
 import { CoversManagerModal } from "./components/CoversManagerModal";
-import { getInitialDemoTracks } from "./services/demoTracks";
+import {
+  getInitialDemoTracks,
+  getFreshDemoAudioUrl,
+  ensureDemoTracksPlayable,
+} from "./services/demoTracks";
 import { loadSavedTheme, applyThemeToDocument } from "./services/themeEngine";
 import { Navbar } from "./components/Navbar";
 import { BottomPlayer } from "./components/BottomPlayer";
@@ -68,6 +78,7 @@ import { HiddenTracksModal } from "./components/HiddenTracksModal";
 import { SleepTimerModal } from "./components/SleepTimerModal";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { SplashScreen } from "./components/SplashScreen";
+import { CoverPickerModal } from "./components/CoverPickerModal";
 import { Capacitor } from "@capacitor/core";
 import { autoScanStartup, requestStoragePermissions } from "./services/nativeScanner";
 import {
@@ -83,7 +94,7 @@ import {
   extractCoverArtFromFile,
   extractCoverArtFromTrack,
 } from "./services/metadataParser";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Check, Sparkles } from "lucide-react";
 import {
   loadTracksFromDB,
   saveTracksToDB,
@@ -160,6 +171,9 @@ export function SonoraApp() {
 
   // ID3 Metadata Editor Modal state
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+
+  // Selector y Gestor de Carátulas (Poweramp Style) state
+  const [coverPickerTrack, setCoverPickerTrack] = useState<Track | null>(null);
 
   // Temporizador de Apagado (Sleep Timer)
   const [isSleepTimerOpen, setIsSleepTimerOpen] = useState(false);
@@ -306,6 +320,7 @@ export function SonoraApp() {
     expandedSubTab,
     lyricsSearchTrack,
     editingTrack,
+    coverPickerTrack,
     isEqualizerOpen,
     isThemeOpen,
     isScannerOpen,
@@ -328,6 +343,7 @@ export function SonoraApp() {
       expandedSubTab,
       lyricsSearchTrack,
       editingTrack,
+      coverPickerTrack,
       isEqualizerOpen,
       isThemeOpen,
       isScannerOpen,
@@ -390,6 +406,10 @@ export function SonoraApp() {
       }
       if (state.editingTrack) {
         setEditingTrack(null);
+        return;
+      }
+      if (state.coverPickerTrack) {
+        setCoverPickerTrack(null);
         return;
       }
       if (state.isEqualizerOpen) {
@@ -488,8 +508,22 @@ export function SonoraApp() {
         console.warn("[App] Error cargando archivo sonora_covers.json:", covErr);
       }
 
+      // 2. Cargar archivo permanente de letras (sonora_lyrics.json)
+      try {
+        await loadLyricsFromFile();
+      } catch (lyrErr) {
+        console.warn("[App] Error cargando archivo sonora_lyrics.json:", lyrErr);
+      }
+
       const savedTracks = await loadTracksFromDB();
-      const enrichedSaved = enrichTracksWithCoversFromFile(savedTracks);
+      let enrichedSaved = enrichTracksWithCoversFromFile(savedTracks);
+      enrichedSaved = enrichTracksWithLyricsFromFile(enrichedSaved);
+
+      // Si estamos en entorno web, asegurar que las pistas demo tengan URLs de audio frescas y vivas
+      if (!Capacitor.isNativePlatform()) {
+        enrichedSaved = await ensureDemoTracksPlayable(enrichedSaved);
+      }
+
       let currentList = enrichedSaved;
 
       if (enrichedSaved.length > 0) {
@@ -620,6 +654,8 @@ export function SonoraApp() {
   // Cache de búsquedas fallidas de carátulas para evitar peticiones de red repetitivas
   const failedCoverSearchesRef = useRef<Set<string>>(new Set());
   const checkedEmbeddedCoversRef = useRef<Set<string>>(new Set());
+  // Historial cronológico de pistas reproducidas para retroceso exacto a la canción previa (Lark Player / Spotify style)
+  const playbackHistoryRef = useRef<Track[]>([]);
 
   // Buscador automatizado de carátulas en línea (Deezer con respaldo en iTunes)
   useEffect(() => {
@@ -741,6 +777,15 @@ export function SonoraApp() {
   };
 
   const handleCorruptedTrack = (corruptedTrack: Track) => {
+    // Si es una pista demo en la web con URL temporal expirada, regenerarla de inmediato
+    if (!Capacitor.isNativePlatform() && (corruptedTrack.id.startsWith("demo-") || corruptedTrack.id.startsWith("demo_"))) {
+      getFreshDemoAudioUrl(corruptedTrack.id).then((fresh) => {
+        corruptedTrack.url = fresh;
+        startPlayback(corruptedTrack);
+      });
+      return;
+    }
+
     setToastMessage(`"${corruptedTrack.title}" no se puede reproducir. Saltando a la siguiente...`);
     setTimeout(() => {
       handleNextRef.current();
@@ -750,6 +795,18 @@ export function SonoraApp() {
   // Reproductor centralizado con auto-recuperación y sin race conditions
   const startPlayback = useCallback(async (track: Track, startTime: number = 0) => {
     if (!audioRef.current) return;
+
+    // En entorno web, asegurar que las pistas demo cuenten con URL activa
+    if (!Capacitor.isNativePlatform() && (track.id.startsWith("demo-") || track.id.startsWith("demo_"))) {
+      try {
+        const freshUrl = await getFreshDemoAudioUrl(track.id);
+        if (freshUrl) {
+          track.url = freshUrl;
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     if (isTrackCorrupted(track)) {
       handleCorruptedTrack(track);
@@ -780,6 +837,32 @@ export function SonoraApp() {
         // Interrupción normal al cambiar de canción
         return;
       }
+
+      if (err?.name === "NotAllowedError") {
+        // Autoplay diferido por política del navegador hasta interacción del usuario
+        console.log("[AudioEngine] Autoplay diferido esperando interacción del usuario.");
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        audioEngine.setPlaybackState(false);
+        syncMediaSessionPlaybackState("paused");
+        return;
+      }
+
+      // Si falló una pista demo en la web por blob revocado, reintentar de inmediato
+      if (!Capacitor.isNativePlatform() && (track.id.startsWith("demo-") || track.id.startsWith("demo_"))) {
+        try {
+          const fresh = await getFreshDemoAudioUrl(track.id);
+          if (fresh && audioRef.current) {
+            track.url = fresh;
+            audioRef.current.src = fresh;
+            await audioRef.current.play();
+            return;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       console.warn("Playback error on track:", track.title, err);
       // Auto-recuperación: si la pista falló, saltar automáticamente a la siguiente para no congelar la app
       setToastMessage(`No se pudo reproducir "${track.title}". Saltando a la siguiente...`);
@@ -865,6 +948,14 @@ export function SonoraApp() {
         startPlayback(currentTrack, 0);
       }
     } else {
+      // Guardar la pista actual en el historial cronológico antes de avanzar
+      if (currentTrack) {
+        playbackHistoryRef.current.push(currentTrack);
+        if (playbackHistoryRef.current.length > 50) {
+          playbackHistoryRef.current.shift();
+        }
+      }
+
       const nextIdx = (currentTrackIndex + 1) % activeList.length;
       setCurrentTrackIndex(nextIdx);
       const nextTrack = activeList[nextIdx];
@@ -874,7 +965,7 @@ export function SonoraApp() {
     }
   };
 
-  // Previous Track
+  // Previous Track (Retrocede con fidelidad a la pista que realmente sonó anteriormente según el historial)
   const handlePrev = () => {
     const activeList = activeQueue.length > 0 ? activeQueue : (visibleTracks.length > 0 ? visibleTracks : tracks);
     if (activeList.length === 0) return;
@@ -890,6 +981,20 @@ export function SonoraApp() {
     isPlayingRef.current = true;
     setIsPlaying(true);
 
+    // 1. Prioridad: Historial cronológico real de reproducción
+    while (playbackHistoryRef.current.length > 0) {
+      const prevCandidate = playbackHistoryRef.current.pop()!;
+      if (prevCandidate.id !== currentTrack?.id) {
+        const foundIdx = activeList.findIndex((t) => t.id === prevCandidate.id);
+        if (foundIdx !== -1) {
+          setCurrentTrackIndex(foundIdx);
+        }
+        startPlayback(prevCandidate, 0);
+        return;
+      }
+    }
+
+    // 2. Respaldo: Retroceso secuencial en lista si el historial está vacío
     const prevIdx = (currentTrackIndex - 1 + activeList.length) % activeList.length;
     setCurrentTrackIndex(prevIdx);
     const prevTrack = activeList[prevIdx];
@@ -1238,6 +1343,14 @@ export function SonoraApp() {
       }
     }
 
+    // Registrar la canción anterior en el historial si es distinta a la que el usuario acaba de seleccionar
+    if (currentTrack && currentTrack.id !== track.id) {
+      playbackHistoryRef.current.push(currentTrack);
+      if (playbackHistoryRef.current.length > 50) {
+        playbackHistoryRef.current.shift();
+      }
+    }
+
     isUserIntentionalPauseRef.current = false;
     isPlayingRef.current = true;
     setIsPlaying(true);
@@ -1255,7 +1368,8 @@ export function SonoraApp() {
 
   // Import newly scanned tracks from device
   const handleTracksImported = useCallback((newTracks: Track[]) => {
-    const enrichedNewTracks = enrichTracksWithCoversFromFile(newTracks);
+    let enrichedNewTracks = enrichTracksWithCoversFromFile(newTracks);
+    enrichedNewTracks = enrichTracksWithLyricsFromFile(enrichedNewTracks);
 
     setTracks((prev) => {
       // Append unique by title + artist
@@ -1362,7 +1476,7 @@ export function SonoraApp() {
     newTitle?: string,
     newArtist?: string
   ) => {
-    let updatedTrackRef: Track | null = null;
+    let finalUpdatedTrack: Track | null = null;
 
     setTracks((prev) => {
       const updated = prev.map((t) => {
@@ -1374,12 +1488,20 @@ export function SonoraApp() {
             lyrics,
             album: album || t.album,
           };
-          updatedTrackRef = finalTrack;
+          finalUpdatedTrack = finalTrack;
+          // Guardar de inmediato y sincrónicamente en sonora_lyrics.json y LocalStorage
+          saveLyricsToFile(
+            finalTrack.artist,
+            finalTrack.title,
+            lyrics,
+            finalTrack.fileName,
+            finalTrack.id
+          );
           return finalTrack;
         }
         return t;
       });
-      saveTracksToDB(updated);
+      saveTracksToDB(updated).catch(() => {});
       return updated;
     });
 
@@ -1399,9 +1521,11 @@ export function SonoraApp() {
       });
     });
 
-    if (updatedTrackRef) {
-      updateTrackInDb(updatedTrackRef).catch(() => {});
-    }
+    setTimeout(() => {
+      if (finalUpdatedTrack) {
+        updateTrackInDb(finalUpdatedTrack).catch(() => {});
+      }
+    }, 0);
 
     setToastMessage("¡Letra vinculada a la canción exitosamente!");
   }, []);
@@ -1427,19 +1551,28 @@ export function SonoraApp() {
 
   // Eliminar o desvincular letras de una canción
   const handleLyricsRemoved = useCallback((trackId: string) => {
+    let removedTrack: Track | null = null;
     setTracks((prev) => {
       const updated = prev.map((t) => {
         if (t.id === trackId) {
-          return {
-            ...t,
-            lyrics: undefined,
-          };
+          removedTrack = { ...t, lyrics: undefined };
+          removeLyricsFromFile(t.artist, t.title, t.fileName, t.id);
+          return removedTrack;
         }
         return t;
       });
-      saveTracksToDB(updated);
+      saveTracksToDB(updated).catch(() => {});
       return updated;
     });
+    setShuffledQueue((prev) => {
+      if (!prev) return null;
+      return prev.map((t) => (t.id === trackId ? { ...t, lyrics: undefined } : t));
+    });
+    setTimeout(() => {
+      if (removedTrack) {
+        updateTrackInDb(removedTrack).catch(() => {});
+      }
+    }, 0);
     setToastMessage("Letra eliminada de la canción");
   }, []);
 
@@ -1644,27 +1777,6 @@ export function SonoraApp() {
 
     return () => clearInterval(timerInterval);
   }, [sleepTimer.isActive, sleepTimer.mode, sleepTimer.targetTimestamp, duration, currentTime]);
-
-  // Filtered tracks for Library / Search / Favorites
-  const displayedTracks = useMemo(() => {
-    let list = tracks;
-
-    if (activeTab === "favorites") {
-      list = list.filter((t) => t.isFavorite);
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      list = list.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          t.artist.toLowerCase().includes(q) ||
-          t.album.toLowerCase().includes(q)
-      );
-    }
-
-    return list;
-  }, [tracks, activeTab, searchQuery]);
 
   // Keyboard controls
   useEffect(() => {
@@ -2018,6 +2130,7 @@ export function SonoraApp() {
         onDeleteTracks={handleDeleteTracks}
         activeSubTab={expandedSubTab}
         onOpenID3Editor={(track) => setEditingTrack(track)}
+        onOpenCoverPicker={(track) => setCoverPickerTrack(track)}
         sleepTimer={sleepTimer}
         onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
         onLyricsApplied={handleLyricsApplied}
@@ -2031,9 +2144,19 @@ export function SonoraApp() {
           id="sonora-toast-feedback"
           className="fixed bottom-24 sm:bottom-28 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-full bg-neutral-900/95 border border-white/20 text-white shadow-2xl flex items-center gap-2.5 text-xs font-semibold backdrop-blur-xl animate-fade-in max-w-[90vw]"
         >
-          <div className="w-5 h-5 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
-            <AlertCircle className="w-3.5 h-3.5" />
-          </div>
+          {/error|falló|no se puede|no compatible|inaccesible|corrupt/i.test(toastMessage) ? (
+            <div className="w-5 h-5 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+              <AlertCircle className="w-3.5 h-3.5" />
+            </div>
+          ) : /éxito|guardad|actualizad|importad|vinculad|eliminad|añadieron|restableció|completad/i.test(toastMessage) ? (
+            <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <Check className="w-3.5 h-3.5" />
+            </div>
+          ) : (
+            <div className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0">
+              <Sparkles className="w-3.5 h-3.5" />
+            </div>
+          )}
           <span className="whitespace-normal sm:whitespace-nowrap text-center">{toastMessage}</span>
         </div>
       )}
@@ -2108,6 +2231,25 @@ export function SonoraApp() {
         track={editingTrack}
         onClose={() => setEditingTrack(null)}
         onSave={handleSaveEditedTrack}
+      />
+
+      {/* Selector y Gestor de Carátulas Oficiales (Estilo Poweramp) */}
+      <CoverPickerModal
+        isOpen={Boolean(coverPickerTrack)}
+        track={coverPickerTrack}
+        onClose={() => setCoverPickerTrack(null)}
+        onCoverUpdated={(updatedTrack) => {
+          setTracks((prev) => prev.map((t) => (t.id === updatedTrack.id ? updatedTrack : t)));
+          if (shuffledQueue) {
+            setShuffledQueue((prev) =>
+              prev ? prev.map((t) => (t.id === updatedTrack.id ? updatedTrack : t)) : prev
+            );
+          }
+          if (coverPickerTrack && coverPickerTrack.id === updatedTrack.id) {
+            setCoverPickerTrack(updatedTrack);
+          }
+        }}
+        onShowToast={(msg) => setToastMessage(msg)}
       />
 
       {/* Temporizador de Apagado (Sleep Timer) Modal */}
