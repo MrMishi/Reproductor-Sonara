@@ -1,6 +1,7 @@
 {
   "appId": "com.sonora.music",
   "productName": "Sonora Music",
+  "publish": null,
   "directories": {
     "output": "dist-electron"
   },
