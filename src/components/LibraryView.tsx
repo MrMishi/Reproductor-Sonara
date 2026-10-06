@@ -166,6 +166,18 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
   const selectedFolder = propSelectedFolder !== undefined ? propSelectedFolder : internalFolder;
   const setSelectedFolder = propOnSelectFolder ?? setInternalFolder;
 
+  // Si el usuario escribe una búsqueda y estaba dentro de una vista en detalle,
+  // restablecer la selección para mostrar la lista completa de resultados de búsqueda
+  const prevSearchRef = useRef(searchQuery);
+  useEffect(() => {
+    if (searchQuery.trim() && !prevSearchRef.current.trim()) {
+      setSelectedArtist(null);
+      setSelectedAlbum(null);
+      setSelectedFolder(null);
+    }
+    prevSearchRef.current = searchQuery;
+  }, [searchQuery, setSelectedArtist, setSelectedAlbum, setSelectedFolder]);
+
   // Estado de ordenación de canciones con persistencia en localStorage
   const [sortBy, setSortBy] = useState<LibrarySortOption>(() => {
     try {
@@ -413,21 +425,22 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
 
   // Tracks para la vista de detalle
   const activeDetailTracks = useMemo(() => {
+    const sourceList = tracks;
     if (selectedArtist) {
-      return filteredTracks.filter(
+      return sourceList.filter(
         (t) => (t.artist && t.artist.trim() ? t.artist.trim() : "Artista Desconocido") === selectedArtist
       );
     }
     if (selectedAlbum) {
-      return filteredTracks.filter(
+      return sourceList.filter(
         (t) => (t.album && t.album.trim() ? t.album.trim() : "Álbum Desconocido") === selectedAlbum
       );
     }
     if (selectedFolder) {
-      return filteredTracks.filter((t) => (t.folderPath || "Música del Dispositivo") === selectedFolder);
+      return sourceList.filter((t) => (t.folderPath || "Música del Dispositivo") === selectedFolder);
     }
     return [];
-  }, [selectedArtist, selectedAlbum, selectedFolder, filteredTracks]);
+  }, [selectedArtist, selectedAlbum, selectedFolder, tracks]);
 
   // Volver a la vista general de la sección
   const handleBackToSection = () => {
@@ -671,7 +684,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       </div>
 
       {/* Pestañas / Filtros Superiores de Biblioteca: Pequeñas, Limpias y Minimalistas */}
-      {((!selectedArtist && !selectedAlbum && !selectedFolder) || searchQuery.trim()) && (
+      {!selectedArtist && !selectedAlbum && !selectedFolder && (
         <div className="flex flex-wrap items-center justify-between gap-3 select-none">
           <div className="flex items-center gap-1 sm:gap-2 p-1 rounded-full bg-white/[0.04] border border-white/5 max-w-fit select-none">
             <button
@@ -733,7 +746,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       )}
 
       {/* Vista en detalle cuando se hace clic en un Artista, Álbum o Carpeta */}
-      {(selectedArtist || selectedAlbum || selectedFolder) && !searchQuery.trim() && (
+      {(selectedArtist || selectedAlbum || selectedFolder) && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <button
@@ -818,7 +831,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {/* 1. SECCIÓN: CANCIONES (Lista General de Reproducción) */}
       {/* ========================================================================= */}
-      {((!selectedArtist && !selectedAlbum && !selectedFolder) || Boolean(searchQuery.trim())) && activeSection === "songs" && (
+      {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "songs" && (
         <TrackList
           tracks={sortedTracks}
           currentTrackId={currentTrackId}
@@ -840,7 +853,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {/* 2. SECCIÓN: ARTISTAS (Cuadrícula agrupada por Artista) */}
       {/* ========================================================================= */}
-      {((!selectedArtist && !selectedAlbum && !selectedFolder) || Boolean(searchQuery.trim())) && activeSection === "artists" && (
+      {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "artists" && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
           {artistsMap.map((entry) => (
             <div
@@ -893,7 +906,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {/* 3. SECCIÓN: ÁLBUMES (Cuadrícula agrupada por Álbum) */}
       {/* ========================================================================= */}
-      {((!selectedArtist && !selectedAlbum && !selectedFolder) || Boolean(searchQuery.trim())) && activeSection === "albums" && (
+      {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "albums" && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
           {albumsMap.map((entry) => (
             <div
@@ -950,7 +963,7 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* ========================================================================= */}
       {/* 4. SECCIÓN: CARPETAS (Directorios de Origen del Dispositivo) */}
       {/* ========================================================================= */}
-      {((!selectedArtist && !selectedAlbum && !selectedFolder) || Boolean(searchQuery.trim())) && activeSection === "folders" && (
+      {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "folders" && (
         <div className="flex flex-col gap-2">
           {foldersMap.map((entry) => (
             <div

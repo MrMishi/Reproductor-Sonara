@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { ActiveTab } from "../types";
 import { SonoraLogo } from "./SonoraLogo";
+import { Capacitor } from "@capacitor/core";
 
 interface NavbarProps {
   activeTab: ActiveTab;
@@ -55,6 +56,7 @@ interface NavbarProps {
   coversCount?: number;
   onOpenInstallModal?: () => void;
   onOpenWelcome?: () => void;
+  onExportLibrary?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = React.memo(({
@@ -80,6 +82,7 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
   coversCount,
   onOpenInstallModal,
   onOpenWelcome,
+  onExportLibrary,
 }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
@@ -88,6 +91,152 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
 
   // Estado local para respuesta instantánea de escritura (0ms latencia)
   const [localQuery, setLocalQuery] = useState(searchQuery);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+
+  // Detección de Computadora (PC / Desktop):
+  // En computadora: La parte superior (Navbar con logo, pestañas de biblioteca, buscador, ajustes)
+  // permanece SIEMPRE visible y fija, acompañándote al bajar por la lista de canciones.
+  // En Android / Móvil táctil: Se aplica el comportamiento estilo Google Drive al leer PDF (se oculta al bajar y reaparece al subir).
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (Capacitor.isNativePlatform()) return false;
+    if (typeof window === "undefined") return false;
+    return window.innerWidth >= 768 || window.matchMedia("(pointer: fine)").matches;
+  });
+
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      setIsDesktop(false);
+      return;
+    }
+    const checkDesktop = () => {
+      const finePointer = window.matchMedia("(pointer: fine)").matches;
+      const isWide = window.innerWidth >= 768;
+      setIsDesktop(finePointer || isWide);
+    };
+    window.addEventListener("resize", checkDesktop);
+    return () => window.removeEventListener("resize", checkDesktop);
+  }, []);
+
+  // Comportamiento estilo Google Drive al leer un PDF / Chrome:
+  // Mientras vas bajando la parte superior se esconde suavemente hacia arriba.
+  // Pero si comienzas a subir, la parte superior vuelve a aparecer de inmediato.
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const lastScrollYRef = useRef(0);
+  const accumulatedDeltaRef = useRef(0);
+  const touchStartYRef = useRef(0);
+
+  useEffect(() => {
+    // En computadora (PC / Web Desktop), la parte superior NUNCA se oculta: siempre está visible y fija al bajar.
+    if (isDesktop) {
+      setIsHeaderVisible(true);
+      return;
+    }
+
+    let ticking = false;
+
+    const getScrollY = () => {
+      return Math.max(
+        0,
+        window.pageYOffset ||
+          document.documentElement.scrollTop ||
+          document.body.scrollTop ||
+          0
+      );
+    };
+
+    const handleScroll = () => {
+      if (ticking) return;
+      ticking = true;
+
+      window.requestAnimationFrame(() => {
+        const currentY = getScrollY();
+        const delta = currentY - lastScrollYRef.current;
+
+        // Mantener visible si un menú está abierto o el buscador está enfocado / con texto
+        if (isSettingsOpen || isAddMenuOpen || isSearchFocused || localQuery.trim().length > 0) {
+          setIsHeaderVisible(true);
+          accumulatedDeltaRef.current = 0;
+          lastScrollYRef.current = currentY;
+          ticking = false;
+          return;
+        }
+
+        // Siempre visible al estar en la parte superior o cerca del tope (<= 30px)
+        if (currentY <= 30) {
+          setIsHeaderVisible(true);
+          accumulatedDeltaRef.current = 0;
+        } else {
+          // Acumular desplazamiento en la misma dirección
+          if ((delta > 0 && accumulatedDeltaRef.current < 0) || (delta < 0 && accumulatedDeltaRef.current > 0)) {
+            accumulatedDeltaRef.current = delta;
+          } else {
+            accumulatedDeltaRef.current += delta;
+          }
+
+          // Si el usuario baja acumulando más de 12px (y ya pasó el tope del header): esconder barra superior
+          if (accumulatedDeltaRef.current > 12 && currentY > 50) {
+            setIsHeaderVisible(false);
+            accumulatedDeltaRef.current = 0;
+          }
+          // Si el usuario comienza a subir acumulando más de 6px: mostrar de inmediato estilo Google Drive
+          else if (accumulatedDeltaRef.current < -6) {
+            setIsHeaderVisible(true);
+            accumulatedDeltaRef.current = 0;
+          }
+        }
+
+        lastScrollYRef.current = currentY;
+        ticking = false;
+      });
+    };
+
+    // Soporte directo para gestos táctiles en móviles y tablets
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches && e.touches.length > 0) {
+        touchStartYRef.current = e.touches[0].clientY;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!e.touches || e.touches.length === 0) return;
+      const currentTouchY = e.touches[0].clientY;
+      const touchDiff = touchStartYRef.current - currentTouchY;
+      touchStartYRef.current = currentTouchY;
+
+      // Mantener visible si el buscador está activo o menús abiertos
+      if (isSettingsOpen || isAddMenuOpen || isSearchFocused || localQuery.trim().length > 0) {
+        setIsHeaderVisible(true);
+        return;
+      }
+
+      const currentY = getScrollY();
+      if (currentY <= 30) {
+        setIsHeaderVisible(true);
+        return;
+      }
+
+      // Arrastrar hacia arriba = desplazar contenido hacia abajo -> ocultar barra superior
+      if (touchDiff > 10 && currentY > 50) {
+        setIsHeaderVisible(false);
+      }
+      // Arrastrar hacia abajo = desplazar contenido hacia arriba -> mostrar de inmediato
+      else if (touchDiff < -8) {
+        setIsHeaderVisible(true);
+      }
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    document.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      document.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+    };
+  }, [isDesktop, isSettingsOpen, isAddMenuOpen, isSearchFocused, localQuery]);
 
   // Sincronizar si el estado exterior cambia (por botón de retroceso o reseteo)
   useEffect(() => {
@@ -144,7 +293,11 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
       */}
       <header
         id="ytm-navbar"
-        className="sticky top-0 z-40 w-full px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 border-b flex items-center justify-between gap-2 sm:gap-4 bg-[#0a0a16]/90 backdrop-blur-md transition-colors"
+        className={`sticky top-0 z-40 w-full px-3 sm:px-4 lg:px-8 py-2.5 sm:py-3 border-b flex items-center justify-between gap-2 sm:gap-4 bg-[#0a0a16]/95 backdrop-blur-md transition-all duration-300 ease-out will-change-transform ${
+          isHeaderVisible
+            ? "translate-y-0 opacity-100 pointer-events-auto shadow-md"
+            : "-translate-y-full opacity-0 pointer-events-none"
+        }`}
         style={{
           borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
         }}
@@ -418,6 +571,34 @@ export const Navbar: React.FC<NavbarProps> = React.memo(({
                     {typeof coversCount === "number" && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono font-medium shrink-0">
                         {coversCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+
+                {/* Archivo de Biblioteca Permanente (sonora_library.json) */}
+                {onExportLibrary && (
+                  <button
+                    type="button"
+                    id="settings-library-export-btn"
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      onExportLibrary();
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition-colors cursor-pointer text-left"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 pr-2">
+                      <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-400 shrink-0">
+                        <FileJson className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white font-medium text-xs truncate">Archivo de Biblioteca</div>
+                        <div className="text-[10px] opacity-60 truncate">sonora_library.json (Descargar / Respaldar)</div>
+                      </div>
+                    </div>
+                    {typeof trackCount === "number" && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-medium shrink-0">
+                        {trackCount}
                       </span>
                     )}
                   </button>

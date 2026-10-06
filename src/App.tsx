@@ -106,6 +106,10 @@ import {
   clearAllHiddenTracks,
   updateTrackInDb,
 } from "./services/db";
+import {
+  exportLibraryFile,
+  requestPersistentStorageOnPC,
+} from "./services/libraryStorageService";
 
 export function SonoraApp() {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -501,6 +505,11 @@ export function SonoraApp() {
     applyThemeToDocument(currentTheme);
 
     async function initLibrary() {
+      // 0. En PC / Navegador Web, solicitar persistencia permanente de almacenamiento
+      if (!Capacitor.isNativePlatform()) {
+        requestPersistentStorageOnPC().catch(() => {});
+      }
+
       // 1. Cargar archivo permanente de carátulas (sonora_covers.json)
       try {
         await loadCoversFromFile();
@@ -1857,6 +1866,11 @@ export function SonoraApp() {
     setIsExpandedPlayerOpen(true);
   }, []);
 
+  const handleExportLibrary = useCallback(() => {
+    exportLibraryFile(tracks);
+    setToastMessage(`Archivo permanente sonora_library.json generado (${tracks.length} canciones)`);
+  }, [tracks]);
+
   return (
     <div
       id="ytm-app-root"
@@ -2031,6 +2045,7 @@ export function SonoraApp() {
         coversCount={getCoversFileStats().totalCovers}
         onOpenInstallModal={handleOpenInstallModal}
         onOpenWelcome={handleResetWelcome}
+        onExportLibrary={handleExportLibrary}
       />
 
       {/* Main Content Area */}

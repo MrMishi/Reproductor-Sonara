@@ -31,6 +31,10 @@ import {
   enrichTracksWithLyricsFromFile,
   getLyricsFromCache,
 } from "./lyricsStorageService";
+import {
+  saveLibraryToFile,
+  requestPersistentStorageOnPC,
+} from "./libraryStorageService";
 
 const DB_NAME = "YouTubeMusicWebPlayerDB";
 const DB_VERSION = 2; // Incrementar si se añaden nuevos ObjectStores
@@ -279,10 +283,13 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
       store.put(record);
     }
 
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+
+    // Sincronizar respaldo permanente en sonora_library.json
+    saveLibraryToFile(tracks);
   } catch (err) {
     console.warn("Error saving tracks to IndexedDB:", err);
   }
@@ -330,6 +337,7 @@ export async function saveTracksInChunks(
           lyrics: track.lyrics,
           nativePath: nativePath || track.nativePath,
           url: track.url,
+          file: track.file instanceof Blob ? track.file : undefined,
         };
         store.put(record);
       }
@@ -348,6 +356,9 @@ export async function saveTracksInChunks(
       console.warn(`[IndexedDB] Error guardando lote en chunks (${i} a ${i + chunk.length}):`, chunkErr);
     }
   }
+
+  // Sincronizar respaldo permanente en sonora_library.json
+  saveLibraryToFile(tracks);
 }
 
 /**
@@ -420,6 +431,11 @@ export async function addSingleTrackToDB(track: Track): Promise<void> {
  */
 export async function loadTracksFromDB(): Promise<Track[]> {
   try {
+    // En PC / navegador web, solicitar persistencia para que el navegador no elimine las canciones
+    if (!Capacitor.isNativePlatform()) {
+      requestPersistentStorageOnPC().catch(() => {});
+    }
+
     const db = await openDB();
     const tx = db.transaction(STORE_TRACKS, "readwrite");
     const store = tx.objectStore(STORE_TRACKS);
@@ -447,6 +463,11 @@ export async function loadTracksFromDB(): Promise<Track[]> {
             finalUrl = Capacitor.convertFileSrc(finalUrl);
           } else if (!isNative && item.file instanceof Blob) {
             finalUrl = URL.createObjectURL(item.file);
+          } else if (!isNative && item.url && (item.url.startsWith("http://") || item.url.startsWith("https://") || item.url.startsWith("/demos/"))) {
+            finalUrl = item.url;
+          } else if (!isNative && item.url?.startsWith("blob:") && !item.file) {
+            // URL de Blob expirada de sesión previa sin archivo adjunto
+            finalUrl = "";
           }
 
           if (finalUrl) {

@@ -1,0 +1,39 @@
+name: Sonora - Compilar Windows .EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    name: Compilar Instalador y Ejecutable Windows (.exe)
+    runs-on: windows-latest
+
+    steps:
+      - name: Descargar código fuente
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Instalación de dependencias
+        run: npm install
+
+      - name: Compilar aplicación web (Vite)
+        run: npm run build
+
+      - name: Instalar Electron y Electron Builder
+        run: npm install -D electron electron-builder
+
+      - name: Empaquetar ejecutable Windows .exe
+        run: npx electron-builder --config electron-builder.json --win nsis portable
+
+      - name: Subir instalador .EXE como Artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sonora-Windows-EXE
+          path: dist-electron/*.exe
+          retention-days: 30
