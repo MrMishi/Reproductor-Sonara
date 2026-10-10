@@ -1,6 +1,6 @@
 import { registerPlugin, Capacitor } from "@capacitor/core";
 import { Track } from "../types";
-import { addSingleTrackToDB, isTrackHidden } from "./db";
+import { addSingleTrackToDB, isTrackHidden, saveTracksInChunks } from "./db";
 import {
   cleanFilename,
   generateCoverArt,
@@ -346,10 +346,17 @@ export async function scanAllNativeDeviceMusic(
 
       if (!isTrackHidden(track.title, track.artist, track.fileName)) {
         discovered.push(track);
-        await addSingleTrackToDB(track);
         onTrackDiscovered?.(track);
       }
     }
+
+    // Guardado no bloqueante en segundo plano en lotes atómicos de 50 pistas
+    if (discovered.length > 0) {
+      saveTracksInChunks(discovered, 50).catch((err) =>
+        console.warn("[NativeScanner] Error guardando pistas en chunks:", err)
+      );
+    }
+
     return discovered;
   } catch (err) {
     console.warn("[NativeScanner] Error en scanAllNativeDeviceMusic:", err);

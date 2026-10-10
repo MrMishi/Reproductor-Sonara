@@ -6,7 +6,18 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    base: './',
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'remove-crossorigin-for-electron',
+        enforce: 'post',
+        transformIndexHtml(html: string) {
+          return html.replace(/ crossorigin(?:="[^"]*")?/g, '');
+        },
+      },
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -29,7 +29,7 @@ import {
   MAX_VIDEO_DURATION_SECONDS,
 } from "./metadataParser";
 import { getCoverFromCache } from "./coverStorageService";
-import { isTrackHidden, addSingleTrackToDB } from "./db";
+import { isTrackHidden, addSingleTrackToDB, saveTracksInChunks } from "./db";
 import {
   checkNativeStoragePermissions,
   requestNativeStoragePermissionsDirect,
@@ -640,14 +640,18 @@ export async function scanNativeMusicDirectories(
         discoveredTracks.push(parsedTrack);
         totalProcessed++;
 
-        // 3. AGREGAR A BIBLIOTECA DE INMEDIATO:
-        // Registra de inmediato en IndexedDB la ruta devuelta 'Capacitor.convertFileSrc(path)'
-        // y emite onTrackDiscovered para que se reflejen en la lista al instante.
-        await addSingleTrackToDB(parsedTrack);
+        // 3. AGREGAR A BIBLIOTECA:
+        // Se notifica el progreso y se guardan en bloque al terminar para no saturar el hilo principal
         onTrackDiscovered?.(parsedTrack);
       } catch (fileErr: unknown) {
         console.warn(`[NativeScanner] No se pudo resolver ruta para ${item.fileName}:`, fileErr);
       }
+    }
+
+    if (discoveredTracks.length > 0) {
+      saveTracksInChunks(discoveredTracks, 50).catch((err) =>
+        console.warn("[NativeScanner] Error guardando pistas escaneadas:", err)
+      );
     }
 
     return {
@@ -923,12 +927,17 @@ export async function scanSpecificNativeDirectory(
         discoveredTracks.push(parsedTrack);
         totalProcessed++;
 
-        // AGREGAR A BIBLIOTECA DE INMEDIATO:
-        await addSingleTrackToDB(parsedTrack);
+        // Notificar descubrimiento individual sin bloquear IndexedDB en bucle
         onTrackDiscovered?.(parsedTrack);
       } catch (fileErr) {
         console.warn(`[NativeScanner] No se pudo procesar archivo ${item.fileName}:`, fileErr);
       }
+    }
+
+    if (discoveredTracks.length > 0) {
+      saveTracksInChunks(discoveredTracks, 50).catch((err) =>
+        console.warn("[NativeScanner] Error guardando pistas escaneadas:", err)
+      );
     }
 
     return {

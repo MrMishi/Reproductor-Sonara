@@ -209,6 +209,17 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
   // Posicionamiento inteligente del menú desplegable: evita desbordes fuera de la pantalla en móviles
   const [dropdownAlign, setDropdownAlign] = useState<"left" | "right">("left");
 
+  // Batching progresivo de Artistas y Álbumes para responder a 60 FPS sin saturar el DOM en móviles
+  const [artistsLimit, setArtistsLimit] = useState(36);
+  const [albumsLimit, setAlbumsLimit] = useState(36);
+  const artistsLoadMoreRef = useRef<HTMLDivElement | null>(null);
+  const albumsLoadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setArtistsLimit(36);
+    setAlbumsLimit(36);
+  }, [activeSection, searchQuery]);
+
   useEffect(() => {
     if (!isSortMenuOpen || !sortMenuRef.current) return;
     const updateAlign = () => {
@@ -416,6 +427,42 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
     return Array.from(map.values()).sort((a, b) => standardCollator.compare(a.path, b.path));
   }, [filteredTracks, activeSection]);
 
+  useEffect(() => {
+    if (activeSection !== "artists" || artistsLimit >= artistsMap.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setArtistsLimit((prev) => Math.min(prev + 36, artistsMap.length));
+        }
+      },
+      { rootMargin: "300px" }
+    );
+    const el = artistsLoadMoreRef.current;
+    if (el) observer.observe(el);
+    return () => {
+      if (el) observer.unobserve(el);
+      observer.disconnect();
+    };
+  }, [activeSection, artistsLimit, artistsMap.length]);
+
+  useEffect(() => {
+    if (activeSection !== "albums" || albumsLimit >= albumsMap.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setAlbumsLimit((prev) => Math.min(prev + 36, albumsMap.length));
+        }
+      },
+      { rootMargin: "300px" }
+    );
+    const el = albumsLoadMoreRef.current;
+    if (el) observer.observe(el);
+    return () => {
+      if (el) observer.unobserve(el);
+      observer.disconnect();
+    };
+  }, [activeSection, albumsLimit, albumsMap.length]);
+
   // Función para reproducir la primera canción de una lista
   const handlePlayGroup = (groupTracks: Track[]) => {
     if (groupTracks.length > 0) {
@@ -463,15 +510,20 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       let comparison = 0;
 
       switch (sortBy) {
-        case "title":
-          comparison = standardCollator.compare(a.title || "", b.title || "");
+        case "title": {
+          const tA = (a.title || "").toLowerCase();
+          const tB = (b.title || "").toLowerCase();
+          comparison = tA < tB ? -1 : tA > tB ? 1 : 0;
           break;
+        }
         case "artist": {
-          const artA = a.artist || "Artista Desconocido";
-          const artB = b.artist || "Artista Desconocido";
-          comparison = standardCollator.compare(artA, artB);
+          const artA = (a.artist || "Artista Desconocido").toLowerCase();
+          const artB = (b.artist || "Artista Desconocido").toLowerCase();
+          comparison = artA < artB ? -1 : artA > artB ? 1 : 0;
           if (comparison === 0) {
-            comparison = standardCollator.compare(a.title || "", b.title || "");
+            const tA = (a.title || "").toLowerCase();
+            const tB = (b.title || "").toLowerCase();
+            comparison = tA < tB ? -1 : tA > tB ? 1 : 0;
           }
           break;
         }
@@ -854,52 +906,66 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* 2. SECCIÓN: ARTISTAS (Cuadrícula agrupada por Artista) */}
       {/* ========================================================================= */}
       {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "artists" && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-          {artistsMap.map((entry) => (
-            <div
-              key={entry.artist}
-              onClick={() => setSelectedArtist(entry.artist)}
-              className="group p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer flex flex-col items-center text-center hover:scale-[1.02] active:scale-[0.98]"
-              style={{
-                backgroundColor: "var(--color-surface, #141414)",
-                borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))",
-              }}
-            >
-              {/* Avatar de Artista */}
-              <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden shadow-lg border border-white/10 mb-3 bg-neutral-900 flex items-center justify-center">
-                {entry.coverUrl ? (
-                  <img
-                    src={entry.coverUrl}
-                    alt={entry.artist}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : (
-                  <Users className="w-10 h-10 text-neutral-500" />
-                )}
-                {/* Botón flotante de reproducción rápida */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handlePlayGroup(entry.tracks);
-                  }}
-                  title={`Reproducir música de ${entry.artist}`}
-                  className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                >
-                  <div className="w-10 h-10 rounded-full bg-purple-600 text-white flex items-center justify-center shadow-lg">
-                    <Play className="w-4 h-4 fill-white ml-0.5" />
-                  </div>
-                </button>
-              </div>
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+            {artistsMap.slice(0, artistsLimit).map((entry) => (
+              <div
+                key={entry.artist}
+                onClick={() => setSelectedArtist(entry.artist)}
+                className="group p-3 sm:p-4 rounded-2xl border transition-all cursor-pointer flex flex-col items-center text-center hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  backgroundColor: "var(--color-surface, #141414)",
+                  borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))",
+                }}
+              >
+                {/* Avatar de Artista */}
+                <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden shadow-lg border border-white/10 mb-3 bg-neutral-900 flex items-center justify-center">
+                  {entry.coverUrl ? (
+                    <img
+                      src={entry.coverUrl}
+                      alt={entry.artist}
+                      loading="lazy"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <Users className="w-10 h-10 text-neutral-500" />
+                  )}
+                  {/* Botón flotante de reproducción rápida */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePlayGroup(entry.tracks);
+                    }}
+                    title={`Reproducir música de ${entry.artist}`}
+                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-purple-600 text-white flex items-center justify-center shadow-lg">
+                      <Play className="w-4 h-4 fill-white ml-0.5" />
+                    </div>
+                  </button>
+                </div>
 
-              <span className="text-xs sm:text-sm font-bold text-white truncate w-full group-hover:text-purple-300 transition-colors">
-                {entry.artist}
-              </span>
-              <span className="text-[11px] text-neutral-400 mt-0.5">
-                {entry.tracks.length} {entry.tracks.length === 1 ? "canción" : "canciones"}
-              </span>
+                <span className="text-xs sm:text-sm font-bold text-white truncate w-full group-hover:text-purple-300 transition-colors">
+                  {entry.artist}
+                </span>
+                <span className="text-[11px] text-neutral-400 mt-0.5">
+                  {entry.tracks.length} {entry.tracks.length === 1 ? "canción" : "canciones"}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Observer para cargar más artistas */}
+          {artistsLimit < artistsMap.length && (
+            <div
+              ref={artistsLoadMoreRef}
+              className="py-4 text-center text-xs text-neutral-400 font-mono flex items-center justify-center gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+              <span>Cargando más artistas ({artistsLimit} de {artistsMap.length})...</span>
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -907,56 +973,70 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       {/* 3. SECCIÓN: ÁLBUMES (Cuadrícula agrupada por Álbum) */}
       {/* ========================================================================= */}
       {!selectedArtist && !selectedAlbum && !selectedFolder && activeSection === "albums" && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-          {albumsMap.map((entry) => (
-            <div
-              key={`${entry.album}-${entry.artist}`}
-              onClick={() => setSelectedAlbum(entry.album)}
-              className="group p-3 rounded-2xl border transition-all cursor-pointer flex flex-col hover:scale-[1.02] active:scale-[0.98]"
-              style={{
-                backgroundColor: "var(--color-surface, #141414)",
-                borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))",
-              }}
-            >
-              {/* Carátula del Álbum */}
-              <div className="relative aspect-square w-full rounded-xl overflow-hidden shadow-lg border border-white/10 mb-2.5 bg-neutral-900 flex items-center justify-center">
-                {entry.coverUrl ? (
-                  <img
-                    src={entry.coverUrl}
-                    alt={entry.album}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : (
-                  <Disc3 className="w-12 h-12 text-neutral-500" />
-                )}
-                {/* Botón flotante de reproducción rápida */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handlePlayGroup(entry.tracks);
-                  }}
-                  title={`Reproducir álbum ${entry.album}`}
-                  className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                >
-                  <div className="w-10 h-10 rounded-full bg-purple-600 text-white flex items-center justify-center shadow-lg">
-                    <Play className="w-4 h-4 fill-white ml-0.5" />
-                  </div>
-                </button>
-              </div>
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+            {albumsMap.slice(0, albumsLimit).map((entry) => (
+              <div
+                key={`${entry.album}-${entry.artist}`}
+                onClick={() => setSelectedAlbum(entry.album)}
+                className="group p-3 rounded-2xl border transition-all cursor-pointer flex flex-col hover:scale-[1.02] active:scale-[0.98]"
+                style={{
+                  backgroundColor: "var(--color-surface, #141414)",
+                  borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))",
+                }}
+              >
+                {/* Carátula del Álbum */}
+                <div className="relative aspect-square w-full rounded-xl overflow-hidden shadow-lg border border-white/10 mb-2.5 bg-neutral-900 flex items-center justify-center">
+                  {entry.coverUrl ? (
+                    <img
+                      src={entry.coverUrl}
+                      alt={entry.album}
+                      loading="lazy"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <Disc3 className="w-12 h-12 text-neutral-500" />
+                  )}
+                  {/* Botón flotante de reproducción rápida */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePlayGroup(entry.tracks);
+                    }}
+                    title={`Reproducir álbum ${entry.album}`}
+                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-purple-600 text-white flex items-center justify-center shadow-lg">
+                      <Play className="w-4 h-4 fill-white ml-0.5" />
+                    </div>
+                  </button>
+                </div>
 
-              <span className="text-xs sm:text-sm font-bold text-white truncate w-full group-hover:text-purple-300 transition-colors">
-                {entry.album}
-              </span>
-              <span className="text-[11px] text-neutral-400 truncate w-full">
-                {entry.artist}
-              </span>
-              <span className="text-[10px] text-neutral-500 mt-1">
-                {entry.tracks.length} {entry.tracks.length === 1 ? "canción" : "canciones"}
-                {entry.year ? ` · ${entry.year}` : ""}
-              </span>
+                <span className="text-xs sm:text-sm font-bold text-white truncate w-full group-hover:text-purple-300 transition-colors">
+                  {entry.album}
+                </span>
+                <span className="text-[11px] text-neutral-400 truncate w-full">
+                  {entry.artist}
+                </span>
+                <span className="text-[10px] text-neutral-500 mt-1">
+                  {entry.tracks.length} {entry.tracks.length === 1 ? "canción" : "canciones"}
+                  {entry.year ? ` · ${entry.year}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Observer para cargar más álbumes */}
+          {albumsLimit < albumsMap.length && (
+            <div
+              ref={albumsLoadMoreRef}
+              className="py-4 text-center text-xs text-neutral-400 font-mono flex items-center justify-center gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+              <span>Cargando más álbumes ({albumsLimit} de {albumsMap.length})...</span>
             </div>
-          ))}
+          )}
         </div>
       )}
 

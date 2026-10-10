@@ -98,6 +98,7 @@ import { AlertCircle, Check, Sparkles } from "lucide-react";
 import {
   loadTracksFromDB,
   saveTracksToDB,
+  saveTracksInChunks,
   removeTrackFromDB,
   removeMultipleTracksFromDB,
   addHiddenTrack,
@@ -570,24 +571,7 @@ export function SonoraApp() {
           if (hasPerms) {
             const newDiscovered = await autoScanStartup(
               currentList,
-              filterShortAudios,
-              (newTrack) => {
-                // 3. AGREGAR A BIBLIOTECA:
-                // Registra de inmediato en el estado global para que se refleje en la lista al instante
-                setTracks((prev) => {
-                  if (
-                    prev.some(
-                      (t) =>
-                        t.id === newTrack.id ||
-                        (t.nativePath && t.nativePath === newTrack.nativePath) ||
-                        (t.url && t.url === newTrack.url)
-                    )
-                  ) {
-                    return prev;
-                  }
-                  return [...prev, newTrack];
-                });
-              }
+              filterShortAudios
             );
             if (newDiscovered.length > 0) {
               setTracks((prev) => {
@@ -597,7 +581,7 @@ export function SonoraApp() {
                 // Si la biblioteca contenía únicamente demos sintéticos y detectamos música real del usuario, reemplazar demos
                 const isOnlyDemos = prev.length > 0 && prev.every((t) => t.id.startsWith("demo_"));
                 const merged = isOnlyDemos ? filteredNew : [...prev, ...filteredNew];
-                saveTracksToDB(merged);
+                saveTracksInChunks(merged, 50).catch(console.warn);
                 return merged;
               });
               setToastMessage(`Biblioteca actualizada: ${newDiscovered.length} canción(es) detectada(s)`);
@@ -660,19 +644,37 @@ export function SonoraApp() {
 
   const currentTrack = activeQueue[currentTrackIndex] || visibleTracks[currentTrackIndex] || tracks[currentTrackIndex] || null;
 
+  const currentTrackIndexRef = useRef(currentTrackIndex);
+  currentTrackIndexRef.current = currentTrackIndex;
+  const currentTrackRef = useRef(currentTrack);
+  currentTrackRef.current = currentTrack;
+  const activeQueueRef = useRef(activeQueue);
+  activeQueueRef.current = activeQueue;
+  const visibleTracksRef = useRef(visibleTracks);
+  visibleTracksRef.current = visibleTracks;
+  const tracksRef = useRef(tracks);
+  tracksRef.current = tracks;
+  const playbackModeRef = useRef(playbackMode);
+  playbackModeRef.current = playbackMode;
+  const shuffledQueueRef = useRef(shuffledQueue);
+  shuffledQueueRef.current = shuffledQueue;
+  const activePlayingTrackIdRef = useRef<string | null>(null);
+  const previousModeBeforeShuffleRef = useRef<PlaybackMode>("repeat-all");
+
   // Cache de búsquedas fallidas de carátulas para evitar peticiones de red repetitivas
   const failedCoverSearchesRef = useRef<Set<string>>(new Set());
   const checkedEmbeddedCoversRef = useRef<Set<string>>(new Set());
   // Historial cronológico de pistas reproducidas para retroceso exacto a la canción previa (Lark Player / Spotify style)
   const playbackHistoryRef = useRef<Track[]>([]);
 
-  // Buscador automatizado de carátulas en línea (Deezer con respaldo en iTunes)
+  // Buscador automatizado de carátulas en línea (Deezer con respaldo en iTunes) con debounce de 1200ms
   useEffect(() => {
     let isMounted = true;
 
     async function actualizarCaratula() {
-      // Si el usuario desactivó la opción en ajustes, no hacemos nada
+      // Si el usuario desactivó la opción en ajustes o no hay conexión a internet, no consultar red
       if (!buscarCaratulasOnline) return;
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
       if (!currentTrack || !currentTrack.artist || !currentTrack.title) return;
 
       const trackId = currentTrack.id;
@@ -721,10 +723,13 @@ export function SonoraApp() {
       }
     }
 
-    actualizarCaratula();
+    const timer = setTimeout(() => {
+      actualizarCaratula();
+    }, 1200);
 
     return () => {
       isMounted = false;
+      clearTimeout(timer);
     };
   }, [currentTrack?.id, currentTrack?.coverUrl, buscarCaratulasOnline]);
 
@@ -839,6 +844,7 @@ export function SonoraApp() {
       setIsPlaying(true);
       audioEngine.setPlaybackState(true);
 
+      activePlayingTrackIdRef.current = track.id;
       await audioRef.current.play();
       syncMediaSessionPlaybackState("playing");
     } catch (err: any) {
@@ -864,6 +870,7 @@ export function SonoraApp() {
           if (fresh && audioRef.current) {
             track.url = fresh;
             audioRef.current.src = fresh;
+            activePlayingTrackIdRef.current = track.id;
             await audioRef.current.play();
             return;
           }
@@ -873,17 +880,20 @@ export function SonoraApp() {
       }
 
       console.warn("Playback error on track:", track.title, err);
-      // Auto-recuperación: si la pista falló, saltar automáticamente a la siguiente para no congelar la app
-      setToastMessage(`No se pudo reproducir "${track.title}". Saltando a la siguiente...`);
-      setTimeout(() => {
-        handleNextRef.current();
-      }, 1200);
+      // Notificar al usuario sin desencadenar bucles infinitos de saltos que congelan la aplicación
+      setToastMessage(`No se pudo reproducir "${track.title}"`);
     }
   }, []);
 
   // Update audio source and lazy-load embedded cover art when currentTrack changes
   useEffect(() => {
     if (!audioRef.current || !currentTrack) return;
+
+    // Si ya estamos reproduciendo exactamente esta pista, NO reiniciar audio para no cortar la música ni congelar
+    if (activePlayingTrackIdRef.current === currentTrack.id && audioRef.current.src) {
+      return;
+    }
+    activePlayingTrackIdRef.current = currentTrack.id;
 
     if (isPlayingRef.current) {
       startPlayback(currentTrack);
@@ -1272,75 +1282,119 @@ export function SonoraApp() {
     }
   }, [isMuted, volume]);
 
-  // Cycle playback mode con reordenamiento físico real de la cola en Shuffle
-  const handleCyclePlaybackMode = () => {
-    const modes: PlaybackMode[] = ["normal", "repeat-all", "repeat-one", "shuffle"];
-    const currentIdx = modes.indexOf(playbackMode);
-    const nextMode = modes[(currentIdx + 1) % modes.length];
-    setPlaybackMode(nextMode);
+  // Toggle directo de Modo Aleatorio (Shuffle)
+  const handleToggleShuffle = useCallback(() => {
+    const baseList = visibleTracksRef.current.length > 0 ? visibleTracksRef.current : tracksRef.current;
+    if (baseList.length === 0) return;
 
-    const baseList = visibleTracks.length > 0 ? visibleTracks : tracks;
-    if (nextMode === "shuffle") {
-      // Activar Shuffle: reordenar físicamente la cola colocando la pista actual al inicio
-      const activeCurrent = (shuffledQueue ? shuffledQueue[currentTrackIndex] : null) || baseList[currentTrackIndex] || null;
+    if (playbackModeRef.current === "shuffle") {
+      // Desactivar aleatorio: Restaurar modo de reproducción anterior
+      const restoreMode =
+        previousModeBeforeShuffleRef.current !== "shuffle"
+          ? previousModeBeforeShuffleRef.current
+          : "repeat-all";
+      setPlaybackMode(restoreMode);
+
+      const activeCurrent = currentTrackRef.current;
+      if (activeCurrent) {
+        const originalIdx = baseList.findIndex((t) => t.id === activeCurrent.id);
+        if (originalIdx !== -1) {
+          setCurrentTrackIndex(originalIdx);
+        }
+      }
+      setShuffledQueue(null);
+      setToastMessage("Modo Aleatorio desactivado: Orden original restaurado");
+    } else {
+      // Activar aleatorio:
+      previousModeBeforeShuffleRef.current = playbackModeRef.current;
+      setPlaybackMode("shuffle");
+
+      // La pista activa actualmente se mantiene sonando anclada al índice 0 sin reiniciar audio
+      const activeCurrent =
+        currentTrackRef.current || baseList[currentTrackIndexRef.current] || baseList[0];
       const newShuffled = createShuffledQueue(baseList, activeCurrent);
       setShuffledQueue(newShuffled);
       setCurrentTrackIndex(0);
-      setToastMessage("Modo Aleatorio activado: Cola reordenada físicamente");
-    } else {
-      // Desactivar Shuffle: restaurar orden original
-      if (shuffledQueue) {
-        const activeCurrent = shuffledQueue[currentTrackIndex] || null;
-        if (activeCurrent) {
-          const originalIdx = baseList.findIndex((t) => t.id === activeCurrent.id);
-          if (originalIdx !== -1) {
-            setCurrentTrackIndex(originalIdx);
-          }
-        }
-        setShuffledQueue(null);
-        setToastMessage("Modo normal: Cola original restaurada");
-      }
+      setToastMessage("Modo Aleatorio activado: Cola mezclada");
     }
-  };
+  }, []);
 
-  // Reproducción directa desde listas o desde la cola de reproducción
+  // Ciclo de modo repetición (Repeat All -> Repeat One -> Normal)
+  const handleCycleRepeatMode = useCallback(() => {
+    const repeatCycle: PlaybackMode[] = ["repeat-all", "repeat-one", "normal"];
+    const current =
+      playbackModeRef.current === "shuffle"
+        ? previousModeBeforeShuffleRef.current
+        : playbackModeRef.current;
+    const curIdx = repeatCycle.indexOf(current);
+    const nextRepeat = repeatCycle[(curIdx + 1) % repeatCycle.length];
+
+    if (playbackModeRef.current === "shuffle") {
+      previousModeBeforeShuffleRef.current = nextRepeat;
+      setToastMessage(
+        `Repetición: ${
+          nextRepeat === "repeat-one"
+            ? "Repetir una canción"
+            : nextRepeat === "repeat-all"
+            ? "Repetir toda la lista"
+            : "Sin repetición"
+        }`
+      );
+    } else {
+      setPlaybackMode(nextRepeat);
+      setToastMessage(
+        `Modo: ${
+          nextRepeat === "repeat-one"
+            ? "Repetir una canción"
+            : nextRepeat === "repeat-all"
+            ? "Repetir toda la lista"
+            : "Normal"
+        }`
+      );
+    }
+  }, []);
+
+  // Cycle playback mode general para compatibilidad
+  const handleCyclePlaybackMode = useCallback(() => {
+    handleToggleShuffle();
+  }, [handleToggleShuffle]);
+
+  // Reproducción directa desde listas o desde la cola de reproducción (memoizado estable para 60 FPS)
   const handlePlayTrack = useCallback((track: Track, _index?: number) => {
     if (isTrackCorrupted(track)) {
       handleCorruptedTrack(track);
       return;
     }
 
-    const baseList = visibleTracks.length > 0 ? visibleTracks : tracks;
+    const baseList = visibleTracksRef.current.length > 0 ? visibleTracksRef.current : tracksRef.current;
 
     // 1. Identificar si la canción seleccionada ya forma parte de la cola activa actual (activeQueue).
     // Si se pasó un índice directo válido que coincide con la pista, usarlo de inmediato O(1).
+    const currentQ = activeQueueRef.current;
     let foundIndex = -1;
-    if (typeof _index === "number" && _index >= 0 && _index < activeQueue.length && activeQueue[_index]?.id === track.id) {
+    if (typeof _index === "number" && _index >= 0 && _index < currentQ.length && currentQ[_index]?.id === track.id) {
       foundIndex = _index;
     } else {
-      foundIndex = activeQueue.findIndex((t) => t.id === track.id);
+      foundIndex = currentQ.findIndex((t) => t.id === track.id);
     }
 
     if (foundIndex !== -1) {
       // La pista ya existe en la cola activa (tanto si está en orden aleatorio 'shuffle' como en normal).
-      // REGLA CRÍTICA: NO re-barajar ni sobrescribir la cola existente si el usuario toca una canción desde la cola.
-      // Simplemente desplazamos el puntero actual a dicho índice conservando la cola completa de canciones.
-      if (foundIndex === currentTrackIndex && isPlayingRef.current) {
+      if (foundIndex === currentTrackIndexRef.current && isPlayingRef.current) {
         handleTogglePlay();
         return;
       }
       setCurrentTrackIndex(foundIndex);
     } else {
       // La pista no estaba en la cola activa actual (ej: seleccionada desde otra vista o filtro distinto):
-      if (playbackMode === "shuffle") {
-        if (!shuffledQueue || shuffledQueue.length === 0) {
-          // Si no existía aún una cola aleatoria, crearla iniciando con la pista seleccionada
+      if (playbackModeRef.current === "shuffle") {
+        const curShuffled = shuffledQueueRef.current;
+        if (!curShuffled || curShuffled.length === 0) {
           const newShuffled = createShuffledQueue(baseList, track);
           setShuffledQueue(newShuffled);
           setCurrentTrackIndex(0);
         } else {
-          // Si ya existía una cola aleatoria pero la pista no estaba presente, añadirla al frente sin destruir el resto
-          const newShuffled = [track, ...shuffledQueue.filter((t) => t.id !== track.id)];
+          const newShuffled = [track, ...curShuffled.filter((t) => t.id !== track.id)];
           setShuffledQueue(newShuffled);
           setCurrentTrackIndex(0);
         }
@@ -1353,18 +1407,20 @@ export function SonoraApp() {
     }
 
     // Registrar la canción anterior en el historial si es distinta a la que el usuario acaba de seleccionar
-    if (currentTrack && currentTrack.id !== track.id) {
-      playbackHistoryRef.current.push(currentTrack);
+    const prevPlaying = currentTrackRef.current;
+    if (prevPlaying && prevPlaying.id !== track.id) {
+      playbackHistoryRef.current.push(prevPlaying);
       if (playbackHistoryRef.current.length > 50) {
         playbackHistoryRef.current.shift();
       }
     }
 
+    activePlayingTrackIdRef.current = track.id;
     isUserIntentionalPauseRef.current = false;
     isPlayingRef.current = true;
     setIsPlaying(true);
     startPlayback(track, 0);
-  }, [visibleTracks, tracks, playbackMode, activeQueue, currentTrackIndex, startPlayback, shuffledQueue]);
+  }, [handleCorruptedTrack, handleTogglePlay, startPlayback]);
 
   // Toggle favorite
   const handleToggleFavorite = useCallback((id: string) => {
@@ -1858,9 +1914,18 @@ export function SonoraApp() {
   const handleOpenTheme = useCallback(() => setIsThemeOpen(true), []);
   const handleOpenHiddenTracks = useCallback(() => setIsHiddenTracksOpen(true), []);
   const handleToggleMiniMode = useCallback(() => setIsMiniMode((prev) => !prev), []);
+  const handleEnableMiniMode = useCallback(() => setIsMiniMode(true), []);
+  const handleDisableMiniMode = useCallback(() => setIsMiniMode(false), []);
   const handleOpenInstallModal = useCallback(() => setIsInstallModalOpen(true), []);
   const handleOpenLyricsSearchForTrack = useCallback((track: Track) => setLyricsSearchTrack(track), []);
+  const handleOpenLyricsSearchCurrent = useCallback(() => {
+    if (currentTrackRef.current) setLyricsSearchTrack(currentTrackRef.current);
+  }, []);
   const handleOpenID3Editor = useCallback((track: Track) => setEditingTrack(track), []);
+  const handleOpenCoverPickerTrack = useCallback((track: Track) => setCoverPickerTrack(track), []);
+  const handleOpenCoversManager = useCallback(() => setIsCoversManagerOpen(true), []);
+  const handleCloseExpandedPlayer = useCallback(() => setIsExpandedPlayerOpen(false), []);
+  const handleOpenSleepTimerModal = useCallback(() => setIsSleepTimerOpen(true), []);
   const handleOpenExpandedCover = useCallback(() => {
     setExpandedSubTab("cover");
     setIsExpandedPlayerOpen(true);
@@ -1945,12 +2010,9 @@ export function SonoraApp() {
                 return;
               }
 
-              // Actualizar duración de la pista si era 0 (solo la pista individual para no saturar IndexedDB)
+              // Actualizar duración de la pista si era 0 (actualización en memoria e IndexedDB sin reordenar toda la biblioteca)
               if (currentTrack && (!currentTrack.duration || currentTrack.duration <= 0)) {
-                const trackId = currentTrack.id;
-                setTracks((prev) =>
-                  prev.map((t) => (t.id === trackId ? { ...t, duration: realDuration } : t))
-                );
+                currentTrack.duration = realDuration;
                 updateTrackInDb({ ...currentTrack, duration: realDuration }).catch(() => {});
               }
             }
@@ -2041,7 +2103,7 @@ export function SonoraApp() {
         onToggleFilterShortAudios={handleToggleFilterShortAudios}
         buscarCaratulasOnline={buscarCaratulasOnline}
         onToggleBuscarCaratulasOnline={handleToggleBuscarCaratulasOnline}
-        onOpenCoversManager={() => setIsCoversManagerOpen(true)}
+        onOpenCoversManager={handleOpenCoversManager}
         coversCount={getCoversFileStats().totalCovers}
         onOpenInstallModal={handleOpenInstallModal}
         onOpenWelcome={handleResetWelcome}
@@ -2111,19 +2173,16 @@ export function SonoraApp() {
           onToggleMute={handleToggleMute}
           onCyclePlaybackMode={handleCyclePlaybackMode}
           onToggleFavorite={handleToggleFavorite}
-          onRestoreBottomPlayer={() => setIsMiniMode(false)}
-          onOpenExpanded={() => {
-            setExpandedSubTab("queue");
-            setIsExpandedPlayerOpen(true);
-          }}
-          onCloseMiniMode={() => setIsMiniMode(false)}
+          onRestoreBottomPlayer={handleDisableMiniMode}
+          onOpenExpanded={handleOpenExpandedCover}
+          onCloseMiniMode={handleDisableMiniMode}
         />
       )}
 
       {/* Full Screen Expanded Player */}
       <ExpandedPlayer
         isOpen={isExpandedPlayerOpen}
-        onClose={() => setIsExpandedPlayerOpen(false)}
+        onClose={handleCloseExpandedPlayer}
         currentTrack={currentTrack}
         queue={activeQueue}
         currentTrackIndex={currentTrackIndex}
@@ -2138,19 +2197,21 @@ export function SonoraApp() {
         onSeek={handleSeek}
         onToggleFavorite={handleToggleFavorite}
         onCyclePlaybackMode={handleCyclePlaybackMode}
-        onOpenLyricsSearch={() => setLyricsSearchTrack(currentTrack)}
-        onOpenEqualizer={() => setIsEqualizerOpen(true)}
-        onToggleMiniMode={() => setIsMiniMode(true)}
+        onOpenLyricsSearch={handleOpenLyricsSearchCurrent}
+        onOpenEqualizer={handleOpenEqualizer}
+        onToggleMiniMode={handleEnableMiniMode}
         onHideTrack={handleHideTrack}
         onDeleteTracks={handleDeleteTracks}
         activeSubTab={expandedSubTab}
-        onOpenID3Editor={(track) => setEditingTrack(track)}
-        onOpenCoverPicker={(track) => setCoverPickerTrack(track)}
+        onOpenID3Editor={handleOpenID3Editor}
+        onOpenCoverPicker={handleOpenCoverPickerTrack}
         sleepTimer={sleepTimer}
-        onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
+        onOpenSleepTimer={handleOpenSleepTimerModal}
         onLyricsApplied={handleLyricsApplied}
         onLyricsRemoved={handleLyricsRemoved}
         onSwapTitleArtist={handleSwapTitleArtist}
+        onToggleShuffle={handleToggleShuffle}
+        onCycleRepeatMode={handleCycleRepeatMode}
       />
 
       {/* Floating Action Toast Notification */}
@@ -2292,22 +2353,7 @@ export function SonoraApp() {
             try {
               const newDiscovered = await autoScanStartup(
                 tracks,
-                filterShortAudios,
-                (newTrack) => {
-                  setTracks((prev) => {
-                    if (
-                      prev.some(
-                        (t) =>
-                          t.id === newTrack.id ||
-                          (t.nativePath && t.nativePath === newTrack.nativePath) ||
-                          (t.url && t.url === newTrack.url)
-                      )
-                    ) {
-                      return prev;
-                    }
-                    return [...prev, newTrack];
-                  });
-                }
+                filterShortAudios
               );
               if (newDiscovered.length > 0) {
                 setTracks((prev) => {
@@ -2316,7 +2362,7 @@ export function SonoraApp() {
                   if (filteredNew.length === 0) return prev;
                   const isOnlyDemos = prev.length > 0 && prev.every((t) => t.id.startsWith("demo_"));
                   const merged = isOnlyDemos ? filteredNew : [...prev, ...filteredNew];
-                  saveTracksToDB(merged);
+                  saveTracksInChunks(merged, 50).catch(console.warn);
                   return merged;
                 });
                 setToastMessage(`Biblioteca actualizada: ${newDiscovered.length} canción(es) detectada(s)`);

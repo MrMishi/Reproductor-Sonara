@@ -468,8 +468,8 @@ export const TrackList: React.FC<TrackListProps> = React.memo(({
     return () => window.removeEventListener("click", handleDocumentClick);
   }, [openMenuTrackId]);
 
-  // Selection helpers
-  const handleToggleSelect = (id: string, e?: React.MouseEvent) => {
+  // Selection helpers memoizados para estabilidad de TrackRow
+  const handleToggleSelect = useCallback((id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -480,34 +480,39 @@ export const TrackList: React.FC<TrackListProps> = React.memo(({
       }
       return next;
     });
-  };
+  }, []);
 
-  const handleToggleSelectAll = () => {
-    if (selectedIds.size === tracks.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(tracks.map((t) => t.id)));
-    }
-  };
+  const handleToggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === tracks.length) {
+        return new Set();
+      } else {
+        return new Set(tracks.map((t) => t.id));
+      }
+    });
+  }, [tracks]);
 
-  const handleExitSelectionMode = () => {
+  const handleExitSelectionMode = useCallback(() => {
     setIsSelectionMode(false);
     setSelectedIds(new Set());
-  };
+  }, []);
 
-  const handleStartDeleteSelected = () => {
-    if (selectedIds.size === 0) return;
-    const selectedTracks = tracks.filter((t) => selectedIds.has(t.id));
-    setPendingDeleteTracks(selectedTracks);
-    setShowConfirmModal(true);
-  };
+  const handleStartDeleteSelected = useCallback(() => {
+    setSelectedIds((prevSelected) => {
+      if (prevSelected.size === 0) return prevSelected;
+      const selectedTracks = tracks.filter((t) => prevSelected.has(t.id));
+      setPendingDeleteTracks(selectedTracks);
+      setShowConfirmModal(true);
+      return prevSelected;
+    });
+  }, [tracks]);
 
-  const handleStartDeleteSingle = (track: Track) => {
+  const handleStartDeleteSingle = useCallback((track: Track) => {
     setPendingDeleteTracks([track]);
     setShowConfirmModal(true);
-  };
+  }, []);
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = useCallback(() => {
     if (pendingDeleteTracks.length > 0 && onDeleteTracks) {
       const idsToDelete = pendingDeleteTracks.map((t) => t.id);
       onDeleteTracks(idsToDelete);
@@ -525,12 +530,12 @@ export const TrackList: React.FC<TrackListProps> = React.memo(({
     }
     setShowConfirmModal(false);
     setPendingDeleteTracks([]);
-  };
+  }, [pendingDeleteTracks, onDeleteTracks, isSelectionMode, selectedIds.size]);
 
-  const handleCancelDelete = () => {
+  const handleCancelDelete = useCallback(() => {
     setShowConfirmModal(false);
     setPendingDeleteTracks([]);
-  };
+  }, []);
 
   if (tracks.length === 0) {
     return (

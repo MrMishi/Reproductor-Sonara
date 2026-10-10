@@ -100,6 +100,8 @@ export interface ExpandedPlayerProps {
   onLyricsApplied?: (trackId: string, lyrics: Track["lyrics"], album?: string) => void;
   onLyricsRemoved?: (trackId: string) => void;
   onSwapTitleArtist?: (track: Track) => void;
+  onToggleShuffle?: () => void;
+  onCycleRepeatMode?: () => void;
 }
 
 function formatTime(seconds: number): string {
@@ -109,7 +111,219 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
 }
 
-export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
+interface QueueRowProps {
+  track: Track;
+  idx: number;
+  isCurrent: boolean;
+  isPlaying: boolean;
+  onSelectTrack: (track: Track, index: number) => void;
+  onHideTrack?: (track: Track) => void;
+  onDeleteTracks?: (trackIds: string[]) => void;
+}
+
+const QueueRow = React.memo<QueueRowProps>(
+  ({ track, idx, isCurrent, isPlaying, onSelectTrack, onHideTrack, onDeleteTracks }) => {
+    return (
+      <div
+        id={`queue-item-${track.id}`}
+        onClick={() => onSelectTrack(track, idx)}
+        className={`flex items-center justify-between p-2.5 cursor-pointer transition-all border font-mono rounded-xl ${
+          isCurrent
+            ? "bg-purple-950/70 border-violet-500/70 shadow-[0_0_15px_rgba(124,58,237,0.3)] text-white"
+            : "bg-white/[0.03] hover:bg-purple-950/20 border-white/5 hover:border-purple-500/30 text-neutral-300 hover:text-white"
+        }`}
+      >
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <span className="w-6 text-[11px] text-center font-mono shrink-0">
+            {isCurrent && isPlaying ? (
+              <span className="text-violet-400 font-bold animate-pulse">▶</span>
+            ) : (
+              <span className="opacity-50 text-[10px]">{String(idx + 1).padStart(2, "0")}</span>
+            )}
+          </span>
+          {/* Carátula compacta */}
+          <div
+            className={`w-9 h-9 shrink-0 overflow-hidden rounded-lg border ${
+              isCurrent ? "border-violet-500/60 shadow-[0_0_8px_rgba(124,58,237,0.35)]" : "border-white/10"
+            }`}
+          >
+            <img
+              src={track.coverUrl}
+              alt={track.title}
+              loading="lazy"
+              className="w-full h-full object-cover"
+            />
+          </div>
+          {/* Título y Artista */}
+          <div className="min-w-0 flex-1 flex flex-col justify-center py-0.5">
+            <div className="w-full min-w-0">
+              {isCurrent && isPlaying ? (
+                <CyberMarquee
+                  text={track.title}
+                  active={true}
+                  className="text-xs sm:text-sm font-bold tracking-wide text-fuchsia-300 drop-shadow-[0_0_8px_rgba(236,72,153,0.4)]"
+                />
+              ) : (
+                <p className="text-xs sm:text-sm font-bold tracking-wide text-white truncate">
+                  {track.title}
+                </p>
+              )}
+            </div>
+            <div className="w-full min-w-0 mt-0.5">
+              <p className="text-[10px] sm:text-[11px] font-mono tracking-wider text-purple-300/80 truncate">
+                {track.artist || "Artista Desconocido"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="flex items-center gap-2 shrink-0 ml-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="text-[11px] font-mono opacity-60">
+            {formatTime(track.duration)}
+          </span>
+          {onHideTrack && (
+            <button
+              id={`queue-hide-btn-${track.id}`}
+              onClick={() => onHideTrack(track)}
+              title="Ocultar pista"
+              className="p-1 rounded hover:bg-white/10 text-neutral-400 hover:text-white opacity-40 hover:opacity-100 transition-all"
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {onDeleteTracks && (
+            <button
+              id={`queue-delete-btn-${track.id}`}
+              onClick={() => onDeleteTracks([track.id])}
+              title="Eliminar de la cola"
+              className="p-1 rounded hover:bg-red-500/20 text-neutral-400 hover:text-red-400 opacity-40 hover:opacity-100 transition-all"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.track.id === next.track.id &&
+    prev.idx === next.idx &&
+    prev.isCurrent === next.isCurrent &&
+    (prev.isCurrent ? prev.isPlaying : false) === (next.isCurrent ? next.isPlaying : false) &&
+    prev.track.title === next.track.title &&
+    prev.track.artist === next.track.artist &&
+    prev.track.coverUrl === next.track.coverUrl &&
+    prev.track.duration === next.track.duration
+);
+
+interface QueueListViewProps {
+  queue: Track[];
+  currentTrackId?: string;
+  currentTrackIndex: number;
+  isPlaying: boolean;
+  playbackMode: PlaybackMode;
+  onSelectTrack: (track: Track, index: number) => void;
+  onHideTrack?: (track: Track) => void;
+  onDeleteTracks?: (trackIds: string[]) => void;
+}
+
+const QueueListView = React.memo<QueueListViewProps>(({
+  queue,
+  currentTrackId,
+  currentTrackIndex,
+  isPlaying,
+  playbackMode,
+  onSelectTrack,
+  onHideTrack,
+  onDeleteTracks,
+}) => {
+  const [queueDisplayLimit, setQueueDisplayLimit] = useState<number>(50);
+  const queueLoadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setQueueDisplayLimit(50);
+  }, [queue]);
+
+  useEffect(() => {
+    if (queueDisplayLimit >= queue.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setQueueDisplayLimit((prev) => Math.min(prev + 50, queue.length));
+        }
+      },
+      { rootMargin: "300px" }
+    );
+    const el = queueLoadMoreRef.current;
+    if (el) observer.observe(el);
+    return () => {
+      if (el) observer.unobserve(el);
+      observer.disconnect();
+    };
+  }, [queueDisplayLimit, queue.length]);
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full px-3 sm:px-6 py-2">
+      {/* Encabezado ultra compacto y limpio */}
+      <div className="flex items-center justify-between mb-2 px-1 shrink-0">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-bold text-white tracking-wide">
+            Cola
+          </h3>
+          <span className="text-xs text-neutral-400 font-normal">
+            ({queue.length})
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {playbackMode === "shuffle" && (
+            <span
+              className="inline-flex items-center gap-1 text-[11px] text-purple-300 font-medium bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 rounded-full"
+              title="Orden aleatorio activo"
+            >
+              <Shuffle className="w-3 h-3" />
+              <span>Aleatorio</span>
+            </span>
+          )}
+          <span className="text-xs text-neutral-400 font-mono">
+            {currentTrackIndex + 1} de {queue.length}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+        {queue.slice(0, queueDisplayLimit).map((track, idx) => (
+          <QueueRow
+            key={`${track.id}-${idx}`}
+            track={track}
+            idx={idx}
+            isCurrent={track.id === currentTrackId}
+            isPlaying={isPlaying}
+            onSelectTrack={onSelectTrack}
+            onHideTrack={onHideTrack}
+            onDeleteTracks={onDeleteTracks}
+          />
+        ))}
+
+        {/* Elemento observador para cargar más canciones en la cola */}
+        {queueDisplayLimit < queue.length && (
+          <div
+            ref={queueLoadMoreRef}
+            className="py-3 text-center text-xs text-neutral-400 font-mono flex items-center justify-center gap-2"
+          >
+            <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+            <span>Cargando más canciones ({queueDisplayLimit} de {queue.length})...</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
   isOpen,
   onClose,
   currentTrack,
@@ -139,6 +353,8 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   onLyricsApplied,
   onLyricsRemoved,
   onSwapTitleArtist,
+  onToggleShuffle,
+  onCycleRepeatMode,
 }) => {
   const [activeTab, setActiveTab] = useState<"cover" | "queue" | "lyrics" | "details">(
     activeSubTab || "cover"
@@ -467,9 +683,9 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
   return (
     <div
       id="ytm-expanded-player"
-      className="fixed inset-0 z-50 flex flex-col backdrop-blur-3xl animate-in slide-in-from-bottom duration-300 ease-out overflow-hidden select-none"
+      className="fixed inset-0 z-50 flex flex-col bg-[#07070a] animate-in slide-in-from-bottom duration-300 ease-out overflow-hidden select-none"
       style={{
-        backgroundColor: "var(--color-bg, #030303)",
+        backgroundColor: "var(--color-bg, #07070a)",
         color: "var(--color-text-primary, #ffffff)",
       }}
     >
@@ -477,7 +693,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
       {/* TOP HEADER: Navigation Tabs, Minimize & EQ                     */}
       {/* ------------------------------------------------------------- */}
       <header
-        className="flex items-center justify-between px-4 sm:px-6 py-3 border-b shrink-0 z-30 bg-neutral-950/80 backdrop-blur-md"
+        className="flex items-center justify-between px-4 sm:px-6 py-3 border-b shrink-0 z-30 bg-neutral-950/95"
         style={{ borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))" }}
       >
         <button
@@ -1245,130 +1461,16 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
         {/* VIEW 3: QUEUE (COLA / SIGUIENTES)                         */}
         {/* ========================================================= */}
         {activeTab === "queue" && (
-          <div className="flex-1 flex flex-col overflow-hidden max-w-3xl mx-auto w-full px-3 sm:px-6 py-2">
-            {/* Encabezado ultra compacto y limpio */}
-            <div className="flex items-center justify-between mb-2 px-1 shrink-0">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-white tracking-wide">
-                  Cola
-                </h3>
-                <span className="text-xs text-neutral-400 font-normal">
-                  ({queue.length})
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {playbackMode === "shuffle" && (
-                  <span
-                    className="inline-flex items-center gap-1 text-[11px] text-purple-300 font-medium bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 rounded-full"
-                    title="Orden aleatorio activo"
-                  >
-                    <Shuffle className="w-3 h-3" />
-                    <span>Aleatorio</span>
-                  </span>
-                )}
-                <span className="text-xs text-neutral-400 font-mono">
-                  {currentTrackIndex + 1} de {queue.length}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-              {queue.map((track, idx) => {
-                const isCurrent = track.id === currentTrack.id;
-                return (
-                  <div
-                    key={`${track.id}-${idx}`}
-                    id={`queue-item-${track.id}`}
-                    onClick={() => onSelectTrack(track, idx)}
-                    style={{
-                      clipPath: "polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px)",
-                    }}
-                    className={`flex items-center justify-between p-2.5 cursor-pointer transition-all border font-mono ${
-                      isCurrent
-                        ? "bg-purple-950/60 border-violet-500/60 shadow-[0_0_15px_rgba(124,58,237,0.3)] text-white"
-                        : "bg-black/40 hover:bg-purple-950/20 border-white/5 hover:border-purple-500/30 text-neutral-300 hover:text-white"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <span className="w-6 text-[11px] text-center font-mono shrink-0">
-                        {isCurrent && isPlaying ? (
-                          <span className="text-violet-400 font-bold animate-pulse">▶</span>
-                        ) : (
-                          <span className="opacity-50 text-[10px]">{String(idx + 1).padStart(2, "0")}</span>
-                        )}
-                      </span>
-                      {/* Carátula compacta con biselado 45° */}
-                      <div
-                        style={{
-                          clipPath: "polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px)",
-                        }}
-                        className={`w-9 h-9 shrink-0 overflow-hidden border ${
-                          isCurrent ? "border-violet-500/60 shadow-[0_0_8px_rgba(124,58,237,0.35)]" : "border-white/10"
-                        }`}
-                      >
-                        <img
-                          src={track.coverUrl}
-                          alt={track.title}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      {/* Título y Artista en dos líneas separadas con tipografía Cyberpunk y Marquee */}
-                      <div className="min-w-0 flex-1 flex flex-col justify-center py-0.5">
-                        <div className="w-full min-w-0">
-                          <CyberMarquee
-                            text={track.title}
-                            active={isCurrent && isPlaying}
-                            animateOnHover={true}
-                            className={`text-xs sm:text-sm font-bold tracking-wide ${
-                              isCurrent ? "text-fuchsia-300 font-bold drop-shadow-[0_0_8px_rgba(236,72,153,0.4)]" : "text-white"
-                            }`}
-                          />
-                        </div>
-                        <div className="w-full min-w-0 mt-0.5">
-                          <CyberMarquee
-                            text={track.artist || "Artista Desconocido"}
-                            active={isCurrent && isPlaying}
-                            animateOnHover={true}
-                            className="text-[10px] sm:text-[11px] font-mono tracking-wider text-purple-300/80 group-hover:text-purple-200"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      className="flex items-center gap-2 shrink-0 ml-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <span className="text-[11px] font-mono opacity-60">
-                        {formatTime(track.duration)}
-                      </span>
-                      {onHideTrack && (
-                        <button
-                          id={`queue-hide-btn-${track.id}`}
-                          onClick={() => onHideTrack(track)}
-                          title="Ocultar pista"
-                          className="p-1 rounded hover:bg-white/10 text-neutral-400 hover:text-white opacity-40 hover:opacity-100 transition-all"
-                        >
-                          <EyeOff className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {onDeleteTracks && (
-                        <button
-                          id={`queue-delete-btn-${track.id}`}
-                          onClick={() => onDeleteTracks([track.id])}
-                          title="Eliminar de la cola"
-                          className="p-1 rounded hover:bg-red-500/20 text-neutral-400 hover:text-red-400 opacity-40 hover:opacity-100 transition-all"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <QueueListView
+            queue={queue}
+            currentTrackId={currentTrack?.id}
+            currentTrackIndex={currentTrackIndex}
+            isPlaying={isPlaying}
+            playbackMode={playbackMode}
+            onSelectTrack={onSelectTrack}
+            onHideTrack={onHideTrack}
+            onDeleteTracks={onDeleteTracks}
+          />
         )}
 
         {/* ========================================================= */}
@@ -1493,7 +1595,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
       {/* ------------------------------------------------------------- */}
       <footer
         id="expanded-player-bottom-deck"
-        className="shrink-0 w-full border-t z-30 px-4 sm:px-8 pt-3 pb-6 sm:pb-5 bg-neutral-950/95 backdrop-blur-2xl"
+        className="shrink-0 w-full border-t z-30 px-4 sm:px-8 pt-3 pb-6 sm:pb-5 bg-neutral-950"
         style={{
           borderColor: "var(--color-border-subtle, rgba(255,255,255,0.08))",
           boxShadow: "0 -8px 32px rgba(0,0,0,0.8)",
@@ -1526,12 +1628,12 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
           {/* Shuffle Mode */}
           <button
             id="expanded-shuffle-btn"
-            onClick={onCyclePlaybackMode}
-            title={`Modo: ${playbackMode}`}
+            onClick={onToggleShuffle || onCyclePlaybackMode}
+            title={playbackMode === "shuffle" ? "Desactivar modo aleatorio" : "Activar modo aleatorio"}
             className={`p-2.5 rounded-full transition-colors ${
-              playbackMode === "shuffle" ? "text-white" : "opacity-50 hover:opacity-100 text-neutral-300"
+              playbackMode === "shuffle" ? "text-purple-400 font-bold" : "opacity-50 hover:opacity-100 text-neutral-300"
             }`}
-            style={{ color: playbackMode === "shuffle" ? "var(--color-accent)" : undefined }}
+            style={{ color: playbackMode === "shuffle" ? "var(--color-accent, #c084fc)" : undefined }}
           >
             <Shuffle className="w-5 h-5" />
           </button>
@@ -1577,12 +1679,12 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
           {/* Repeat Mode */}
           <button
             id="expanded-repeat-btn"
-            onClick={onCyclePlaybackMode}
+            onClick={onCycleRepeatMode || onCyclePlaybackMode}
             title={`Modo: ${playbackMode}`}
             className={`p-2.5 rounded-full transition-colors ${
-              playbackMode.startsWith("repeat") ? "text-white" : "opacity-50 hover:opacity-100 text-neutral-300"
+              playbackMode.startsWith("repeat") ? "text-purple-400 font-bold" : "opacity-50 hover:opacity-100 text-neutral-300"
             }`}
-            style={{ color: playbackMode.startsWith("repeat") ? "var(--color-accent)" : undefined }}
+            style={{ color: playbackMode.startsWith("repeat") ? "var(--color-accent, #c084fc)" : undefined }}
           >
             {playbackMode === "repeat-one" ? (
               <Repeat1 className="w-5 h-5" />
@@ -1594,6 +1696,6 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = ({
       </footer>
     </div>
   );
-};
+});
 
 export default ExpandedPlayer;
