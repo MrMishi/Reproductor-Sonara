@@ -1,7 +1,8 @@
-const { app, BrowserWindow, protocol, net } = require('electron');
+const { app, BrowserWindow, protocol, net, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 
 // 1. Registrar esquema de protocolo seguro 'app://' antes de que la aplicación esté lista.
@@ -289,6 +290,33 @@ function showErrorScreen(mainWindow, description, code) {
   `)}`);
   mainWindow.show();
 }
+
+// IPC Handler: Permite ejecutar Unistaller.exe de forma segura desde la app si se solicita
+ipcMain.handle('app:launch-uninstaller', async () => {
+  try {
+    const appDir = path.dirname(app.getPath('exe'));
+    const candidates = [
+      path.join(appDir, 'Unistaller.exe'),
+      path.join(appDir, 'Uninstaller.exe'),
+      path.join(appDir, 'Uninstall Sonora Music.exe'),
+    ];
+
+    for (const exePath of candidates) {
+      if (fs.existsSync(exePath)) {
+        console.log('[Electron] Ejecutando desinstalador:', exePath);
+        const child = spawn(exePath, [], { detached: true, stdio: 'ignore' });
+        child.unref();
+        setTimeout(() => {
+          app.quit();
+        }, 1000);
+        return { success: true, path: exePath };
+      }
+    }
+    return { success: false, error: 'No se encontró Unistaller.exe en la carpeta de instalación' };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
 
 app.whenReady().then(() => {
   // Registrar el manejador de archivos para el protocolo 'app://'

@@ -31,6 +31,8 @@
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
-    "shortcutName": "Sonora Music"
+    "shortcutName": "Sonora Music",
+    "uninstallDisplayName": "Sonora Music - Desinstalar",
+    "include": "electron/installer.nsh"
   }
 }
