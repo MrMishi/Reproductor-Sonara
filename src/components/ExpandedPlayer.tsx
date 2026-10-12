@@ -69,6 +69,7 @@ import {
 } from "../services/lyricsService";
 import { VisualizerCanvas } from "./VisualizerCanvas";
 import { CyberMarquee } from "./CyberMarquee";
+import { generateCoverArt } from "../services/metadataParser";
 
 export interface ExpandedPlayerProps {
   isOpen: boolean;
@@ -102,6 +103,7 @@ export interface ExpandedPlayerProps {
   onSwapTitleArtist?: (track: Track) => void;
   onToggleShuffle?: () => void;
   onCycleRepeatMode?: () => void;
+  onToast?: (message: string) => void;
 }
 
 function formatTime(seconds: number): string {
@@ -151,6 +153,10 @@ const QueueRow = React.memo<QueueRowProps>(
               src={track.coverUrl}
               alt={track.title}
               loading="lazy"
+              onError={(e) => {
+                const target = e.currentTarget as HTMLImageElement;
+                target.src = generateCoverArt(track.title, track.artist);
+              }}
               className="w-full h-full object-cover"
             />
           </div>
@@ -323,7 +329,7 @@ const QueueListView = React.memo<QueueListViewProps>(({
   );
 });
 
-export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
+const ExpandedPlayerContent: React.FC<ExpandedPlayerProps & { currentTrack: Track }> = React.memo(({
   isOpen,
   onClose,
   currentTrack,
@@ -355,6 +361,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
   onSwapTitleArtist,
   onToggleShuffle,
   onCycleRepeatMode,
+  onToast,
 }) => {
   const [activeTab, setActiveTab] = useState<"cover" | "queue" | "lyrics" | "details">(
     activeSubTab || "cover"
@@ -486,8 +493,10 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
         onLyricsApplied(currentTrack.id, enriched, currentTrack.album);
       }
       setShowRomaji(true);
+      if (onToast) onToast("Transcripción a Romaji completada");
     } catch (err) {
       console.warn("[ExpandedPlayer] Error al traducir letras a Romaji bajo demanda:", err);
+      if (onToast) onToast("No se pudo transcribir a Romaji en este momento.");
     } finally {
       setIsTranscribingRomaji(false);
     }
@@ -548,8 +557,10 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
         onLyricsApplied(currentTrack.id, enriched, currentTrack.album);
       }
       setShowSpanish(true);
-    } catch (err) {
+      if (onToast) onToast("¡Letra traducida al español exitosamente!");
+    } catch (err: any) {
       console.warn("[ExpandedPlayer] Error al traducir letras a Español bajo demanda:", err);
+      if (onToast) onToast("No se pudo traducir la letra en este momento. Inténtalo de nuevo.");
     } finally {
       setIsTranslatingSpanish(false);
     }
@@ -856,6 +867,10 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
                   src={currentTrack.coverUrl}
                   alt={currentTrack.title}
                   draggable={false}
+                  onError={(e) => {
+                    const target = e.currentTarget as HTMLImageElement;
+                    target.src = generateCoverArt(currentTrack.title, currentTrack.artist);
+                  }}
                   className={`w-full h-full object-cover transition-transform duration-700 pointer-events-none ${
                     isPlaying ? "scale-105" : "scale-100"
                   }`}
@@ -1148,6 +1163,10 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
                   <img
                     src={currentTrack.coverUrl}
                     alt={currentTrack.title}
+                    onError={(e) => {
+                      const target = e.currentTarget as HTMLImageElement;
+                      target.src = generateCoverArt(currentTrack.title, currentTrack.artist);
+                    }}
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1256,6 +1275,7 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
                     id="lyrics-remove-btn"
                     onClick={() => {
                       if (onLyricsRemoved && currentTrack) {
+                        currentTrack.lyrics = undefined;
                         onLyricsRemoved(currentTrack.id);
                         setShowRomaji(false);
                         setShowSpanish(false);
@@ -1696,6 +1716,11 @@ export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo(({
       </footer>
     </div>
   );
+});
+
+export const ExpandedPlayer: React.FC<ExpandedPlayerProps> = React.memo((props) => {
+  if (!props.isOpen || !props.currentTrack) return null;
+  return <ExpandedPlayerContent {...props} currentTrack={props.currentTrack} />;
 });
 
 export default ExpandedPlayer;

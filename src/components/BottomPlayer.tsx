@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { Track } from "../types";
 import { CyberMarquee } from "./CyberMarquee";
+import { generateCoverArt } from "../services/metadataParser";
 
 interface BottomPlayerProps {
   currentTrack: Track | null;
@@ -138,6 +139,10 @@ export const BottomPlayer: React.FC<BottomPlayerProps> = React.memo(({
               <img
                 src={currentTrack.coverUrl}
                 alt={currentTrack.title}
+                onError={(e) => {
+                  const target = e.currentTarget as HTMLImageElement;
+                  target.src = generateCoverArt(currentTrack.title, currentTrack.artist);
+                }}
                 className={`w-full h-full object-cover transition-transform duration-300 ${
                   isPlaying ? "brightness-100" : "brightness-90"
                 }`}

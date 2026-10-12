@@ -372,6 +372,9 @@ export const LyricsSearchModal: React.FC<LyricsSearchModalProps> = ({
                 id="lyrics-modal-delete-btn"
                 type="button"
                 onClick={() => {
+                  track.lyrics = undefined;
+                  setCustomText("");
+                  setResult(null);
                   onLyricsRemoved(track.id);
                   onClose();
                 }}

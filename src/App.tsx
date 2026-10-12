@@ -190,6 +190,8 @@ export function SonoraApp() {
     selectedMinutes: undefined,
     fadeOut: true,
   });
+  const sleepTimerRef = useRef(sleepTimer);
+  sleepTimerRef.current = sleepTimer;
 
   // Filtro de audios cortos (< 30 segundos: notas de voz, tonos y audios breves)
   const [filterShortAudios, setFilterShortAudios] = useState<boolean>(() => {
@@ -742,6 +744,7 @@ export function SonoraApp() {
   const handleNextRef = useRef<() => void>(() => {});
   const handlePrevRef = useRef<() => void>(() => {});
   const handleSeekRef = useRef<(time: number) => void>(() => {});
+  const handlePlayTrackRef = useRef<(track: Track, index?: number) => void>(() => {});
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -788,22 +791,6 @@ export function SonoraApp() {
     if (!t) return true;
     if (!t.url && !t.nativePath) return true;
     return false;
-  };
-
-  const handleCorruptedTrack = (corruptedTrack: Track) => {
-    // Si es una pista demo en la web con URL temporal expirada, regenerarla de inmediato
-    if (!Capacitor.isNativePlatform() && (corruptedTrack.id.startsWith("demo-") || corruptedTrack.id.startsWith("demo_"))) {
-      getFreshDemoAudioUrl(corruptedTrack.id).then((fresh) => {
-        corruptedTrack.url = fresh;
-        startPlayback(corruptedTrack);
-      });
-      return;
-    }
-
-    setToastMessage(`"${corruptedTrack.title}" no se puede reproducir. Saltando a la siguiente...`);
-    setTimeout(() => {
-      handleNextRef.current();
-    }, 1200);
   };
 
   // Reproductor centralizado con auto-recuperación y sin race conditions
@@ -921,26 +908,43 @@ export function SonoraApp() {
     }
   }, [currentTrack?.id, startPlayback]);
 
-  // Handle Play/Pause
-  const handleTogglePlay = () => {
-    if (!audioRef.current || !currentTrack) {
-      const activeList = visibleTracks.length > 0 ? visibleTracks : tracks;
+  // Notificación de pista corrupta o no reproducible con auto-recuperación
+  const handleCorruptedTrack = useCallback((corruptedTrack: Track) => {
+    // Si es una pista demo en la web con URL temporal expirada, regenerarla de inmediato
+    if (!Capacitor.isNativePlatform() && (corruptedTrack.id.startsWith("demo-") || corruptedTrack.id.startsWith("demo_"))) {
+      getFreshDemoAudioUrl(corruptedTrack.id).then((fresh) => {
+        corruptedTrack.url = fresh;
+        startPlayback(corruptedTrack);
+      });
+      return;
+    }
+
+    setToastMessage(`"${corruptedTrack.title}" no se puede reproducir. Saltando a la siguiente...`);
+    setTimeout(() => {
+      handleNextRef.current();
+    }, 1200);
+  }, [startPlayback]);
+
+  // Handle Play/Pause con referencias estables para 60 FPS
+  const handleTogglePlay = useCallback(() => {
+    if (!audioRef.current || !currentTrackRef.current) {
+      const activeList = visibleTracksRef.current.length > 0 ? visibleTracksRef.current : tracksRef.current;
       if (activeList.length > 0) {
-        handlePlayTrack(activeList[0], 0);
+        handlePlayTrackRef.current(activeList[0], 0);
       } else {
         setIsScannerOpen(true);
       }
       return;
     }
 
-    if (isTrackCorrupted(currentTrack)) {
-      handleCorruptedTrack(currentTrack);
+    if (isTrackCorrupted(currentTrackRef.current)) {
+      handleCorruptedTrack(currentTrackRef.current);
       return;
     }
 
     audioEngine.resumeContext();
 
-    if (isPlaying) {
+    if (isPlayingRef.current) {
       // Pausa intencional requerida por el usuario
       isUserIntentionalPauseRef.current = true;
       audioRef.current.pause();
@@ -950,50 +954,48 @@ export function SonoraApp() {
       syncMediaSessionPlaybackState("paused");
     } else {
       isUserIntentionalPauseRef.current = false;
-      startPlayback(currentTrack);
+      startPlayback(currentTrackRef.current);
     }
-  };
+  }, [handleCorruptedTrack, startPlayback]);
 
   // Next Track (Avanza exactamente según el orden físico visualizado en la cola de reproducción)
-  const handleNext = () => {
-    const activeList = activeQueue.length > 0 ? activeQueue : (visibleTracks.length > 0 ? visibleTracks : tracks);
+  const handleNext = useCallback(() => {
+    const activeList = activeQueueRef.current.length > 0 ? activeQueueRef.current : (visibleTracksRef.current.length > 0 ? visibleTracksRef.current : tracksRef.current);
     if (activeList.length === 0) return;
 
     isPlayingRef.current = true;
     setIsPlaying(true);
 
-    if (playbackMode === "repeat-one") {
-      if (currentTrack) {
-        startPlayback(currentTrack, 0);
+    if (playbackModeRef.current === "repeat-one") {
+      if (currentTrackRef.current) {
+        startPlayback(currentTrackRef.current, 0);
       }
     } else {
       // Guardar la pista actual en el historial cronológico antes de avanzar
-      if (currentTrack) {
-        playbackHistoryRef.current.push(currentTrack);
+      if (currentTrackRef.current) {
+        playbackHistoryRef.current.push(currentTrackRef.current);
         if (playbackHistoryRef.current.length > 50) {
           playbackHistoryRef.current.shift();
         }
       }
 
-      const nextIdx = (currentTrackIndex + 1) % activeList.length;
+      const nextIdx = (currentTrackIndexRef.current + 1) % activeList.length;
       setCurrentTrackIndex(nextIdx);
       const nextTrack = activeList[nextIdx];
       if (nextTrack) {
         startPlayback(nextTrack, 0);
       }
     }
-  };
+  }, [startPlayback]);
 
   // Previous Track (Retrocede con fidelidad a la pista que realmente sonó anteriormente según el historial)
-  const handlePrev = () => {
-    const activeList = activeQueue.length > 0 ? activeQueue : (visibleTracks.length > 0 ? visibleTracks : tracks);
+  const handlePrev = useCallback(() => {
+    const activeList = activeQueueRef.current.length > 0 ? activeQueueRef.current : (visibleTracksRef.current.length > 0 ? visibleTracksRef.current : tracksRef.current);
     if (activeList.length === 0) return;
 
-    if (currentTime > 3) {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        setCurrentTime(0);
-      }
+    if (audioRef.current && audioRef.current.currentTime > 3) {
+      audioRef.current.currentTime = 0;
+      setCurrentTime(0);
       return;
     }
 
@@ -1003,7 +1005,7 @@ export function SonoraApp() {
     // 1. Prioridad: Historial cronológico real de reproducción
     while (playbackHistoryRef.current.length > 0) {
       const prevCandidate = playbackHistoryRef.current.pop()!;
-      if (prevCandidate.id !== currentTrack?.id) {
+      if (prevCandidate.id !== currentTrackRef.current?.id) {
         const foundIdx = activeList.findIndex((t) => t.id === prevCandidate.id);
         if (foundIdx !== -1) {
           setCurrentTrackIndex(foundIdx);
@@ -1014,13 +1016,13 @@ export function SonoraApp() {
     }
 
     // 2. Respaldo: Retroceso secuencial en lista si el historial está vacío
-    const prevIdx = (currentTrackIndex - 1 + activeList.length) % activeList.length;
+    const prevIdx = (currentTrackIndexRef.current - 1 + activeList.length) % activeList.length;
     setCurrentTrackIndex(prevIdx);
     const prevTrack = activeList[prevIdx];
     if (prevTrack) {
       startPlayback(prevTrack, 0);
     }
-  };
+  }, [startPlayback]);
 
   // Seek
   const handleSeek = useCallback((time: number) => {
@@ -1422,6 +1424,8 @@ export function SonoraApp() {
     startPlayback(track, 0);
   }, [handleCorruptedTrack, handleTogglePlay, startPlayback]);
 
+  handlePlayTrackRef.current = handlePlayTrack;
+
   // Toggle favorite
   const handleToggleFavorite = useCallback((id: string) => {
     setTracks((prev) => {
@@ -1481,7 +1485,7 @@ export function SonoraApp() {
   }, [handleTracksImported]);
 
   // Handle local folder selected directly from "+" menu
-  const handleLocalFolderSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLocalFolderSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -1525,7 +1529,7 @@ export function SonoraApp() {
       setToastMessage("No se encontraron archivos de audio compatibles en la carpeta");
     }
     e.target.value = "";
-  };
+  }, [handleTracksImported]);
 
   // Load demos helper
   const handleLoadDemos = useCallback(async () => {
@@ -1586,6 +1590,10 @@ export function SonoraApp() {
       });
     });
 
+    if (finalUpdatedTrack && currentTrackRef.current?.id === trackId) {
+      currentTrackRef.current = finalUpdatedTrack;
+    }
+
     setTimeout(() => {
       if (finalUpdatedTrack) {
         updateTrackInDb(finalUpdatedTrack).catch(() => {});
@@ -1617,6 +1625,14 @@ export function SonoraApp() {
   // Eliminar o desvincular letras de una canción
   const handleLyricsRemoved = useCallback((trackId: string) => {
     let removedTrack: Track | null = null;
+
+    // Si la pista actual reproduciéndose coincide, limpiar sus letras en la referencia inmediata
+    if (currentTrackRef.current?.id === trackId) {
+      currentTrackRef.current = { ...currentTrackRef.current, lyrics: undefined };
+    }
+
+    setLyricsSearchTrack((prev) => (prev && prev.id === trackId ? { ...prev, lyrics: undefined } : prev));
+
     setTracks((prev) => {
       const updated = prev.map((t) => {
         if (t.id === trackId) {
@@ -1629,15 +1645,18 @@ export function SonoraApp() {
       saveTracksToDB(updated).catch(() => {});
       return updated;
     });
+
     setShuffledQueue((prev) => {
       if (!prev) return null;
       return prev.map((t) => (t.id === trackId ? { ...t, lyrics: undefined } : t));
     });
+
     setTimeout(() => {
       if (removedTrack) {
         updateTrackInDb(removedTrack).catch(() => {});
       }
     }, 0);
+
     setToastMessage("Letra eliminada de la canción");
   }, []);
 
@@ -1720,7 +1739,7 @@ export function SonoraApp() {
   // =========================================================================
 
   // Ejecuta la pausa del audio al expirar el temporizador
-  const handleExecuteSleepTimer = () => {
+  const handleExecuteSleepTimer = useCallback(() => {
     isUserIntentionalPauseRef.current = true;
     setSleepTimer((prev) => ({
       ...prev,
@@ -1730,17 +1749,17 @@ export function SonoraApp() {
     }));
     audioEngine.setSleepTimerActive(false);
 
-    audioEngine.pausePlayback(audioRef.current, sleepTimer.fadeOut, () => {
+    audioEngine.pausePlayback(audioRef.current, sleepTimerRef.current.fadeOut, () => {
       isPlayingRef.current = false;
       setIsPlaying(false);
       audioEngine.setPlaybackState(false);
       syncMediaSessionPlaybackState("paused");
       setToastMessage("💤 Temporizador de apagado: la música se ha pausado.");
     });
-  };
+  }, []);
 
   // Activa el temporizador para pausar tras N minutos
-  const handleSetSleepTimerMinutes = (minutes: number, fadeOut: boolean) => {
+  const handleSetSleepTimerMinutes = useCallback((minutes: number, fadeOut: boolean) => {
     const remainingSeconds = minutes * 60;
     const targetTimestamp = Date.now() + remainingSeconds * 1000;
     setSleepTimer({
@@ -1753,11 +1772,13 @@ export function SonoraApp() {
     });
     audioEngine.setSleepTimerActive(true);
     setToastMessage(`💤 Temporizador configurado: apagado en ${minutes} min`);
-  };
+  }, []);
 
   // Activa el temporizador para pausar al finalizar la canción actual
-  const handleSetSleepTimerEndOfSong = (fadeOut: boolean) => {
-    const rem = Math.max(0, Math.floor(duration - currentTime));
+  const handleSetSleepTimerEndOfSong = useCallback((fadeOut: boolean) => {
+    const dur = audioRef.current?.duration || 0;
+    const cur = audioRef.current?.currentTime || 0;
+    const rem = Math.max(0, Math.floor(dur - cur));
     setSleepTimer({
       isActive: true,
       mode: "end-of-song",
@@ -1768,10 +1789,10 @@ export function SonoraApp() {
     });
     audioEngine.setSleepTimerActive(true);
     setToastMessage("💤 Temporizador configurado: al terminar esta canción");
-  };
+  }, []);
 
   // Desactiva y cancela el temporizador
-  const handleCancelSleepTimer = () => {
+  const handleCancelSleepTimer = useCallback(() => {
     setSleepTimer((prev) => ({
       ...prev,
       isActive: false,
@@ -1781,17 +1802,17 @@ export function SonoraApp() {
     }));
     audioEngine.setSleepTimerActive(false);
     setToastMessage("Temporizador de apagado desactivado");
-  };
+  }, []);
 
   // Añade minutos adicionales al temporizador en curso
-  const handleAddSleepTimerMinutes = (extraMinutes: number) => {
-    if (!sleepTimer.isActive) {
-      handleSetSleepTimerMinutes(extraMinutes, sleepTimer.fadeOut);
+  const handleAddSleepTimerMinutes = useCallback((extraMinutes: number) => {
+    if (!sleepTimerRef.current.isActive) {
+      handleSetSleepTimerMinutes(extraMinutes, sleepTimerRef.current.fadeOut);
       return;
     }
     const extraSeconds = extraMinutes * 60;
     const currentTarget =
-      sleepTimer.targetTimestamp || Date.now() + sleepTimer.remainingSeconds * 1000;
+      sleepTimerRef.current.targetTimestamp || Date.now() + sleepTimerRef.current.remainingSeconds * 1000;
     const newTarget = currentTarget + extraSeconds * 1000;
     const newRem = Math.max(0, Math.round((newTarget - Date.now()) / 1000));
     setSleepTimer((prev) => ({
@@ -1802,12 +1823,12 @@ export function SonoraApp() {
       selectedMinutes: (prev.selectedMinutes || 0) + extraMinutes,
     }));
     setToastMessage(`💤 Se añadieron +${extraMinutes} min al temporizador`);
-  };
+  }, [handleSetSleepTimerMinutes]);
 
   // Cambia la preferencia de fade out
-  const handleToggleFadeOut = (fadeOut: boolean) => {
+  const handleToggleFadeOut = useCallback((fadeOut: boolean) => {
     setSleepTimer((prev) => ({ ...prev, fadeOut }));
-  };
+  }, []);
 
   // Efecto del reloj regresivo del temporizador de apagado
   useEffect(() => {
@@ -2212,6 +2233,7 @@ export function SonoraApp() {
         onSwapTitleArtist={handleSwapTitleArtist}
         onToggleShuffle={handleToggleShuffle}
         onCycleRepeatMode={handleCycleRepeatMode}
+        onToast={setToastMessage}
       />
 
       {/* Floating Action Toast Notification */}

@@ -488,6 +488,57 @@ async function fetchClientBatchTranslations(
   linesToTranslate: string[],
   langpair: string
 ): Promise<string[] | null> {
+  // 1. Motor Google Translate GTX de alta velocidad directo del cliente (inmune a cuotas y límites)
+  try {
+    const results: string[] = new Array(linesToTranslate.length).fill("");
+    const chunks: { indices: number[]; text: string }[] = [];
+    let curIndices: number[] = [];
+    let curLines: string[] = [];
+
+    for (let i = 0; i < linesToTranslate.length; i++) {
+      const line = linesToTranslate[i];
+      if (!line.trim()) continue;
+      curIndices.push(i);
+      curLines.push(line);
+      if (curLines.length >= 12 || curLines.join("\n").length >= 600) {
+        chunks.push({ indices: [...curIndices], text: curLines.join("\n") });
+        curIndices = [];
+        curLines = [];
+      }
+    }
+    if (curLines.length > 0) {
+      chunks.push({ indices: [...curIndices], text: curLines.join("\n") });
+    }
+
+    let hadGtxMatch = false;
+    for (const chunk of chunks) {
+      const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(chunk.text)}`;
+      const gRes = await fetch(gtxUrl, { signal: AbortSignal.timeout(4000) });
+      if (gRes.ok) {
+        const gData: any = await gRes.json();
+        if (Array.isArray(gData) && Array.isArray(gData[0])) {
+          const translatedFull = gData[0].map((item: any) => (item && item[0] ? item[0] : "")).join("");
+          const splitLines = translatedFull.split(/\r?\n/);
+          for (let idx = 0; idx < chunk.indices.length; idx++) {
+            const orig = linesToTranslate[chunk.indices[idx]];
+            const trans = (splitLines[idx] || "").trim();
+            if (trans && trans.toLowerCase() !== orig.toLowerCase()) {
+              results[chunk.indices[idx]] = trans;
+              hadGtxMatch = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (hadGtxMatch) {
+      return results;
+    }
+  } catch (gtxErr) {
+    console.warn("[fetchClientBatchTranslations] Google GTX omitido:", gtxErr);
+  }
+
+  // 2. Fallback secundario MyMemory
   try {
     const results: string[] = new Array(linesToTranslate.length).fill("");
     const chunks: { indices: number[]; lines: string[] }[] = [];
@@ -522,12 +573,12 @@ async function fetchClientBatchTranslations(
       if (res.ok) {
         const json: any = await res.json();
         const rawBlob = json?.responseData?.translatedText;
-        if (typeof rawBlob === "string" && rawBlob.trim().length > 0) {
+        if (typeof rawBlob === "string" && rawBlob.trim().length > 0 && !rawBlob.includes("MYMEMORY WARNING")) {
           const split = rawBlob.split(/\r?\n/);
           for (let k = 0; k < chunk.lines.length; k++) {
             const translatedPart = split[k] ? decodeTranslationEntities(split[k].trim()) : "";
             const targetIdx = chunk.indices[k];
-            if (translatedPart && translatedPart.length > 0) {
+            if (translatedPart && translatedPart.length > 0 && translatedPart.toLowerCase() !== chunk.lines[k].toLowerCase()) {
               results[targetIdx] = translatedPart;
               hadAnyMatch = true;
             }
@@ -588,10 +639,10 @@ export async function translateTextLinesToSpanish(lines: string[]): Promise<stri
 
     let fetchedTranslations: string[] | null = null;
 
-    // 1. Intentar llamada única agrupada al backend oficial
+    // 1. Intentar llamada única agrupada: primero el endpoint local de la app (rápido en Vite/Electron), y luego Render como fallback
     const backendEndpoints = [
-      `${BACKEND_BASE_URL}/api/lyrics/translate`,
       "/api/lyrics/translate",
+      `${BACKEND_BASE_URL}/api/lyrics/translate`,
     ];
 
     for (const endpoint of backendEndpoints) {
@@ -739,6 +790,17 @@ export async function enrichLyricsWithSpanish(
         spanish: translations[pIdx] || l,
       }));
     }
+  }
+
+  const hasRealTranslation =
+    (updatedSynced &&
+      updatedSynced.some(
+        (l) => Boolean(l.spanish && l.spanish.trim().length > 0 && l.spanish.trim().toLowerCase() !== (l.original || l.text || "").trim().toLowerCase())
+      )) ||
+    (spanishPlain && spanishPlain.trim().length > 0 && spanishPlain.trim().toLowerCase() !== (lyrics.plain || "").trim().toLowerCase());
+
+  if (!hasRealTranslation) {
+    throw new Error("No se pudo obtener la traducción al español en este momento.");
   }
 
   return {

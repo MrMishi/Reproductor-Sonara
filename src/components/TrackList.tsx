@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { Track } from "../types";
 import { CyberMarquee } from "./CyberMarquee";
+import { generateCoverArt } from "../services/metadataParser";
 
 interface TrackListProps {
   tracks: Track[];
@@ -193,6 +194,10 @@ const TrackRow = React.memo<TrackRowProps>(
               src={track.coverUrl}
               alt={track.title}
               loading="lazy"
+              onError={(e) => {
+                const target = e.currentTarget as HTMLImageElement;
+                target.src = generateCoverArt(track.title, track.artist);
+              }}
               className="w-full h-full object-cover"
             />
             {isCurrent ? (
@@ -722,6 +727,10 @@ export const TrackList: React.FC<TrackListProps> = React.memo(({
                   <img
                     src={t.coverUrl}
                     alt={t.title}
+                    onError={(e) => {
+                      const target = e.currentTarget as HTMLImageElement;
+                      target.src = generateCoverArt(t.title, t.artist);
+                    }}
                     className="w-8 h-8 rounded-lg object-cover shrink-0 shadow"
                   />
                   <div className="min-w-0 flex-1">

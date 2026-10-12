@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { Track, LibrarySection, LibrarySortOption, SortDirection, Playlist } from "../types";
 import { TrackList } from "./TrackList";
+import { generateCoverArt } from "../services/metadataParser";
 
 const STORAGE_KEY_SORT_BY = "sonora_library_sort_by";
 const STORAGE_KEY_SORT_DIR = "sonora_library_sort_direction";
@@ -371,7 +372,11 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
         entry.coverUrl = t.coverUrl;
       }
     });
-    return Array.from(map.values()).sort((a, b) => standardCollator.compare(a.artist, b.artist));
+    return Array.from(map.values()).sort((a, b) => {
+      const artA = a.artist.toLowerCase();
+      const artB = b.artist.toLowerCase();
+      return artA < artB ? -1 : artA > artB ? 1 : 0;
+    });
   }, [filteredTracks, activeSection]);
 
   // 2. Agrupación por Álbum (Calculado únicamente si la pestaña 'albums' está activa)
@@ -399,7 +404,11 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
         entry.coverUrl = t.coverUrl;
       }
     });
-    return Array.from(map.values()).sort((a, b) => standardCollator.compare(a.album, b.album));
+    return Array.from(map.values()).sort((a, b) => {
+      const albA = a.album.toLowerCase();
+      const albB = b.album.toLowerCase();
+      return albA < albB ? -1 : albA > albB ? 1 : 0;
+    });
   }, [filteredTracks, activeSection]);
 
   // 3. Agrupación por Carpetas del Dispositivo (Calculado únicamente si la pestaña 'folders' está activa)
@@ -424,7 +433,11 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
       }
       map.get(finalPath)!.tracks.push(t);
     });
-    return Array.from(map.values()).sort((a, b) => standardCollator.compare(a.path, b.path));
+    return Array.from(map.values()).sort((a, b) => {
+      const pA = a.path.toLowerCase();
+      const pB = b.path.toLowerCase();
+      return pA < pB ? -1 : pA > pB ? 1 : 0;
+    });
   }, [filteredTracks, activeSection]);
 
   useEffect(() => {
@@ -549,12 +562,23 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
     list.sort((a, b) => {
       let comparison = 0;
       switch (sortBy) {
-        case "title":
-          comparison = standardCollator.compare(a.title || "", b.title || "");
+        case "title": {
+          const tA = (a.title || "").toLowerCase();
+          const tB = (b.title || "").toLowerCase();
+          comparison = tA < tB ? -1 : tA > tB ? 1 : 0;
           break;
-        case "artist":
-          comparison = standardCollator.compare(a.artist || "", b.artist || "");
+        }
+        case "artist": {
+          const artA = (a.artist || "Artista Desconocido").toLowerCase();
+          const artB = (b.artist || "Artista Desconocido").toLowerCase();
+          comparison = artA < artB ? -1 : artA > artB ? 1 : 0;
+          if (comparison === 0) {
+            const tA = (a.title || "").toLowerCase();
+            const tB = (b.title || "").toLowerCase();
+            comparison = tA < tB ? -1 : tA > tB ? 1 : 0;
+          }
           break;
+        }
         case "addedAt":
           comparison = (a.addedAt || 0) - (b.addedAt || 0);
           break;
@@ -837,6 +861,10 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
                 <img
                   src={activeDetailTracks[0].coverUrl}
                   alt="Cover"
+                  onError={(e) => {
+                    const target = e.currentTarget as HTMLImageElement;
+                    target.src = generateCoverArt(activeDetailTracks[0].title, activeDetailTracks[0].artist);
+                  }}
                   className="w-full h-full object-cover"
                 />
               ) : selectedFolder ? (
@@ -925,6 +953,10 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
                       src={entry.coverUrl}
                       alt={entry.artist}
                       loading="lazy"
+                      onError={(e) => {
+                        const target = e.currentTarget as HTMLImageElement;
+                        target.src = generateCoverArt(entry.artist, entry.artist);
+                      }}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   ) : (
@@ -992,6 +1024,10 @@ export const LibraryView: React.FC<LibraryViewProps> = React.memo(({
                       src={entry.coverUrl}
                       alt={entry.album}
                       loading="lazy"
+                      onError={(e) => {
+                        const target = e.currentTarget as HTMLImageElement;
+                        target.src = generateCoverArt(entry.album, entry.artist);
+                      }}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   ) : (

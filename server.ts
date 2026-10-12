@@ -419,10 +419,64 @@ app.post("/api/lyrics/translate", async (req, res) => {
     return;
   }
 
-  // 1. Intentar traducción con Gemini AI
+  // Helper: Traducción ultrarrápida y fiable mediante Google Translate GTX
+  async function translateWithGoogleGtx(lines: string[]): Promise<string[] | null> {
+    try {
+      const results = [...lines];
+      const chunks: { indices: number[]; text: string }[] = [];
+      let curIndices: number[] = [];
+      let curTextLines: string[] = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line.trim()) continue;
+        curIndices.push(i);
+        curTextLines.push(line);
+        if (curTextLines.length >= 15 || curTextLines.join("\n").length >= 800) {
+          chunks.push({ indices: [...curIndices], text: curTextLines.join("\n") });
+          curIndices = [];
+          curTextLines = [];
+        }
+      }
+      if (curTextLines.length > 0) {
+        chunks.push({ indices: [...curIndices], text: curTextLines.join("\n") });
+      }
+
+      let hadAnyTranslation = false;
+      for (const chunk of chunks) {
+        const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(chunk.text)}`;
+        const gRes = await fetch(gtxUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (gRes.ok) {
+          const gData: any = await gRes.json();
+          if (Array.isArray(gData) && Array.isArray(gData[0])) {
+            const translatedFull = gData[0].map((item: any) => (item && item[0] ? item[0] : "")).join("");
+            const splitTranslated = translatedFull.split(/\r?\n/);
+            for (let idx = 0; idx < chunk.indices.length; idx++) {
+              const origLine = lines[chunk.indices[idx]];
+              const transLine = (splitTranslated[idx] || "").trim();
+              if (transLine && transLine.toLowerCase() !== origLine.toLowerCase()) {
+                results[chunk.indices[idx]] = transLine;
+                hadAnyTranslation = true;
+              }
+            }
+          }
+        }
+      }
+
+      return hadAnyTranslation ? results : null;
+    } catch (e) {
+      console.warn("[Lyrics Translation] Google GTX fallback omitido:", e);
+      return null;
+    }
+  }
+
+  // 1. Intentar traducción inteligente con Gemini AI si está disponible (timeout ágil de 5 segundos)
   const ai = getAI();
   if (ai) {
-    const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash"];
+    const candidateModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite"];
     const prompt = `Traduce las siguientes líneas de versos musicales al español de manera natural, poética y fiel al significado de la canción.
 REGLAS ESTRICTAS:
 1. Devuelve EXACTAMENTE una línea traducida por cada línea de entrada (mismo número de líneas).
@@ -441,7 +495,7 @@ ${inputLines.join("\n")}`;
         });
 
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Gemini translation timeout")), 12000)
+          setTimeout(() => reject(new Error("Gemini translation timeout")), 5000)
         );
 
         const response: any = await Promise.race([geminiCall, timeoutPromise]);
@@ -454,16 +508,27 @@ ${inputLines.join("\n")}`;
             if (!orig.trim()) return "";
             return (rawTranslatedLines[i] || "").trim() || orig;
           });
-          res.json({ translations });
-          return;
+          const hasRealTrans = translations.some((t, i) => t && t.toLowerCase() !== inputLines[i].toLowerCase());
+          if (hasRealTrans) {
+            res.json({ translations });
+            return;
+          }
         }
       } catch (err: any) {
-        console.warn(`[Lyrics Translation] Advertencia con modelo ${model}:`, err?.message || err);
+        console.warn(`[Lyrics Translation] Fallback inmediato tras modelo ${model}:`, err?.message || err);
+        break; // Si Gemini da 503 o timeout, no penalizar al usuario esperando otros 10 segundos
       }
     }
   }
 
-  // 2. Fallback de traducción agrupada en bloques por lotes con pares de idioma explícitos
+  // 2. Traducción de alto rendimiento instantánea con motor Google Translate GTX
+  const gtxTranslations = await translateWithGoogleGtx(inputLines);
+  if (gtxTranslations) {
+    res.json({ translations: gtxTranslations });
+    return;
+  }
+
+  // 3. Fallback de traducción con MyMemory API por lotes
   try {
     // Detectar si el texto contiene caracteres japoneses
     const isJapanese = inputLines.some((l) => /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(l));

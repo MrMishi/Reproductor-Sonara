@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { Play, HardDrive, Heart, Trash2 } from "lucide-react";
 import { Track } from "../types";
 import { CyberMarquee } from "./CyberMarquee";
+import { generateCoverArt } from "../services/metadataParser";
 
 interface HomeViewProps {
   tracks: Track[];
@@ -110,6 +111,10 @@ export const HomeView: React.FC<HomeViewProps> = React.memo(({
                   <img
                     src={track.coverUrl}
                     alt={track.title}
+                    onError={(e) => {
+                      const target = e.currentTarget as HTMLImageElement;
+                      target.src = generateCoverArt(track.title, track.artist);
+                    }}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                   />
                   <div
@@ -217,6 +222,10 @@ export const HomeView: React.FC<HomeViewProps> = React.memo(({
                     <img
                       src={firstTrack.coverUrl}
                       alt={albumName}
+                      onError={(e) => {
+                        const target = e.currentTarget as HTMLImageElement;
+                        target.src = generateCoverArt(albumName, firstTrack.artist);
+                      }}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
                     <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
@@ -268,6 +277,10 @@ export const HomeView: React.FC<HomeViewProps> = React.memo(({
                     <img
                       src={firstTrack.coverUrl}
                       alt={artistName}
+                      onError={(e) => {
+                        const target = e.currentTarget as HTMLImageElement;
+                        target.src = generateCoverArt(firstTrack.title, artistName);
+                      }}
                       className="w-full h-full object-cover group-hover:scale-110 transition-transform"
                     />
                   </div>

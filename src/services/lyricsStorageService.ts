@@ -51,6 +51,31 @@ export interface LyricsFileSchema {
 // Índice en memoria RAM para acceso sincrónico O(1)
 const inMemoryLyricsMap = new Map<string, LyricsEntry>();
 
+// Registro persistente de letras eliminadas expresamente por el usuario para evitar resurrecciones accidentales
+const LOCAL_STORAGE_DELETED_KEYS = "sonora_lyrics_deleted_keys";
+const deletedLyricsKeys = new Set<string>();
+
+// Cargar claves eliminadas al arrancar el módulo
+try {
+  const savedDeleted = localStorage.getItem(LOCAL_STORAGE_DELETED_KEYS);
+  if (savedDeleted) {
+    const parsed: string[] = JSON.parse(savedDeleted);
+    if (Array.isArray(parsed)) {
+      parsed.forEach((k) => deletedLyricsKeys.add(k));
+    }
+  }
+} catch {
+  // ignore
+}
+
+function persistDeletedKeys(): void {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_DELETED_KEYS, JSON.stringify(Array.from(deletedLyricsKeys)));
+  } catch {
+    // ignore
+  }
+}
+
 // Timer con debounce para optimizar escrituras en disco
 let diskFlushTimeout: any = null;
 let isInitialized = false;
@@ -93,6 +118,11 @@ export function getLyricsFromCache(
   fileName?: string,
   trackId?: string
 ): Track["lyrics"] | null {
+  // Si la pista fue marcada expresamente como eliminada por el usuario, no devolver letras de caché
+  if (trackId && deletedLyricsKeys.has(idLyricsKey(trackId))) return null;
+  if (fileName && deletedLyricsKeys.has(fileLyricsKey(fileName))) return null;
+  if (artist && title && deletedLyricsKeys.has(normalizeLyricsKey(artist, title))) return null;
+
   // 1. Coincidencia por ID de canción (máxima precisión)
   if (trackId) {
     const idKey = idLyricsKey(trackId);
@@ -123,21 +153,10 @@ export function getLyricsFromCache(
   // 4. Coincidencia por solo Título
   if (title) {
     const soloTitleKey = `:::${(title || "").toLowerCase().trim()}`;
-    const entry = inMemoryLyricsMap.get(soloTitleKey);
-    if (entry?.lyrics && (entry.lyrics.plain || (entry.lyrics.synced && entry.lyrics.synced.length > 0))) {
-      return entry.lyrics;
-    }
-
-    // 5. Coincidencia tolerante (fuzzy matching)
-    const cleanT = (title || "").toLowerCase().replace(/[^a-z0-9]/gi, "");
-    if (cleanT.length >= 3) {
-      for (const [_, item] of inMemoryLyricsMap.entries()) {
-        if (item?.lyrics && item.title) {
-          const itemT = item.title.toLowerCase().replace(/[^a-z0-9]/gi, "");
-          if (itemT === cleanT || (itemT.length >= 4 && (itemT.includes(cleanT) || cleanT.includes(itemT)))) {
-            return item.lyrics;
-          }
-        }
+    if (!deletedLyricsKeys.has(soloTitleKey)) {
+      const entry = inMemoryLyricsMap.get(soloTitleKey);
+      if (entry?.lyrics && (entry.lyrics.plain || (entry.lyrics.synced && entry.lyrics.synced.length > 0))) {
+        return entry.lyrics;
       }
     }
   }
@@ -158,6 +177,13 @@ export function saveLyricsToFile(
   if (!lyrics || (!lyrics.plain && (!lyrics.synced || lyrics.synced.length === 0))) {
     return;
   }
+
+  // Si se asigna una nueva letra, limpiar cualquier marca previa de eliminación
+  if (trackId) deletedLyricsKeys.delete(idLyricsKey(trackId));
+  if (fileName) deletedLyricsKeys.delete(fileLyricsKey(fileName));
+  if (artist && title) deletedLyricsKeys.delete(normalizeLyricsKey(artist, title));
+  if (title) deletedLyricsKeys.delete(`:::${(title || "").toLowerCase().trim()}`);
+  persistDeletedKeys();
 
   const now = Date.now();
   const entry: LyricsEntry = {
@@ -203,11 +229,44 @@ export function removeLyricsFromFile(
   fileName?: string,
   trackId?: string
 ): void {
+  // 1. Registrar lápida (tombstone) persistente para que ningún proceso de sincronización resucite la letra
+  if (trackId) deletedLyricsKeys.add(idLyricsKey(trackId));
+  if (fileName) deletedLyricsKeys.add(fileLyricsKey(fileName));
+  if (artist && title) deletedLyricsKeys.add(normalizeLyricsKey(artist, title));
+  if (title) deletedLyricsKeys.add(`:::${(title || "").toLowerCase().trim()}`);
+  persistDeletedKeys();
+
+  // 2. Eliminación de claves directas
   if (artist && title) inMemoryLyricsMap.delete(normalizeLyricsKey(artist, title));
   if (fileName) inMemoryLyricsMap.delete(fileLyricsKey(fileName));
   if (trackId) inMemoryLyricsMap.delete(idLyricsKey(trackId));
   if (title) inMemoryLyricsMap.delete(`:::${(title || "").toLowerCase().trim()}`);
 
+  // 3. Purga exhaustiva de cualquier entrada en memoria que apunte a esta canción
+  const keysToDelete: string[] = [];
+  const normTarget = artist && title ? normalizeLyricsKey(artist, title) : "";
+  const fNameTarget = fileName ? fileName.toLowerCase().trim() : "";
+  const tIdTarget = trackId ? trackId.toLowerCase().trim() : "";
+
+  for (const [key, entry] of inMemoryLyricsMap.entries()) {
+    if (!entry) {
+      keysToDelete.push(key);
+      continue;
+    }
+    if (tIdTarget && entry.trackId && entry.trackId.toLowerCase().trim() === tIdTarget) {
+      keysToDelete.push(key);
+    } else if (fNameTarget && entry.fileName && entry.fileName.toLowerCase().trim() === fNameTarget) {
+      keysToDelete.push(key);
+    } else if (normTarget && entry.artist && entry.title && normalizeLyricsKey(entry.artist, entry.title) === normTarget) {
+      keysToDelete.push(key);
+    }
+  }
+
+  for (const k of keysToDelete) {
+    inMemoryLyricsMap.delete(k);
+  }
+
+  // 4. Actualización inmediata en LocalStorage y programación de persistencia física
   try {
     const schema = buildSchemaObject();
     localStorage.setItem(LOCAL_STORAGE_LYRICS_KEY, JSON.stringify(schema));
@@ -215,7 +274,7 @@ export function removeLyricsFromFile(
     console.warn("[LyricsStorage] Error actualizando LocalStorage tras eliminación:", err);
   }
 
-  scheduleDiskWrite();
+  flushLyricsToPhysicalFile().catch(() => {});
 }
 
 /**

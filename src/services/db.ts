@@ -24,7 +24,7 @@
 
 import { Capacitor } from "@capacitor/core";
 import { Track, HiddenTrackRecord, Playlist } from "../types";
-import { generateCoverArt, cleanFilename } from "./metadataParser";
+import { generateCoverArt, cleanFilename, unswapMojibake } from "./metadataParser";
 import { getCoverFromCache, saveCoverToFile } from "./coverStorageService";
 import {
   saveLyricsToFile,
@@ -244,17 +244,13 @@ export async function saveTracksToDB(tracks: Track[]): Promise<void> {
         saveCoverToFile(track.artist, track.title, track.coverUrl, track.fileName || track.file?.name, track.id);
       }
 
-      // Si la pista tiene letras, garantizar respaldo permanente en sonora_lyrics.json
+      // Si la pista tiene letras explícitas válidas, asegurar respaldo permanente en sonora_lyrics.json
       let finalLyrics = track.lyrics;
       if (finalLyrics && (finalLyrics.plain || (finalLyrics.synced && finalLyrics.synced.length > 0))) {
         saveLyricsToFile(track.artist, track.title, finalLyrics, track.fileName || track.file?.name, track.id);
       } else {
-        // Si la pista no trae letras pero ya existían en el archivo permanente sonora_lyrics.json, recuperarlas
-        const cachedLyrics = getLyricsFromCache(track.artist, track.title, track.fileName || track.file?.name, track.id);
-        if (cachedLyrics) {
-          finalLyrics = cachedLyrics;
-          track.lyrics = cachedLyrics;
-        }
+        // Si el usuario eliminó la letra (lyrics: undefined/null), respetar la decisión sin resucitarla
+        finalLyrics = undefined;
       }
 
       const record: any = {
@@ -379,11 +375,7 @@ export async function addSingleTrackToDB(track: Track): Promise<void> {
     if (finalLyrics && (finalLyrics.plain || (finalLyrics.synced && finalLyrics.synced.length > 0))) {
       saveLyricsToFile(track.artist, track.title, finalLyrics, track.fileName || track.file?.name, track.id);
     } else {
-      const cachedLyrics = getLyricsFromCache(track.artist, track.title, track.fileName || track.file?.name, track.id);
-      if (cachedLyrics) {
-        finalLyrics = cachedLyrics;
-        track.lyrics = cachedLyrics;
-      }
+      finalLyrics = undefined;
     }
 
     const record: any = {
@@ -471,8 +463,18 @@ export async function loadTracksFromDB(): Promise<Track[]> {
           }
 
           if (finalUrl) {
-            let trackTitle = item.title || "Sin título";
-            let trackArtist = item.artist || "Artista desconocido";
+            let trackTitle = unswapMojibake(item.title || "Sin título");
+            let trackArtist = unswapMojibake(item.artist || "Artista desconocido");
+
+            if (trackTitle !== item.title || trackArtist !== item.artist) {
+              item.title = trackTitle;
+              item.artist = trackArtist;
+              try {
+                store.put(item);
+              } catch {
+                // ignore
+              }
+            }
 
             // Corrección y alineación automática de pistas con nombres tipo "Artista - Título"
             const rawFileName =

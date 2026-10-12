@@ -95,6 +95,35 @@ export function generateCoverArt(title: string, artist: string): string {
 }
 
 /**
+ * Corrige el error común de etiquetas donde texto en español/latino guardado en UTF-16
+ * fue invertido de endianness (Big/Little Endian) haciendo que parezca caracteres chinos.
+ */
+export function unswapMojibake(str: string): string {
+  if (!str || str.length === 0) return str;
+  let swappedCount = 0;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if ((code & 0xff) === 0 && (code >> 8) >= 0x20 && (code >> 8) <= 0xff) {
+      swappedCount++;
+    }
+  }
+  // Si la mitad o más de los caracteres tienen el byte bajo en 0x00 y el alto en rango imprimible, desinvertir
+  if (swappedCount > 0 && swappedCount >= Math.floor(str.length * 0.5)) {
+    let unswapped = "";
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i);
+      if ((code & 0xff) === 0 && (code >> 8) >= 0x20) {
+        unswapped += String.fromCharCode(code >> 8);
+      } else {
+        unswapped += str[i];
+      }
+    }
+    return unswapped.replace(/\0/g, "").trim();
+  }
+  return str;
+}
+
+/**
  * Función: parseID3v2
  * Propósito: Lee y extrae etiquetas ID3v2 (título, artista, álbum, año y carátula APIC) de los primeros 128 KB.
  * ¿Cómo funciona?:
@@ -146,32 +175,65 @@ function parseID3v2(
   const decoderUtf8 = new TextDecoder("utf-8");
   const decoderUtf8Strict = new TextDecoder("utf-8", { fatal: true });
   const decoderLatin1 = new TextDecoder("iso-8859-1");
-  const decoderUtf16 = new TextDecoder("utf-16le");
+  const decoderUtf16Le = new TextDecoder("utf-16le");
+  const decoderUtf16Be = new TextDecoder("utf-16be");
 
   function decodeText(data: Uint8Array): string {
-    if (data.length === 0) return "";
+    if (data.length <= 1) return "";
     const encoding = data[0];
     const textBytes = data.slice(1);
+    let decoded = "";
+
     try {
-      if (encoding === 1 || encoding === 2) {
-        return decoderUtf16.decode(textBytes).replace(/\0/g, "").trim();
-      } else if (encoding === 3) {
-        return decoderUtf8.decode(textBytes).replace(/\0/g, "").trim();
-      } else {
-        // Many Asian/Japanese MP3s store UTF-8 even when tag specifies encoding 0 (Latin1)
-        try {
-          const strictUtf8 = decoderUtf8Strict.decode(textBytes).replace(/\0/g, "").trim();
-          if (strictUtf8 && /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(strictUtf8)) {
-            return strictUtf8;
+      if (encoding === 1) {
+        // UTF-16 con BOM
+        if (textBytes.length >= 2 && textBytes[0] === 0xfe && textBytes[1] === 0xff) {
+          // Big Endian explícito (0xFE 0xFF)
+          decoded = decoderUtf16Be.decode(textBytes.slice(2));
+        } else if (textBytes.length >= 2 && textBytes[0] === 0xff && textBytes[1] === 0xfe) {
+          // Little Endian explícito (0xFF 0xFE)
+          decoded = decoderUtf16Le.decode(textBytes.slice(2));
+        } else {
+          // Sin BOM: analizar alineación de bytes nulos para evitar caracteres chinos espurios
+          if (textBytes.length >= 2 && textBytes[0] === 0x00 && textBytes[1] !== 0x00) {
+            decoded = decoderUtf16Be.decode(textBytes);
+          } else {
+            decoded = decoderUtf16Le.decode(textBytes);
           }
-          return strictUtf8 || decoderLatin1.decode(textBytes).replace(/\0/g, "").trim();
-        } catch {
-          return decoderLatin1.decode(textBytes).replace(/\0/g, "").trim();
+        }
+      } else if (encoding === 2) {
+        // UTF-16BE sin BOM
+        decoded = decoderUtf16Be.decode(textBytes);
+      } else if (encoding === 3) {
+        // UTF-8
+        decoded = decoderUtf8.decode(textBytes);
+      } else {
+        // Encoding 0: ISO-8859-1 (Latin-1)
+        // Muchos programas guardan UTF-16 o UTF-8 aunque marquen encoding 0
+        if (textBytes.length >= 4) {
+          if (textBytes[0] === 0x00 && textBytes[2] === 0x00) {
+            decoded = decoderUtf16Be.decode(textBytes);
+          } else if (textBytes[1] === 0x00 && textBytes[3] === 0x00) {
+            decoded = decoderUtf16Le.decode(textBytes);
+          }
+        }
+        if (!decoded) {
+          try {
+            decoded = decoderUtf8Strict.decode(textBytes);
+          } catch {
+            decoded = decoderLatin1.decode(textBytes);
+          }
         }
       }
     } catch {
-      return decoderLatin1.decode(textBytes).replace(/\0/g, "").trim();
+      decoded = decoderLatin1.decode(textBytes);
     }
+
+    decoded = decoded.replace(/\0/g, "").trim();
+    // Reparar mojibake por inversión de bytes si ocurrió
+    decoded = unswapMojibake(decoded);
+
+    return decoded;
   }
 
   while (pos + 10 < maxLen) {
@@ -205,38 +267,64 @@ function parseID3v2(
     const frameData = bytes.slice(pos, pos + frameSize);
 
     if (frameId === "TIT2" && !result.title) {
-      result.title = decodeText(frameData);
+      const decoded = decodeText(frameData);
+      if (decoded && !/^[\s\-_.,;:]+$/.test(decoded)) {
+        result.title = decoded;
+      }
     } else if ((frameId === "TPE1" || frameId === "TPE2") && !result.artist) {
-      result.artist = decodeText(frameData);
+      const decoded = decodeText(frameData);
+      if (decoded && !/^[\s\-_.,;:]+$/.test(decoded)) {
+        result.artist = decoded;
+      }
     } else if (frameId === "TALB" && !result.album) {
-      result.album = decodeText(frameData);
+      const decoded = decodeText(frameData);
+      if (decoded && !/^[\s\-_.,;:]+$/.test(decoded)) {
+        result.album = decoded;
+      }
     } else if ((frameId === "TYER" || frameId === "TDRC") && !result.year) {
-      result.year = decodeText(frameData);
+      const decoded = decodeText(frameData);
+      const matchYear = decoded.match(/\b(19\d\d|20\d\d)\b/);
+      result.year = matchYear ? matchYear[1] : decoded.slice(0, 4);
     } else if (frameId === "APIC" && extractCover && !result.coverUrl) {
-      // Extract picture only if extractCover is true
+      // Extracción infalible de carátula buscando encabezados binarios reales de imagen (JPEG, PNG, GIF, WEBP)
       try {
-        let p = 1;
-        // Skip mime type
-        let mime = "image/jpeg";
-        const mimeEnd = frameData.indexOf(0, p);
-        if (mimeEnd > p) {
-          mime = decoderLatin1.decode(frameData.slice(p, mimeEnd)).trim();
-          p = mimeEnd + 1;
-        } else {
-          p += 1;
+        let imageOffset = -1;
+        let detectedMime = "image/jpeg";
+
+        for (let i = 1; i < frameData.length - 4; i++) {
+          // JPEG: FF D8 FF
+          if (frameData[i] === 0xff && frameData[i + 1] === 0xd8 && frameData[i + 2] === 0xff) {
+            imageOffset = i;
+            detectedMime = "image/jpeg";
+            break;
+          }
+          // PNG: 89 50 4E 47
+          if (frameData[i] === 0x89 && frameData[i + 1] === 0x50 && frameData[i + 2] === 0x4e && frameData[i + 3] === 0x47) {
+            imageOffset = i;
+            detectedMime = "image/png";
+            break;
+          }
+          // GIF: 47 49 46 38
+          if (frameData[i] === 0x47 && frameData[i + 1] === 0x49 && frameData[i + 2] === 0x46 && frameData[i + 3] === 0x38) {
+            imageOffset = i;
+            detectedMime = "image/gif";
+            break;
+          }
+          // WEBP: RIFF....WEBP
+          if (
+            frameData[i] === 0x52 && frameData[i + 1] === 0x49 && frameData[i + 2] === 0x46 && frameData[i + 3] === 0x46 &&
+            i + 11 < frameData.length &&
+            frameData[i + 8] === 0x57 && frameData[i + 9] === 0x45 && frameData[i + 10] === 0x42 && frameData[i + 11] === 0x50
+          ) {
+            imageOffset = i;
+            detectedMime = "image/webp";
+            break;
+          }
         }
-        // Skip picture type byte
-        p += 1;
-        // Skip description string
-        const descEnd = frameData.indexOf(0, p);
-        if (descEnd >= p) {
-          p = descEnd + 1;
-          // In some encodings, null is 2 bytes
-          if (frameData[p] === 0) p += 1;
-        }
-        if (p < frameData.length) {
-          const imgBytes = frameData.slice(p);
-          const blob = new Blob([imgBytes], { type: mime || "image/jpeg" });
+
+        if (imageOffset >= 0 && frameData.length - imageOffset > 200) {
+          const imgBytes = frameData.slice(imageOffset);
+          const blob = new Blob([imgBytes], { type: detectedMime });
           result.coverUrl = URL.createObjectURL(blob);
         }
       } catch (e) {
@@ -260,12 +348,26 @@ function parseID3v2(
  * 4. Devuelve un objeto `{ title, artist }` asignando el nombre de la música a 'title' y el cantante a 'artist'.
  */
 export function cleanFilename(fileName: string): { title: string; artist: string } {
+  let decodedName = fileName || "";
+  try {
+    if (fileName && fileName.includes("%")) {
+      decodedName = decodeURIComponent(fileName);
+    }
+  } catch {
+    // ignore
+  }
+
   // Remove extension
-  const nameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
+  const nameWithoutExt = decodedName.replace(/\.[^/.]+$/, "");
+
+  // Limpiar prefijos comunes de descargadores web (ej. "[SPOTIFY-DOWNLOADER.COM]", "y2mate.com - ", etc.)
+  const cleanedPrefix = nameWithoutExt
+    .replace(/^\[[^\]]+\]\s*/i, "")
+    .replace(/^(?:y2mate\.com|snaptube|ytmp3|convert2mp3|youtube)\s*[-_]\s*/i, "");
 
   // Formato estándar en archivos de audio: "Artista - Título", "01 - Artista - Título", "01. Artista - Título"
   // Normalizar guiones bajos dobles o simples entre palabras clave si aplica
-  const normalized = nameWithoutExt.replace(/_+/g, " ");
+  const normalized = cleanedPrefix.replace(/_+/g, " ");
   const splitDash = normalized.split(/\s+-\s+/);
 
   if (splitDash.length >= 2) {
@@ -274,12 +376,12 @@ export function cleanFilename(fileName: string): { title: string; artist: string
       if (splitDash.length >= 3) {
         return {
           artist: splitDash[1].trim() || "Artista Desconocido",
-          title: splitDash.slice(2).join(" - ").trim() || nameWithoutExt,
+          title: splitDash.slice(2).join(" - ").trim() || cleanedPrefix,
         };
       }
       // Caso 2: Solo número y título sin artista (ej: "01 - Título")
       return {
-        title: splitDash[1].trim() || nameWithoutExt,
+        title: splitDash[1].trim() || cleanedPrefix,
         artist: "Artista Desconocido",
       };
     }
@@ -292,14 +394,14 @@ export function cleanFilename(fileName: string): { title: string; artist: string
 
     return {
       artist: parsedArtist || "Artista Desconocido",
-      title: parsedTitle || nameWithoutExt,
+      title: parsedTitle || cleanedPrefix,
     };
   }
 
   // Sin guion divisor: "01 Título" o "01. Título" o "Título"
-  const cleanTitle = nameWithoutExt.replace(/^\d+[\s._-]+/, "").trim();
+  const cleanTitle = normalized.replace(/^\d+[\s._-]+/, "").trim();
   return {
-    title: cleanTitle || nameWithoutExt,
+    title: cleanTitle || cleanedPrefix || "Canción",
     artist: "Artista Desconocido",
   };
 }
@@ -433,12 +535,23 @@ export async function parseAudioFile(
     return null;
   }
 
-  let finalTitle = id3.title || fallbackTitle;
-  let finalArtist = id3.artist || fallbackArtist;
+  // Validación de título y artista: descarta metadatos corruptos o vacíos
+  const isSuspiciousText = (t?: string) => {
+    if (!t || !t.trim()) return true;
+    const clean = t.trim();
+    if (/[\uFFFD\u0000-\u001F]/.test(clean)) return true;
+    if (/^[\s\-_.,;:]+$/.test(clean)) return true;
+    return false;
+  };
+
+  let finalTitle = !isSuspiciousText(id3.title) ? id3.title!.trim() : fallbackTitle;
+  let finalArtist = id3.artist && id3.artist.trim() && !isSuspiciousText(id3.artist)
+    ? id3.artist.trim()
+    : fallbackArtist;
 
   // Si el título contiene separador de guion (" - ") y el artista quedó como desconocido o vacío,
   // descomponer el título en Artista (cantante) y Título (canción)
-  if ((!id3.artist || id3.artist === "Artista Desconocido") && finalTitle.includes(" - ")) {
+  if ((!finalArtist || finalArtist === "Artista Desconocido") && finalTitle.includes(" - ")) {
     const parsed = cleanFilename(finalTitle);
     if (parsed.artist && parsed.artist !== "Artista Desconocido") {
       finalArtist = parsed.artist;
@@ -480,12 +593,28 @@ export async function parseAudioFile(
 
 /**
  * Función: extractCoverArtFromFile
- * Propósito: Extrae bajo demanda (Lazy Loading) la carátula ID3 incrustada de un archivo File o Blob de audio.
- * Si el archivo no tiene carátula física o falla, devuelve undefined.
+ * Propósito: Extrae bajo demanda (Lazy Loading) la carátula ID3 incrustada completa de un archivo File o Blob de audio.
+ * Lee dinámicamente el tamaño real del bloque ID3v2 para no truncar portadas de alta resolución (>128 KB).
  */
 export async function extractCoverArtFromFile(file: File | Blob): Promise<string | undefined> {
   try {
-    const slice = file.slice(0, 131072);
+    // 1. Leer los primeros 10 bytes para determinar el tamaño exacto del bloque ID3v2
+    const headerSlice = file.slice(0, 10);
+    const headerBuf = await headerSlice.arrayBuffer();
+    const hBytes = new Uint8Array(headerBuf);
+
+    let readSize = 262144; // 256KB mínimo
+    if (hBytes.length >= 10 && hBytes[0] === 0x49 && hBytes[1] === 0x44 && hBytes[2] === 0x33) {
+      const tagSize =
+        ((hBytes[6] & 0x7f) << 21) |
+        ((hBytes[7] & 0x7f) << 14) |
+        ((hBytes[8] & 0x7f) << 7) |
+        (hBytes[9] & 0x7f);
+      // El bloque completo abarca 10 + tagSize bytes. Cappeamos a 8MB para seguridad
+      readSize = Math.max(131072, Math.min(8388608, 10 + tagSize));
+    }
+
+    const slice = file.slice(0, readSize);
     const buffer = await slice.arrayBuffer();
     const parsed = parseID3v2(buffer, true);
     return parsed.coverUrl;
@@ -506,8 +635,29 @@ export async function extractCoverArtFromTrack(track: { file?: File | Blob; url?
   }
   if (track.url) {
     try {
+      let readBytes = 524288;
+      try {
+        const headRes = await fetch(track.url, {
+          headers: { Range: "bytes=0-9" },
+        });
+        if (headRes.ok) {
+          const headBuf = await headRes.arrayBuffer();
+          const hb = new Uint8Array(headBuf);
+          if (hb.length >= 10 && hb[0] === 0x49 && hb[1] === 0x44 && hb[2] === 0x33) {
+            const tagSize =
+              ((hb[6] & 0x7f) << 21) |
+              ((hb[7] & 0x7f) << 14) |
+              ((hb[8] & 0x7f) << 7) |
+              (hb[9] & 0x7f);
+            readBytes = Math.max(131072, Math.min(8388608, 10 + tagSize));
+          }
+        }
+      } catch {
+        // use default 512KB
+      }
+
       const res = await fetch(track.url, {
-        headers: { Range: "bytes=0-131071" },
+        headers: { Range: `bytes=0-${readBytes - 1}` },
       });
       const blob = await res.blob();
       return extractCoverArtFromFile(blob);

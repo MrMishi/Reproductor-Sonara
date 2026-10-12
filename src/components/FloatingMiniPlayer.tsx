@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { Track, PlaybackMode } from "../types";
 import { CyberMarquee } from "./CyberMarquee";
+import { generateCoverArt } from "../services/metadataParser";
 
 interface FloatingMiniPlayerProps {
   currentTrack: Track | null;
@@ -393,6 +394,10 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
             <img
               src={currentTrack.coverUrl}
               alt={currentTrack.title}
+              onError={(e) => {
+                const target = e.currentTarget as HTMLImageElement;
+                target.src = generateCoverArt(currentTrack.title, currentTrack.artist);
+              }}
               className={`w-full h-full object-cover transition-transform duration-500 ${
                 isPlaying ? "animate-[spin_12s_linear_infinite]" : "scale-100"
               }`}
@@ -584,6 +589,10 @@ export const FloatingMiniPlayer: React.FC<FloatingMiniPlayerProps> = ({
                 <img
                   src={currentTrack.coverUrl}
                   alt={currentTrack.title}
+                  onError={(e) => {
+                    const target = e.currentTarget as HTMLImageElement;
+                    target.src = generateCoverArt(currentTrack.title, currentTrack.artist);
+                  }}
                   className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${
                     isPlaying ? "brightness-100" : "brightness-90"
                   }`}

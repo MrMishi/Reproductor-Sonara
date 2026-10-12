@@ -18,10 +18,6 @@
       {
         "target": "nsis",
         "arch": ["x64"]
-      },
-      {
-        "target": "portable",
-        "arch": ["x64"]
       }
     ],
     "icon": "public/icon.png"
@@ -33,6 +29,7 @@
     "createStartMenuShortcut": true,
     "shortcutName": "Sonora Music",
     "uninstallDisplayName": "Sonora Music - Desinstalar",
+    "artifactName": "Sonora-Music-Setup-${version}.${ext}",
     "include": "electron/installer.nsh"
   }
 }
